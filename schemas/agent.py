@@ -2,7 +2,6 @@ from pydantic import BaseModel
 from typing import Optional
 
 class AgentCreate(BaseModel):
-    agent_id: str
     name: str
     sys_prompt: Optional[str] = None
     brain_slot_id : int = 0

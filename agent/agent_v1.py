@@ -1,4 +1,6 @@
-from typing import Dict
+import asyncio
+from typing import AsyncGenerator, Dict, Iterable
+import uuid
 
 from sqlalchemy.future import select
 from db.models import AgentModel, MessageModel
@@ -63,6 +65,63 @@ class AgentV1:
             
             print(f"🤖 Agent [{self.name}] 思考中...")
             
-            response_gen = self.brain.send(messages)
+            raw_response = self.brain.send(messages, is_think_mode)
             
-            return response_gen
+            # 4. 定義內部 Async Generator 嚟處理唔同型別同埋背景儲存
+            async def wrapped_generator() -> AsyncGenerator[str, None]:
+                full_content = ""
+                full_reasoning = ""
+                is_currently_reasoning = False
+                
+                if isinstance(raw_response, Iterable):
+                    for chunk in raw_response:
+                        if not isinstance(chunk, str):
+                            continue
+                            
+                        # 標籤解析邏輯
+                        if chunk == "<think>":
+                            is_currently_reasoning = True
+                            yield "---------- 思考中 ----------"
+                            continue # 唔使 yield 俾 User
+                        elif chunk == "</think>":
+                            is_currently_reasoning = False
+                            yield "---------------------------"
+                            continue # 唔使 yield 俾 User
+                        
+                        if is_currently_reasoning:
+                            full_reasoning += chunk
+                            yield chunk
+                        else:
+                            full_content += chunk
+                            yield chunk
+                
+                if full_reasoning:
+                    pend_save.append(MessageDTO.get_reasoning_msg(full_reasoning, is_think_mode))
+                pend_save.append(MessageDTO.get_assistant_msg(full_content, is_think_mode))
+                
+                # 開啟背景任務儲存，唔會塞住個 return
+                asyncio.create_task(self._save_messages_to_db(pend_save))
+            
+            return wrapped_generator()
+        
+    async def _save_messages_to_db(self, messages: list[MessageDTO]):
+        try:
+            async with GlobalVar.conn_pool.AsyncSessionLocal() as session:
+                step_id = "step-" + str(uuid.uuid4()) # 呢一轉對話嘅 ID
+                
+                for msg_dto in messages:
+                    new_msg = MessageModel(
+                        agent_id=self.db_id,
+                        step_id=step_id,
+                        msg_id="msg-" + str(uuid.uuid4()),
+                        msg_type=msg_dto.msg_type,
+                        content=msg_dto.content,
+                        is_think_mode=msg_dto.is_think_mode,
+                        sent_by=msg_dto.sent_by
+                    )
+                    session.add(new_msg)
+                
+                await session.commit()
+                print(f"💾 歷史訊息已成功存入資料庫 (Agent: {self.name})")
+        except Exception as e:
+            print(f"❌ 儲存訊息失敗: {e}")

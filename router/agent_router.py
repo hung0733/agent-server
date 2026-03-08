@@ -1,3 +1,5 @@
+import uuid
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.future import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,12 +20,18 @@ async def list_agents(db: AsyncSession = Depends(get_db)):
 # 2. Create agent
 @router.post("/", response_model=AgentOut)
 async def create_agent(data: AgentCreate, db: AsyncSession = Depends(get_db)):
-    # 檢查 agent_id 係咪已經存在
-    existing = await db.execute(select(AgentModel).where(AgentModel.agent_id == data.agent_id))
+
+    existing = await db.execute(select(AgentModel).where(AgentModel.name == data.name))
     if existing.scalars().first():
-        raise HTTPException(status_code=400, detail="Agent ID already exists")
-    
-    new_agent = AgentModel(**data.model_dump())
+        raise HTTPException(status_code=400, detail="Agent Name already exists")
+
+    new_agent = AgentModel(
+        agent_id = "agent-" + str(uuid.uuid4()),
+        name = data.name,
+        sys_prompt = data.sys_prompt,
+        brain_slot_id = data.brain_slot_id,
+        sum_slot_id = data.sum_slot_id
+    )
     db.add(new_agent)
     await db.commit()
     await db.refresh(new_agent)

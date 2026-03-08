@@ -39,3 +39,24 @@ class MessageDTO:
             date = cast(DateTime, func.now()),
             content = user_input
         )
+    
+        
+    @classmethod
+    def get_assistant_msg(cls, user_input: str, is_think_mode : bool):
+        return cls(
+            msg_type = "assistant_message",
+            is_think_mode = is_think_mode,
+            sent_by = "assistant",
+            date = cast(DateTime, func.now()),
+            content = user_input
+        )
+        
+    @classmethod
+    def get_reasoning_msg(cls, user_input: str, is_think_mode : bool):
+        return cls(
+            msg_type = "reasoning_message",
+            is_think_mode = is_think_mode,
+            sent_by = "assistant",
+            date = cast(DateTime, func.now()),
+            content = user_input
+        )

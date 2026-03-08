@@ -34,12 +34,12 @@ async def main():
         
         # 3. 測試對話 (Streaming)
         user_msg = "你好，介紹吓你自己。"
-        response_gen = await agent.chat(user_msg)
+        response_gen = await agent.chat(user_msg, True)
         
         print(f"💬 {agent.name} 回應：", end="", flush=True)
-        for chunk in response_gen:
+        async for chunk in response_gen:
             print(chunk, end="", flush=True)
-        print("\n" + "-"*30)
+        print("\n" + "-"*100)
     else:
         print(f"❌ 搵唔到 ID 係 '{target_id}' 嘅 Agent，請先用 API 或 SQL 入一筆資料。")
 

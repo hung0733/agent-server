@@ -21,9 +21,8 @@ class BrainAgent:
     def send(self, messages: list[Dict[str, str]], is_think_mode : bool = False):
         gen = self.client.send(messages, is_think_mode)
         
-        # 繼續 yield 出去俾最外面嗰層（例如 UI 或 API）
         if hasattr(gen, '__iter__'):
             for chunk in gen:
                 yield chunk
         else:
-            yield gen # 如果係 Error String 就直接 yield 嗰個 String
+            yield gen
