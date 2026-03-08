@@ -32,29 +32,30 @@ class ConnPool:
             class_=AsyncSession,
             expire_on_commit=False
         )
-    # Dependency Injection: 俾其他 API Route 攞 DB Session 用
-    async def get_db(self):
-        async with self.AsyncSessionLocal() as session:
-            try:
-                yield session
-            finally:
-                await session.close()
         
     @asynccontextmanager
     async def lifespan(self, app: FastAPI):
-        # Startup: 驗證 DB 連線
+        # Startup
         try:
             async with self.engine.begin() as conn:
-                # 簡單行一個 SELECT 1 嚟試吓個 Pool 郁唔郁到
                 from sqlalchemy import text
                 await conn.execute(text("SELECT 1"))
-            print("✅ Database connection pool initialized successfully.")
+            print("✅ Database connection pool initialized.")
         except Exception as e:
-            print(f"❌ Failed to initialize database pool: {e}")
+            print(f"❌ DB initialization failed: {e}")
             raise e
             
-        yield
+        yield # 呢度係 API 行緊嘅時間
         
-        # Shutdown: 釋放資源
+        # Shutdown
         await self.engine.dispose()
         print("🛑 Database connection pool closed.")
+
+# Dependency Injection: 俾其他 API Route 攞 DB Session 用
+async def get_db():
+    from global_var import GlobalVar
+    async with GlobalVar.conn_pool.AsyncSessionLocal() as session:
+        try:
+            yield session
+        finally:
+            await session.close()
