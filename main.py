@@ -34,7 +34,7 @@ async def main():
         
         # 3. 測試對話 (Streaming)
         user_msg = "你好，介紹吓你自己。"
-        response_gen = await agent.chat(user_msg, True)
+        response_gen = await agent.chat(user_msg, False)
         
         print(f"💬 {agent.name} 回應：", end="", flush=True)
         async for chunk in response_gen:
