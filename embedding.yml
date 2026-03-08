@@ -1,0 +1,22 @@
+services:
+  # Embedding 服務 (負責將 Text 變做 Vector)
+  embedding-api:
+    container_name: embedding-ai
+    user: root
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.6
+    ports:
+      - "8605:80"
+    volumes:
+      - /mnt/models/huggingface/hub/:/data
+    command: --model-id BAAI/bge-m3
+
+  # Reranker 服務 (負責重新排序，提高精準度)
+  reranker-api:
+    container_name: reranker-ai
+    user: root
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.6
+    ports:
+      - "8606:80"
+    volumes:
+      - /mnt/models/huggingface/hub/:/data
+    command: --model-id BAAI/bge-reranker-v2-m3

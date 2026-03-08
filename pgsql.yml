@@ -1,0 +1,12 @@
+services:
+  postgres:
+    container_name: agent-server-pgsql
+    image: pgvector/pgvector:pg17
+    restart: always
+    environment:
+      POSTGRES_PASSWORD: 4UuA6hDEqzkLZD
+      TZ: Asia/Hong_Kong
+    ports:
+      - "5432:5432"
+    volumes:
+      - /mnt/data/misc/agent-server/pgsql:/var/lib/postgresql/data
