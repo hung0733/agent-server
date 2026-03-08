@@ -15,12 +15,11 @@ class BrainAgent:
             api_key=api_key,
             model_name=model,
             stream=True,
-            slot_id=slot_id,
-            enable_think=enable_think
+            slot_id=slot_id
         )
 
-    def send(self, messages: list[Dict[str, str]]):
-        gen = self.client.send(messages)
+    def send(self, messages: list[Dict[str, str]], is_think_mode : bool = False):
+        gen = self.client.send(messages, is_think_mode)
         
         # 繼續 yield 出去俾最外面嗰層（例如 UI 或 API）
         if hasattr(gen, '__iter__'):

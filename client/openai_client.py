@@ -12,15 +12,13 @@ class OpenAIClient:
         api_key: str, 
         model_name: str,
         stream: bool = True,
-        slot_id: int = 0,
-        enable_think: bool = False
+        slot_id: int = 0
     ):
         self.endpoint = endpoint.rstrip('/')
         self.api_key = api_key
         self.model_name = model_name
         self.stream = stream
         self.slot_id = slot_id
-        self.enable_think = enable_think
         
         # 初始化 OpenAI 客戶端
         self.client = OpenAI(
@@ -28,16 +26,17 @@ class OpenAIClient:
             api_key=self.api_key
         )
         
-    def send(self, messages: list[Dict[str, str]]) -> Union[str, Generator[str, None, None]]:
+    def send(self, messages: list[Dict[str, str]], is_think_mode : bool = False) -> Union[str, Generator[str, None, None]]:
+        
         # 根據是否開啟思考模式，動態調整內部參數
         extra_kwargs: Dict[str, Any] = {
-            "temperature": 0.6 if self.enable_think else 0.7,
-            "top_p": 0.95 if self.enable_think else 0.8,
-            "presence_penalty": 0.0 if self.enable_think else 0.3,
+            "temperature": 0.6 if is_think_mode else 0.7,
+            "top_p": 0.95 if is_think_mode else 0.8,
+            "presence_penalty": 0.0 if is_think_mode else 0.3,
             "extra_body": {
                 "top_k": 20,
-                "repetition_penalty": 1.0 if self.enable_think else 1.1,
-                "chat_template_kwargs": {"enable_thinking": self.enable_think},
+                "repetition_penalty": 1.0 if is_think_mode else 1.1,
+                "chat_template_kwargs": {"enable_thinking": is_think_mode},
                 "slot_id": self.slot_id
             }
         }

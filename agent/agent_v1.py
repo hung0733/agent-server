@@ -1,12 +1,14 @@
 from typing import Dict
 
 from sqlalchemy.future import select
-from db.models import AgentModel
+from db.models import AgentModel, MessageModel
+from dto.message import MessageDTO
 from global_var import GlobalVar
 from llm.brain_agent import BrainAgent
 
 class AgentV1:
-    def __init__(self, agent_id: str, name: str, sys_prompt: str, brain_slot_id: int, sum_slot_id: int):
+    def __init__(self, db_id : int, agent_id: str, name: str, sys_prompt: str, brain_slot_id: int, sum_slot_id: int):
+        self.db_id = db_id
         self.agent_id = agent_id
         self.name = name
         self.sys_prompt = sys_prompt
@@ -31,22 +33,36 @@ class AgentV1:
 
             # 攞到資料，返傳實例
             return cls(
-                agent_id= db_agent.agent_id,
-                name= db_agent.name,
-                sys_prompt= db_agent.sys_prompt,
-                brain_slot_id= db_agent.brain_slot_id,
-                sum_slot_id= db_agent.sum_slot_id
+                db_id = db_agent.id,  # type: ignore
+                agent_id= db_agent.agent_id, # type: ignore
+                name= db_agent.name, # type: ignore
+                sys_prompt= db_agent.sys_prompt, # type: ignore
+                brain_slot_id= db_agent.brain_slot_id, # type: ignore
+                sum_slot_id= db_agent.sum_slot_id # type: ignore
             )
     
-    async def chat(self, user_input: str):
-        
-        messages : list[Dict[str, str]] = []
-        
-        messages.append({"role": "system", "content": f"{self.sys_prompt}"})
-        messages.append({"role": "user", "content": f"{user_input}"})
-        
-        print(f"🤖 Agent [{self.name}] 思考中...")
-        
-        response_gen = self.brain.send(messages)
-        
-        return response_gen
+    async def chat(self, user_input: str, is_think_mode : bool = False):
+        async with GlobalVar.conn_pool.AsyncSessionLocal() as session:
+            query = select(MessageModel).where(MessageModel.agent_id == self.db_id).order_by(MessageModel.create_date.asc())
+            result = await session.execute(query)
+            historys : list[MessageDTO] = [MessageDTO.get(m) for m in (result.scalars().all() or [])]
+            
+            messages : list[Dict[str, str]] = []
+            
+            if self.sys_prompt:
+                messages.append({"role": "system", "content": f"{self.sys_prompt}"})
+                
+            for m in historys:
+                messages.append(m.to_msg())
+                
+            pend_save : list[MessageDTO] = []
+            
+            user_msg : MessageDTO = MessageDTO.get_user_msg(user_input, is_think_mode)
+            pend_save.append(user_msg)
+            messages.append(user_msg.to_msg())
+            
+            print(f"🤖 Agent [{self.name}] 思考中...")
+            
+            response_gen = self.brain.send(messages)
+            
+            return response_gen
