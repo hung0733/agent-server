@@ -34,10 +34,3 @@ class BrainAgent:
                 yield chunk
         else:
             yield gen # 如果係 Error String 就直接 yield 嗰個 String
-
-# --- 出面點樣 Call ---
-if __name__ == "__main__":
-    agent = BrainAgent()
-    # 呢度就係你問嘅「點 Call」：當佢係 generator 咁用 loop 攞嘢
-    for word in agent.think("點樣用 Python 寫一個高效嘅 Agent?"):
-        print(word, end="", flush=True)
