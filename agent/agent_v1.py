@@ -134,32 +134,8 @@ class AgentV1:
                     MessageDTO.get_assistant_msg(full_content, is_think_mode)
                 )
 
-                task = asyncio.create_task(self._save_messages_to_db(pend_save))
+                task = asyncio.create_task(MessageDTO.save_message(self, pend_save))
                 self._pending_tasks.add(task)
                 task.add_done_callback(self._pending_tasks.discard) # 行完就剔除
 
             return wrapped_generator()
-
-    async def _save_messages_to_db(self, messages: list[MessageDTO]):
-        try:
-            async with GlobalVar.conn_pool.AsyncSessionLocal() as session:
-                step_id = "step-" + str(uuid.uuid4())  # 呢一轉對話嘅 ID
-
-                for msg_dto in messages:
-                    new_msg = MessageModel(
-                        agent_id=self.db_id,
-                        session_id = self.session_db_id,
-                        step_id=step_id,
-                        msg_id="msg-" + str(uuid.uuid4()),
-                        msg_type=msg_dto.msg_type,
-                        content=msg_dto.content,
-                        is_think_mode=msg_dto.is_think_mode,
-                        sent_by=msg_dto.sent_by,
-                        create_date=msg_dto.date,
-                    )
-                    session.add(new_msg)
-
-                await session.commit()
-                print(f"💾 歷史訊息已成功存入資料庫 (Agent: {self.name})")
-        except Exception as e:
-            print(f"❌ 儲存訊息失敗: {e}")

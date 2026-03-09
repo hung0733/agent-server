@@ -1,9 +1,6 @@
 import os
 from openai import OpenAI
 from typing import Dict, Any, Optional, Generator, Union
-from dotenv import load_dotenv
-
-load_dotenv()
 
 class OpenAIClient:
     def __init__(
