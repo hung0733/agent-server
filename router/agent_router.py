@@ -30,9 +30,7 @@ async def create_agent(data: AgentCreate, db: AsyncSession = Depends(get_db)):
         new_agent = AgentModel(
             agent_id = "agent-" + str(uuid.uuid4()), # 或 data.agent_id
             name = data.name,
-            sys_prompt = data.sys_prompt,
-            brain_slot_id = data.brain_slot_id,
-            sum_slot_id = data.sum_slot_id
+            sys_prompt = data.sys_prompt
         )
         db.add(new_agent)
         

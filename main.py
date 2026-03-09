@@ -33,7 +33,7 @@ async def main():
         print(f"✅ 成功載入 Agent: {agent.name}")
         
         # 3. 測試對話 (Streaming)
-        user_msg = "你好，介紹吓你自己。"
+        user_msg = "Hi"
         response_gen = await agent.chat(user_msg, False)
         
         print(f"💬 {agent.name} 回應：", end="", flush=True)
@@ -43,7 +43,7 @@ async def main():
     else:
         print(f"❌ 搵唔到 ID 係 '{target_id}' 嘅 Agent，請先用 API 或 SQL 入一筆資料。")
 
-    await asyncio.sleep(10)
+    await asyncio.sleep(5)
     # 4. 關閉連線池
     await GlobalVar.conn_pool.engine.dispose()
     

@@ -9,8 +9,6 @@ class AgentModel(Base):
     agent_id = Column(String(100), unique=True, nullable=False)
     name = Column(String(100), nullable=False)
     sys_prompt = Column(Text, nullable=True)
-    brain_slot_id = Column(Integer, nullable=False)
-    sum_slot_id = Column(Integer, nullable=False)
     
     # 修正 1：分開命名屬性，唔好重複用 messages
     messages = relationship("MessageModel", back_populates="agent", cascade="all, delete-orphan")

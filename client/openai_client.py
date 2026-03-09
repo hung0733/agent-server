@@ -11,14 +11,12 @@ class OpenAIClient:
         endpoint: str, 
         api_key: str, 
         model_name: str,
-        stream: bool = True,
-        slot_id: int = 0
+        stream: bool = True
     ):
         self.endpoint = endpoint.rstrip('/')
         self.api_key = api_key
         self.model_name = model_name
         self.stream = stream
-        self.slot_id = slot_id
         
         # 初始化 OpenAI 客戶端
         self.client = OpenAI(
@@ -31,8 +29,7 @@ class OpenAIClient:
         extra_body = {
             "top_k": 20,
             "repetition_penalty": 1.0 if is_think_mode else 1.1,
-            "chat_template_kwargs": {"enable_thinking": is_think_mode},
-            "slot_id": self.slot_id
+            "chat_template_kwargs": {"enable_thinking": is_think_mode}
         }
         
         try:

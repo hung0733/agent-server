@@ -17,9 +17,7 @@ class AgentV1:
         session_db_id: int,
         session_id: str,
         name: str,
-        sys_prompt: str,
-        brain_slot_id: int,
-        sum_slot_id: int,
+        sys_prompt: str
     ):
         self.db_id = db_id
         self.agent_id = agent_id
@@ -27,9 +25,7 @@ class AgentV1:
         self.session_id = session_id
         self.name = name
         self.sys_prompt = sys_prompt
-        self.brain_slot_id = brain_slot_id
-        self.sum_slot_id = sum_slot_id
-        self.brain = BrainAgent(self.brain_slot_id, False)
+        self.brain = BrainAgent()
 
     @classmethod
     async def get_agent(cls, agent_id: str, session_id: str = "default"):
@@ -64,9 +60,7 @@ class AgentV1:
                 session_db_id=db_session.id,
                 session_id=session_id,
                 name=db_agent.name,  # type: ignore
-                sys_prompt=db_agent.sys_prompt,  # type: ignore
-                brain_slot_id=db_agent.brain_slot_id,  # type: ignore
-                sum_slot_id=db_agent.sum_slot_id,  # type: ignore
+                sys_prompt=db_agent.sys_prompt  # type: ignore
             )
 
     async def chat(self, user_input: str, is_think_mode: bool = False):

@@ -3,8 +3,7 @@ from typing import Dict
 from client.openai_client import OpenAIClient
 
 class BrainAgent:
-    def __init__(self, slot_id : int = 0, enable_think : bool = False):
-        # 修正：用 os.getenv，並加上預設值或 Error Check
+    def __init__(self):
         endpoint = os.getenv("BRAIN_LLM_END_POINT", "http://localhost:8080/v1")
         api_key = os.getenv("BRAIN_LLM_API_KEY", "no-key")
         model = os.getenv("BRAIN_LLM_MODEL", "mamba")
@@ -14,8 +13,7 @@ class BrainAgent:
             endpoint=endpoint,
             api_key=api_key,
             model_name=model,
-            stream=True,
-            slot_id=slot_id
+            stream=True
         )
 
     def send(self, messages: list[Dict[str, str]], is_think_mode : bool = False):
