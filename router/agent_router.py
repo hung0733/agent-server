@@ -5,7 +5,7 @@ from sqlalchemy.future import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
 
-from db.models import AgentModel
+from db.models import AgentModel, SessionModel
 from db.conn_pool import get_db
 from schemas.agent import AgentCreate, AgentUpdate, AgentOut
 
@@ -20,22 +20,41 @@ async def list_agents(db: AsyncSession = Depends(get_db)):
 # 2. Create agent
 @router.post("/", response_model=AgentOut)
 async def create_agent(data: AgentCreate, db: AsyncSession = Depends(get_db)):
-
+    # 1. 檢查名有無重複
     existing = await db.execute(select(AgentModel).where(AgentModel.name == data.name))
     if existing.scalars().first():
         raise HTTPException(status_code=400, detail="Agent Name already exists")
 
-    new_agent = AgentModel(
-        agent_id = "agent-" + str(uuid.uuid4()),
-        name = data.name,
-        sys_prompt = data.sys_prompt,
-        brain_slot_id = data.brain_slot_id,
-        sum_slot_id = data.sum_slot_id
-    )
-    db.add(new_agent)
-    await db.commit()
-    await db.refresh(new_agent)
-    return new_agent
+    try:
+        # 2. 建立新 Agent
+        new_agent = AgentModel(
+            agent_id = "agent-" + str(uuid.uuid4()), # 或 data.agent_id
+            name = data.name,
+            sys_prompt = data.sys_prompt,
+            brain_slot_id = data.brain_slot_id,
+            sum_slot_id = data.sum_slot_id
+        )
+        db.add(new_agent)
+        
+        # 關鍵修正：先 flush，等 DB 派 ID 畀 new_agent，但仲未正式 commit
+        await db.flush() 
+
+        # 3. 建立預設 Session
+        new_session = SessionModel(
+            session_id = "default",
+            name = "預設對話",
+            agent_id = new_agent.id # 呢度依家攞到正確嘅 id 喇
+        )
+        db.add(new_session)
+
+        # 4. 一次過 commit 晒兩樣嘢
+        await db.commit()
+        await db.refresh(new_agent)
+        return new_agent
+
+    except Exception as e:
+        await db.rollback() # 出事就成組 rollback
+        raise HTTPException(status_code=500, detail=f"建立失敗: {str(e)}")
 
 # 3. Retrieve agent info
 @router.get("/{agent_id}", response_model=AgentOut)
