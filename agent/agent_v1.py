@@ -54,7 +54,7 @@ class AgentV1:
             db_session: SessionModel = result.scalars().first()
 
             if not db_agent:
-                print(f"⚠️ Session {agent_id} 唔存在喺資料庫。")
+                print(f"⚠️ Session {session_id} 唔存在喺資料庫。")
                 return None
 
             # 攞到資料，返傳實例
