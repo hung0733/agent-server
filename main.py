@@ -15,12 +15,16 @@ from sqlalchemy import select, text
 # API Routing
 from router.agent_router import router as agent_router
 from router.chat_router import router as chat_router
+from router.session_router import router as session_router
+from router.message_router import router as message_router
 
 GlobalVar.conn_pool = ConnPool()
 
 app = FastAPI(lifespan=GlobalVar.conn_pool.lifespan)
-app.include_router(agent_router)  # 註冊 Agent API
+app.include_router(agent_router, prefix="/v1")  # 註冊 Agent API
 app.include_router(chat_router, prefix="/v1")  # 註冊 OpenAI Chat API
+app.include_router(session_router, prefix="/v1")  # 註冊 Session API
+app.include_router(message_router, prefix="/v1")  # 註冊 Message API
 
 
 @app.get("/health")

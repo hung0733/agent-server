@@ -7,86 +7,112 @@ from typing import List
 
 from db.models import AgentModel, SessionModel
 from db.conn_pool import get_db
+from db.agent_dao import AgentDAO
 from schemas.agent import AgentCreate, AgentUpdate, AgentOut
 
 router = APIRouter(prefix="/v1/agents", tags=["Agents"])
 
+
 # 1. List all agents
 @router.get("/", response_model=List[AgentOut])
 async def list_agents(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(AgentModel))
-    return result.scalars().all()
+    """列出所有 Agents"""
+    agent_dao = AgentDAO()
+    agents = await agent_dao.list_all(db)
+    return [AgentOut.from_model(a) for a in agents]
+
 
 # 2. Create agent
 @router.post("/", response_model=AgentOut)
 async def create_agent(data: AgentCreate, db: AsyncSession = Depends(get_db)):
-    # 1. 檢查名有無重複
+    """創建新 Agent (自動創建 default session)"""
+    agent_dao = AgentDAO()
+    
+    # 檢查 name 有無重複
     existing = await db.execute(select(AgentModel).where(AgentModel.name == data.name))
     if existing.scalars().first():
         raise HTTPException(status_code=400, detail="Agent Name already exists")
 
     try:
-        # 2. 建立新 Agent
-        new_agent = AgentModel(
-            agent_id = "agent-" + str(uuid.uuid4()), # 或 data.agent_id
-            name = data.name,
-            sys_prompt = data.sys_prompt
+        # 建立新 Agent
+        new_agent = await agent_dao.create(
+            db, 
+            agent_id=f"agent-{uuid.uuid4()}", 
+            name=data.name, 
+            sys_prompt=data.sys_prompt
         )
-        db.add(new_agent)
         
-        # 關鍵修正：先 flush，等 DB 派 ID 畀 new_agent，但仲未正式 commit
-        await db.flush() 
-
-        # 3. 建立預設 Session
-        new_session = SessionModel(
-            session_id = "default",
-            name = "預設對話",
-            agent_id = new_agent.id # 呢度依家攞到正確嘅 id 喇
+        # 建立預設 Session
+        from db.session_dao import SessionDAO
+        session_dao = SessionDAO()
+        await session_dao.create(
+            db, 
+            agent_id=new_agent.id, 
+            session_id="default", 
+            name="預設對話"
         )
-        db.add(new_session)
 
-        # 4. 一次過 commit 晒兩樣嘢
-        await db.commit()
-        await db.refresh(new_agent)
-        return new_agent
+        return AgentOut.from_model(new_agent)
 
     except Exception as e:
-        await db.rollback() # 出事就成組 rollback
-        raise HTTPException(status_code=500, detail=f"建立失敗: {str(e)}")
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"建立失敗：{str(e)}")
+
 
 # 3. Retrieve agent info
 @router.get("/{agent_id}", response_model=AgentOut)
 async def get_agent(agent_id: str, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(AgentModel).where(AgentModel.agent_id == agent_id))
-    agent = result.scalars().first()
+    """獲取 Agent 詳情"""
+    agent_dao = AgentDAO()
+    agent = await agent_dao.get_by_agent_id(db, agent_id)
+    
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
-    return agent
+    
+    return AgentOut.from_model(agent)
+
 
 # 4. Update agent info
 @router.patch("/{agent_id}", response_model=AgentOut)
 async def update_agent(agent_id: str, data: AgentUpdate, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(AgentModel).where(AgentModel.agent_id == agent_id))
-    agent = result.scalars().first()
+    """更新 Agent 信息"""
+    agent_dao = AgentDAO()
+    
+    # 獲取 agent (根據 unique agent_id)
+    agent_result = await db.execute(select(AgentModel).where(AgentModel.agent_id == agent_id))
+    agent = agent_result.scalar_one_or_none()
+    
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     
+    # 更新數據
     update_data = data.model_dump(exclude_unset=True)
-    for key, value in update_data.items():
-        setattr(agent, key, value)
+    updated_agent = await agent_dao.update(db, agent.id, **update_data)
     
-    await db.commit()
-    await db.refresh(agent)
-    return agent
+    return AgentOut.from_model(updated_agent)
+
 
 # 5. Delete agent info
 @router.delete("/{agent_id}")
 async def delete_agent(agent_id: str, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(AgentModel).where(AgentModel.agent_id == agent_id))
-    agent = result.scalars().first()
-    if not agent:
+    """刪除 Agent (級聯刪除相關 Session 和 Messages)"""
+    agent_dao = AgentDAO()
+    success = await agent_dao.delete_by_agent_id(db, agent_id)
+    
+    if not success:
         raise HTTPException(status_code=404, detail="Agent not found")
     
-    await db.delete(agent)
-    await db.commit()
     return {"message": f"Agent {agent_id} deleted successfully"}
+
+
+# 輔助方法：從 AgentModel 創建 AgentOut
+class AgentOut:
+    @classmethod
+    def from_model(cls, a: AgentModel) -> 'AgentOut':
+        """從 Model 轉換為 Out schema"""
+        return cls(
+            id=a.id,
+            agent_id=a.agent_id,
+            name=a.name,
+            sys_prompt=a.sys_prompt
+        )

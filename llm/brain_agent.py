@@ -9,18 +9,27 @@ class BrainAgent:
         api_key = os.getenv("BRAIN_LLM_API_KEY", "no-key")
         model = os.getenv("BRAIN_LLM_MODEL", "mamba")
 
-        self.client = OpenAIClient(
+        # 初始化串流客戶端（用於 chat()）
+        self.stream_client = OpenAIClient(
             endpoint=endpoint,
             api_key=api_key,
             model_name=model,
             stream=True
+        )
+        
+        # 初始化非串流客戶端（用於 chat_non_stream()）
+        self.non_stream_client = OpenAIClient(
+            endpoint=endpoint,
+            api_key=api_key,
+            model_name=model,
+            stream=False
         )
 
     async def send(self, messages: list[Dict[str, str]], is_think_mode: bool = False):
         """串流模式：發送訊息並產生回應片段（async generator）"""
         import asyncio
         
-        gen = self.client.send(messages, is_think_mode)
+        gen = self.stream_client.send(messages, is_think_mode)
 
         if hasattr(gen, '__iter__') and not isinstance(gen, str):
             # 將 sync generator 轉換為 async generator
@@ -43,21 +52,27 @@ class BrainAgent:
                 - reasoning_content: 思考過程內容（從<think>...</think>標籤中提取）
                 - content: 最終回應內容（去除 think 標籤後的純文本）
         """
-        full_response = self.client.send(messages, is_think_mode)
+        # 從串流 generator 收集完整回應
+        import re
+        
+        full_response = ""
+        gen = self.stream_client.send(messages, is_think_mode)
+        
+        if hasattr(gen, '__iter__') and not isinstance(gen, str):
+            for chunk in gen:
+                full_response += chunk
+        else:
+            full_response = gen
 
-        if isinstance(full_response, str):
-            # 提取 reasoning_content (從<think>...</think> 標籤中)
-            import re
-            think_pattern = r'<think>(.*?)</think>'
-            match = re.search(think_pattern, full_response, re.DOTALL)
+        # 提取 reasoning_content (從<think>...</think> 標籤中)
+        think_pattern = r'<think>(.*?)</think>'
+        match = re.search(think_pattern, full_response, re.DOTALL)
 
-            if match:
-                reasoning_content = match.group(1).strip()
-                # 移除 think 標籤及其內容，得到純回應內容
-                content = re.sub(think_pattern, '', full_response, flags=re.DOTALL).strip()
-                return reasoning_content, content
-            else:
-                # 沒有 think 標籤，返回空 reasoning_content 和完整內容
-                return "", full_response.strip()
-
-        raise ValueError("Non-streaming response expected a string, got different type")
+        if match:
+            reasoning_content = match.group(1).strip()
+            # 移除 think 標籤及其內容，得到純回應內容
+            content = re.sub(think_pattern, '', full_response, flags=re.DOTALL).strip()
+            return reasoning_content, content
+        else:
+            # 沒有 think 標籤，返回空 reasoning_content 和完整內容
+            return "", full_response.strip()
