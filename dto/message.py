@@ -1,6 +1,6 @@
 
+from datetime import datetime
 from typing import List, cast
-from sqlalchemy import DateTime, func
 from db.models import MessageModel
 
 class MessageDTO:
@@ -8,9 +8,9 @@ class MessageDTO:
     is_think_mode : bool
     sent_by : str
     content : str
-    date : DateTime
+    date : datetime
     
-    def __init__(self, msg_type : str, is_think_mode : bool, sent_by : str, date : DateTime, content : str) -> None:
+    def __init__(self, msg_type : str, is_think_mode : bool, sent_by : str, date : datetime, content : str) -> None:
         self.msg_type = msg_type
         self.is_think_mode = is_think_mode
         self.sent_by = sent_by
@@ -36,7 +36,7 @@ class MessageDTO:
             msg_type = "user_message",
             is_think_mode = is_think_mode,
             sent_by = "user",
-            date = cast(DateTime, func.now()),
+            date = datetime.now(),
             content = user_input
         )
     
@@ -47,7 +47,7 @@ class MessageDTO:
             msg_type = "assistant_message",
             is_think_mode = is_think_mode,
             sent_by = "assistant",
-            date = cast(DateTime, func.now()),
+            date = datetime.now(),
             content = user_input
         )
         
@@ -57,6 +57,6 @@ class MessageDTO:
             msg_type = "reasoning_message",
             is_think_mode = is_think_mode,
             sent_by = "assistant",
-            date = cast(DateTime, func.now()),
+            date = datetime.now(),
             content = user_input
         )

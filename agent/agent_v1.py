@@ -117,7 +117,8 @@ class AgentV1:
                         msg_type=msg_dto.msg_type,
                         content=msg_dto.content,
                         is_think_mode=msg_dto.is_think_mode,
-                        sent_by=msg_dto.sent_by
+                        sent_by=msg_dto.sent_by,
+                        create_date=msg_dto.date
                     )
                     session.add(new_msg)
                 

@@ -28,25 +28,22 @@ class OpenAIClient:
         
     def send(self, messages: list[Dict[str, str]], is_think_mode : bool = False) -> Union[str, Generator[str, None, None]]:
         
-        # 根據是否開啟思考模式，動態調整內部參數
-        extra_kwargs: Dict[str, Any] = {
-            "temperature": 0.6 if is_think_mode else 0.7,
-            "top_p": 0.95 if is_think_mode else 0.8,
-            "presence_penalty": 0.0 if is_think_mode else 0.3,
-            "extra_body": {
-                "top_k": 20,
-                "repetition_penalty": 1.0 if is_think_mode else 1.1,
-                "chat_template_kwargs": {"enable_thinking": is_think_mode},
-                "slot_id": self.slot_id
-            }
+        extra_body = {
+            "top_k": 20,
+            "repetition_penalty": 1.0 if is_think_mode else 1.1,
+            "chat_template_kwargs": {"enable_thinking": is_think_mode},
+            "slot_id": self.slot_id
         }
         
         try:
             response = self.client.chat.completions.create(
                 model=self.model_name,
-                messages=messages,
+                messages=messages, # type: ignore
                 stream=self.stream,
-                **extra_kwargs
+                temperature=0.6 if is_think_mode else 0.7,
+                top_p=0.95 if is_think_mode else 0.8,
+                presence_penalty=0.0 if is_think_mode else 0.3,
+                extra_body=extra_body 
             )
             
             if not self.stream:
