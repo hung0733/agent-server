@@ -3,6 +3,7 @@ from typing import AsyncGenerator, Dict, Iterable
 import uuid
 
 from sqlalchemy.future import select
+from db.conn_pool import ConnPool
 from db.models import AgentModel, MessageModel, SessionModel
 from dto.message import MessageDTO
 from global_var import GlobalVar
@@ -131,10 +132,8 @@ class AgentV1:
                 pend_save.append(
                     MessageDTO.get_assistant_msg(full_content, is_think_mode)
                 )
-
-                task = asyncio.create_task(self._save_messages_to_db(pend_save))
-                GlobalVar.conn_pool.pending_tasks.add(task)
-                task.add_done_callback(GlobalVar.conn_pool.pending_tasks.discard)
+                
+                ConnPool.start_db_async_task(self._save_messages_to_db(pend_save))
 
             return wrapped_generator()
 

@@ -62,6 +62,14 @@ class ConnPool:
             import asyncio
             print(f"⏳ 正在等待 {len(ConnPool.pending_tasks)} 個儲存任務...")
             await asyncio.gather(*ConnPool.pending_tasks)
+            
+    @staticmethod
+    def start_db_async_task(func):
+        import asyncio
+        
+        task = asyncio.create_task(func)
+        ConnPool.pending_tasks.add(task)
+        task.add_done_callback(ConnPool.pending_tasks.discard)
 
 # Dependency Injection: 俾其他 API Route 攞 DB Session 用
 async def get_db():

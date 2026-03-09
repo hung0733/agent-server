@@ -38,7 +38,7 @@ async def main():
     print("--- 已進入對話模式 (輸入 'exit' 或 'quit' 退出) ---")
 
     while True:
-        await GlobalVar.conn_pool.wait_task_comp()
+        await ConnPool.wait_task_comp()
         
         # 1. 獲取用戶輸入
         print("\n👤 你 (多行輸入): ")
@@ -64,6 +64,10 @@ async def main():
     await GlobalVar.conn_pool.dispose()  
     
 async def test_summary():
+    from llm.summary_agent import SummaryAgent
+    client : SummaryAgent = SummaryAgent()
+    
+    
     
     await GlobalVar.conn_pool.dispose()  
     
