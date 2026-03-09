@@ -41,6 +41,8 @@ class MessageModel(Base):
     sent_by = Column(String(20), nullable=False)
     
     session_id = Column(Integer, ForeignKey("session.id"), nullable=False)
+    
+    token = Column(Integer, default=0, nullable=False)
 
     # 修正 2：確保反向關聯嘅屬性名稱同 Model 定義一致
     agent = relationship("AgentModel", back_populates="messages")
