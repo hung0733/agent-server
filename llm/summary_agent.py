@@ -8,7 +8,6 @@ class SummaryAgent:
         api_key = os.getenv("SUMMARY_LLM_API_KEY", "no-key")
         model = os.getenv("SUMMARY_LLM_MODEL", "mamba")
         
-        
         self.client = OpenAIClient(
             endpoint=endpoint,
             api_key=api_key,
@@ -16,11 +15,14 @@ class SummaryAgent:
             stream=True
         )
 
-    def send(self, messages: list[Dict[str, str]], is_think_mode : bool = False):
-        gen = self.client.send(messages, is_think_mode)
+    def send(self, sys_prompt : str, input : str, is_think_mode : bool = False):
+        messages: list[Dict[str, str]] = []
         
-        if hasattr(gen, '__iter__'):
-            for chunk in gen:
-                yield chunk
-        else:
-            yield gen
+        if sys_prompt:
+            messages.append({"role": "system", "content": sys_prompt})
+        messages.append({"role": "user", "content": input})
+        
+        return self._send(messages, is_think_mode)
+        
+    def _send(self, messages: list[Dict[str, str]], is_think_mode : bool = False):
+        return self.client.send(messages, is_think_mode)

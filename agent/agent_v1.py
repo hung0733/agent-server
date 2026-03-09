@@ -10,6 +10,7 @@ from global_var import GlobalVar
 from llm.brain_agent import BrainAgent
 import tiktoken
 
+
 class AgentV1:
     def __init__(
         self,
@@ -18,7 +19,7 @@ class AgentV1:
         session_db_id: int,
         session_id: str,
         name: str,
-        sys_prompt: str
+        sys_prompt: str,
     ):
         self.db_id = db_id
         self.agent_id = agent_id
@@ -61,7 +62,7 @@ class AgentV1:
                 session_db_id=db_session.id,
                 session_id=session_id,
                 name=db_agent.name,  # type: ignore
-                sys_prompt=db_agent.sys_prompt  # type: ignore
+                sys_prompt=db_agent.sys_prompt,  # type: ignore
             )
 
     async def chat(self, user_input: str, is_think_mode: bool = False):
@@ -93,7 +94,7 @@ class AgentV1:
             pend_save.append(user_msg)
             messages.append(user_msg.to_msg())
 
-            print(f"🤖 Agent [{self.name}] 思考中...")
+            print(f"\n🤖 Agent [{self.name}] 思考中...\n")
 
             raw_response = self.brain.send(messages, is_think_mode)
 
@@ -111,11 +112,11 @@ class AgentV1:
                         # 標籤解析邏輯
                         if chunk == "<think>":
                             is_currently_reasoning = True
-                            yield "---------- 思考中 ----------"
+                            yield "---------- 思考中 ----------\n"
                             continue  # 唔使 yield 俾 User
                         elif chunk == "</think>":
                             is_currently_reasoning = False
-                            yield "---------------------------"
+                            yield "---------------------------\n"
                             continue  # 唔使 yield 俾 User
 
                         if is_currently_reasoning:
@@ -132,7 +133,7 @@ class AgentV1:
                 pend_save.append(
                     MessageDTO.get_assistant_msg(full_content, is_think_mode)
                 )
-                
+
                 ConnPool.start_db_async_task(self._save_messages_to_db(pend_save))
 
             return wrapped_generator()
@@ -145,7 +146,7 @@ class AgentV1:
                 for msg_dto in messages:
                     new_msg = MessageModel(
                         agent_id=self.db_id,
-                        session_id = self.session_db_id,
+                        session_id=self.session_db_id,
                         step_id=step_id,
                         msg_id="msg-" + str(uuid.uuid4()),
                         msg_type=msg_dto.msg_type,
@@ -153,7 +154,7 @@ class AgentV1:
                         is_think_mode=msg_dto.is_think_mode,
                         sent_by=msg_dto.sent_by,
                         create_date=msg_dto.date,
-                        token = self._count_tokens(msg_dto.content)
+                        token=self._count_tokens(msg_dto.content),
                     )
                     session.add(new_msg)
 
@@ -161,7 +162,7 @@ class AgentV1:
                 print(f"💾 歷史訊息已成功存入資料庫 (Agent: {self.name})")
         except Exception as e:
             print(f"❌ 儲存訊息失敗: {e}")
-            
+
     def _count_tokens(self, text: str) -> int:
         """計吓段文字有幾多 Token"""
         try:

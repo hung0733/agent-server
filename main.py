@@ -2,14 +2,15 @@ import asyncio
 import sys
 from dotenv import load_dotenv
 
-from agent.agent_v1 import AgentV1
-load_dotenv() # 必須喺 import GlobalVar 前行，或者喺 GlobalVar 入面唔好即時行 os.getenv
+from dto.message import MessageDTO
+
+load_dotenv()  # 必須喺 import GlobalVar 前行，或者喺 GlobalVar 入面唔好即時行 os.getenv
 
 from fastapi import FastAPI, Depends
 from global_var import GlobalVar
 from db.conn_pool import ConnPool, get_db
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import text
+from sqlalchemy import select, text
 
 # API Routing
 from router.agent_router import router as agent_router
@@ -17,7 +18,8 @@ from router.agent_router import router as agent_router
 GlobalVar.conn_pool = ConnPool()
 
 app = FastAPI(lifespan=GlobalVar.conn_pool.lifespan)
-app.include_router(agent_router) # 註冊 API
+app.include_router(agent_router)  # 註冊 API
+
 
 @app.get("/health")
 async def health_check(db: AsyncSession = Depends(get_db)):
@@ -27,9 +29,11 @@ async def health_check(db: AsyncSession = Depends(get_db)):
 
 
 async def main():
-    target_id = "agent-9514b4d0-bd2c-4671-bf62-aea14fd8d804" 
+    from agent.agent_v1 import AgentV1
+
+    target_id = "agent-9514b4d0-bd2c-4671-bf62-aea14fd8d804"
     agent = await AgentV1.get_agent(target_id)
-    
+
     if not agent:
         print(f"❌ 搵唔到 ID 係 '{target_id}' 嘅 Agent。")
         return
@@ -39,38 +43,86 @@ async def main():
 
     while True:
         await ConnPool.wait_task_comp()
-        
+
         # 1. 獲取用戶輸入
         print("\n👤 你 (多行輸入): ")
-        user_msg = sys.stdin.read().strip() # 呢度會等 Ctrl+D
-        
+        user_msg = sys.stdin.read().strip()  # 呢度會等 Ctrl+D
+
         if user_msg.lower() in ["exit", "quit", "離開"]:
             print("🛑 對話結束。")
             break
-            
+
         if not user_msg:
             continue
-            
+
         # 2. 呼叫 Agent Chat (Async Generator)
         response_gen_func = await agent.chat(user_msg, False)
-        
+
         print(f"💬 {agent.name}: ", end="", flush=True)
-        
+
         # 3. 處理 Streaming 輸出
         async for chunk in response_gen_func:
             print(chunk, end="", flush=True)
-        print("\n" + "-"*50)
-    
-    await GlobalVar.conn_pool.dispose()  
-    
+        print("\n" + "-" * 100)
+
+    await GlobalVar.conn_pool.dispose()
+
+
 async def test_summary():
+
+    async with GlobalVar.conn_pool.AsyncSessionLocal() as session:
+        from db.models import MessageModel
+
+        query = select(MessageModel).order_by(MessageModel.create_date.asc())
+        result = await session.execute(query)
+        historys: list[MessageDTO] = [
+            MessageDTO.get(m) for m in (result.scalars().all() or [])
+        ]
+        
+        summary_cont : str = ""
+        for msg in historys:
+            summary_cont += msg.date.strftime("%Y-%m-%d %H:%M:%S") + "\n"
+            summary_cont += msg.sent_by + ":\n"
+            summary_cont += msg.content + "\n\n"
+        
+        print(f"Summary Content:")
+        print("\n" + "-" * 100)
+        print(summary_cont)
+        print("\n" + "-" * 100)
+    
     from llm.summary_agent import SummaryAgent
-    client : SummaryAgent = SummaryAgent()
+    client: SummaryAgent = SummaryAgent()
     
+    sys_prompt : str = """
+請嚴格遵守 [Universal Multi-Topic Summary Prompt] 協議：
+
+1. [日期] 標註於最上方。
+
+2. 若對話包含多個互不相關的主題，必須使用 ### [Topic Name] 進行分塊摘要。
+
+3. 每個主題區塊需包含：該主題的核心事件、引號包裹的關鍵事實、技術參數、以及該項目的最終狀態。
+
+4. 絕對禁止將不同主題的關鍵事實（如秘密代碼與旅遊景點）混寫在同一個段落。
+
+5. 保持資訊密度，禁止輸出 Source Code。
+"""
     
+    print(sys_prompt)
+    print("\n" + "-" * 100)
     
-    await GlobalVar.conn_pool.dispose()  
+    gen = client.send(sys_prompt, summary_cont, False)
+            
+    if hasattr(gen, '__iter__'):
+        for chunk in gen:
+            print(chunk, end="", flush=True)
+    else:
+        print(gen, end="", flush=True)
     
-if __name__ == "__main__":
-    # asyncio.run(main())
-    asyncio.run(test_summary())
+    print("\n" + "-" * 100)
+
+    await GlobalVar.conn_pool.dispose()
+
+
+# if __name__ == "__main__":
+#     #asyncio.run(main())
+#     asyncio.run(test_summary())
