@@ -14,11 +14,13 @@ from sqlalchemy import select, text
 
 # API Routing
 from router.agent_router import router as agent_router
+from router.chat_router import router as chat_router
 
 GlobalVar.conn_pool = ConnPool()
 
 app = FastAPI(lifespan=GlobalVar.conn_pool.lifespan)
-app.include_router(agent_router)  # 註冊 API
+app.include_router(agent_router)  # 註冊 Agent API
+app.include_router(chat_router, prefix="/v1")  # 註冊 OpenAI Chat API
 
 
 @app.get("/health")
@@ -123,6 +125,7 @@ async def test_summary():
     await GlobalVar.conn_pool.dispose()
 
 
-# if __name__ == "__main__":
-#     #asyncio.run(main())
-#     asyncio.run(test_summary())
+if __name__ == "__main__":
+    # 運行 FastAPI 服務器
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8600)

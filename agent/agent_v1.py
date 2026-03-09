@@ -1,5 +1,5 @@
 import asyncio
-from typing import AsyncGenerator, Dict, Iterable
+from typing import AsyncGenerator, Dict, Iterable, Tuple
 import uuid
 
 from sqlalchemy.future import select
@@ -96,35 +96,34 @@ class AgentV1:
 
             print(f"\n🤖 Agent [{self.name}] 思考中...\n")
 
-            raw_response = self.brain.send(messages, is_think_mode)
+            # 4. 調用 brain.send() 獲取 async generator（因為 send 已經是 async def）
+            raw_response_gen = self.brain.send(messages, is_think_mode)
 
-            # 4. 定義內部 Async Generator 嚟處理唔同型別同埋背景儲存
+            # 5. 定義內部 Async Generator 嚟處理唔同型別同埋背景儲存
             async def wrapped_generator() -> AsyncGenerator[str, None]:
                 full_content = ""
                 full_reasoning = ""
                 is_currently_reasoning = False
 
-                if isinstance(raw_response, Iterable):
-                    for chunk in raw_response:
-                        if not isinstance(chunk, str):
-                            continue
+                # 使用 async for 遍歷 raw_response_gen（因為它已經是 async generator）
+                async for chunk in raw_response_gen:
+                    if not isinstance(chunk, str):
+                        continue
 
-                        # 標籤解析邏輯
-                        if chunk == "<think>":
-                            is_currently_reasoning = True
-                            yield "---------- 思考中 ----------\n"
-                            continue  # 唔使 yield 俾 User
-                        elif chunk == "</think>":
-                            is_currently_reasoning = False
-                            yield "---------------------------\n"
-                            continue  # 唔使 yield 俾 User
+                    # 標籤解析邏輯 - 過濾掉額外的標記字符串
+                    if chunk == "<think>":
+                        is_currently_reasoning = True
+                        continue  # 唔使 yield 俾 User
+                    elif chunk == "</think>":
+                        is_currently_reasoning = False
+                        continue  # 唔使 yield 俾 User
 
-                        if is_currently_reasoning:
-                            full_reasoning += chunk
-                            yield chunk
-                        else:
-                            full_content += chunk
-                            yield chunk
+                    if is_currently_reasoning:
+                        full_reasoning += chunk
+                        yield chunk
+                    else:
+                        full_content += chunk
+                        yield chunk
 
                 if full_reasoning:
                     pend_save.append(
@@ -137,6 +136,54 @@ class AgentV1:
                 ConnPool.start_db_async_task(self._save_messages_to_db(pend_save))
 
             return wrapped_generator()
+
+    async def chat_non_stream(self, user_input: str, is_think_mode: bool = False):
+        """非串流聊天方法，返回 (reasoning_content, content)"""
+        async with GlobalVar.conn_pool.AsyncSessionLocal() as session:
+            query = (
+                select(MessageModel)
+                .where(
+                    MessageModel.agent_id == self.db_id
+                    and MessageModel.session_id == self.session_db_id
+                )
+                .order_by(MessageModel.create_date.asc())
+            )
+            result = await session.execute(query)
+            historys: list[MessageDTO] = [
+                MessageDTO.get(m) for m in (result.scalars().all() or [])
+            ]
+
+            messages: list[Dict[str, str]] = []
+
+            if self.sys_prompt:
+                messages.append({"role": "system", "content": f"{self.sys_prompt}"})
+
+            for m in historys:
+                messages.append(m.to_msg())
+
+            user_msg: MessageDTO = MessageDTO.get_user_msg(user_input, is_think_mode)
+            messages.append(user_msg.to_msg())
+
+            print(f"\n🤖 Agent [{self.name}] 思考中...\n")
+
+            # 調用非串流方法，返回 (reasoning_content, content)
+            reasoning_content, content = self.brain.send_non_stream(messages, is_think_mode)
+
+            pend_save: list[MessageDTO] = []
+            pend_save.append(user_msg)
+            
+            if reasoning_content:
+                pend_save.append(
+                    MessageDTO.get_reasoning_msg(reasoning_content, is_think_mode)
+                )
+            pend_save.append(
+                MessageDTO.get_assistant_msg(content, is_think_mode)
+            )
+
+            # 同步保存訊息到資料庫
+            await self._save_messages_to_db(pend_save)
+
+            return reasoning_content, content
 
     async def _save_messages_to_db(self, messages: list[MessageDTO]):
         try:
