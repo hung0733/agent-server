@@ -7,7 +7,7 @@ from db.models import AgentModel, MessageModel, SessionModel
 from dto.message import MessageDTO
 from global_var import GlobalVar
 from llm.brain_agent import BrainAgent
-
+import tiktoken
 
 class AgentV1:
     _pending_tasks = set() # 紀錄未完成嘅儲存任務
@@ -134,8 +134,41 @@ class AgentV1:
                     MessageDTO.get_assistant_msg(full_content, is_think_mode)
                 )
 
-                task = asyncio.create_task(MessageDTO.save_message(self, pend_save))
+                task = asyncio.create_task(self._save_messages_to_db(pend_save))
                 self._pending_tasks.add(task)
                 task.add_done_callback(self._pending_tasks.discard) # 行完就剔除
 
             return wrapped_generator()
+
+    async def _save_messages_to_db(self, messages: list[MessageDTO]):
+        try:
+            async with GlobalVar.conn_pool.AsyncSessionLocal() as session:
+                step_id = "step-" + str(uuid.uuid4())  # 呢一轉對話嘅 ID
+
+                for msg_dto in messages:
+                    new_msg = MessageModel(
+                        agent_id=self.db_id,
+                        session_id = self.session_db_id,
+                        step_id=step_id,
+                        msg_id="msg-" + str(uuid.uuid4()),
+                        msg_type=msg_dto.msg_type,
+                        content=msg_dto.content,
+                        is_think_mode=msg_dto.is_think_mode,
+                        sent_by=msg_dto.sent_by,
+                        create_date=msg_dto.date,
+                        token = self._count_tokens(msg_dto.content)
+                    )
+                    session.add(new_msg)
+
+                await session.commit()
+                print(f"💾 歷史訊息已成功存入資料庫 (Agent: {self.name})")
+        except Exception as e:
+            print(f"❌ 儲存訊息失敗: {e}")
+            
+    def _count_tokens(self, text: str) -> int:
+        """計吓段文字有幾多 Token"""
+        try:
+            return len(tiktoken.get_encoding("cl100k_base").encode(text))
+        except Exception as e:
+            print(f"⚠️ Token 計算失敗: {e}")
+            return 0

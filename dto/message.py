@@ -1,14 +1,6 @@
 
 from datetime import datetime
-from email.generator import _MessageT
-from typing import List, cast
-import uuid
-from agent.agent_v1 import AgentV1
 from db.models import MessageModel
-from global_var import GlobalVar
-import tiktoken
-import asyncio
-import sys
 
 class MessageDTO:
     msg_type : str
@@ -73,38 +65,3 @@ class MessageDTO:
             content = user_input,
             token = token
         )
-        
-    @staticmethod
-    def count_tokens(text: str) -> int:
-        """計吓段文字有幾多 Token"""
-        try:
-            return len(tiktoken.get_encoding("cl100k_base").encode(text))
-        except Exception as e:
-            print(f"⚠️ Token 計算失敗: {e}")
-            return 0
-        
-    @staticmethod
-    def save_message(agent : AgentV1, messages: list):
-        try:
-            async with GlobalVar.conn_pool.AsyncSessionLocal() as session:
-                step_id = "step-" + str(uuid.uuid4())  # 呢一轉對話嘅 ID
-
-                for msg_dto in messages:
-                    new_msg = MessageModel(
-                        agent_id=agent.db_id,
-                        session_id = agent.session_db_id,
-                        step_id=step_id,
-                        msg_id="msg-" + str(uuid.uuid4()),
-                        msg_type=msg_dto.msg_type,
-                        content=msg_dto.content,
-                        is_think_mode=msg_dto.is_think_mode,
-                        sent_by=msg_dto.sent_by,
-                        create_date=msg_dto.date,
-                        token = MessageDTO.count_tokens(msg_dto.content)
-                    )
-                    session.add(new_msg)
-
-                await session.commit()
-                print(f"💾 歷史訊息已成功存入資料庫 (Agent: {agent.name})")
-        except Exception as e:
-            print(f"❌ 儲存訊息失敗: {e}")
