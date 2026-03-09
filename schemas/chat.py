@@ -31,10 +31,18 @@ class Usage(BaseModel):
     total_tokens: int = Field(..., description="總 token 數量")
 
 
+class Message(BaseModel):
+    """非串流回應的完整訊息"""
+    role: Literal["system", "user", "assistant"] = Field(..., description="訊息角色")
+    content: str = Field(..., description="內容")
+    reasoning_content: Optional[str] = Field(None, description="思考過程（可選）")
+
+
 class Choice(BaseModel):
     """聊天完成選擇"""
     index: int = Field(0, description="選擇索引")
-    delta: ChoiceDelta = Field(..., description="Delta 內容（串流模式）或最終結果（非串流模式）")
+    delta: Optional[ChoiceDelta] = Field(None, description="Delta 內容（串流模式）")
+    message: Optional[Message] = Field(None, description="完整訊息（非串流模式）")
     finish_reason: Optional[Literal["stop", "length"]] = Field(None, description="結束原因")
 
 

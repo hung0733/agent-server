@@ -12,6 +12,7 @@ from schemas.chat import (
     ChoiceDelta,
     Usage,
     Choice,
+    Message,
     ChatCompletionResponse,
     ModelItem,
     ListModelsResponse,
@@ -172,7 +173,7 @@ async def _non_stream_chat_completion(
         choices=[
             Choice(
                 index=0,
-                delta=ChoiceDelta(role="assistant", content=content),
+                message=Message(role="assistant", reasoning_content=reasoning_content, content=content),
                 finish_reason="stop",
             )
         ],
@@ -236,7 +237,7 @@ async def _stream_chat_completion(
             # 提取 reasoning_content
             reasoning = getattr(delta, 'reasoning_content', None)
             if reasoning:
-                reasoning_chunk = ChoiceDelta(role="assistant", content=None, reasoning_content=reasoning)
+                reasoning_chunk = ChoiceDelta(role="assistant", reasoning_content=reasoning, content=None)
                 reasoning_response = ChatCompletionResponse(
                     id="chatcmpl-" + str(uuid.uuid4()),
                     object="chat.completion.chunk",
