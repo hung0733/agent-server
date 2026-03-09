@@ -49,30 +49,8 @@ class BrainAgent:
             
         Returns:
             Tuple[str, str]: (reasoning_content, content)
-                - reasoning_content: 思考過程內容（從<think>...</think>標籤中提取）
-                - content: 最終回應內容（去除 think 標籤後的純文本）
+                - reasoning_content: 思考過程內容（從 response.choices[0].message.reasoning_content 提取）
+                - content: 最終回應內容（response.choices[0].message.content）
         """
-        # 從串流 generator 收集完整回應
-        import re
-        
-        full_response = ""
-        gen = self.stream_client.send(messages, is_think_mode)
-        
-        if hasattr(gen, '__iter__') and not isinstance(gen, str):
-            for chunk in gen:
-                full_response += chunk
-        else:
-            full_response = gen
-
-        # 提取 reasoning_content (從<think>...</think> 標籤中)
-        think_pattern = r'<think>(.*?)</think>'
-        match = re.search(think_pattern, full_response, re.DOTALL)
-
-        if match:
-            reasoning_content = match.group(1).strip()
-            # 移除 think 標籤及其內容，得到純回應內容
-            content = re.sub(think_pattern, '', full_response, flags=re.DOTALL).strip()
-            return reasoning_content, content
-        else:
-            # 沒有 think 標籤，返回空 reasoning_content 和完整內容
-            return "", full_response.strip()
+        # 直接返回原始 response，由 caller 處理
+        return self.non_stream_client.send(messages, is_think_mode)

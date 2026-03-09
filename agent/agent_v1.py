@@ -100,41 +100,39 @@ class AgentV1:
         # 4. 調用 brain.send() 獲取 async generator（因為 send 已經是 async def）
         raw_response_gen = self.brain.send(messages, is_think_mode)
 
-        # 5. 定義內部 Async Generator 嚟處理唔同型別同埋背景儲存
-        async def wrapped_generator() -> AsyncGenerator[str, None]:
-            full_content = ""
+        # 5. 定義內部 Async Generator 嚟處理背景儲存
+        async def wrapped_generator():
             full_reasoning = ""
-            is_currently_reasoning = False
-
+            full_content = ""
+            
             # 使用 async for 遍歷 raw_response_gen（因為它已經是 async generator）
             async for chunk in raw_response_gen:
-                if not isinstance(chunk, str):
-                    continue
+                yield chunk
+                
+                # 收集 content 同 reasoning 用於保存
+                if hasattr(chunk, 'choices') and chunk.choices:
+                    delta = chunk.choices[0].delta
+                    
+                    # 提取 reasoning_content
+                    reasoning = getattr(delta, 'reasoning_content', None)
+                    if reasoning:
+                        full_reasoning += reasoning
+                    
+                    # 提取 content
+                    if delta.content:
+                        full_content += delta.content
 
-                # 標籤解析邏輯 - 過濾掉額外的標記字符串
-                if chunk == "<think>":
-                    is_currently_reasoning = True
-                    continue  # 唔使 yield 俾 User
-                elif chunk == "</think>":
-                    is_currently_reasoning = False
-                    continue  # 唔使 yield 俾 User
-
-                if is_currently_reasoning:
-                    full_reasoning += chunk
-                    yield chunk
-                else:
-                    full_content += chunk
-                    yield chunk
-
+            
             if full_reasoning:
                 pend_save.append(
                     MessageDTO.get_reasoning_msg(full_reasoning, is_think_mode)
                 )
+                
             pend_save.append(
                 MessageDTO.get_assistant_msg(full_content, is_think_mode)
             )
 
-            await self._save_messages_to_db(pend_save)
+            ConnPool.start_db_async_task(self._save_messages_to_db(pend_save))
 
         return wrapped_generator()
 
@@ -164,8 +162,13 @@ class AgentV1:
 
         print(f"\n🤖 Agent [{self.name}] 思考中...\n")
 
-        # 調用非串流方法，返回 (reasoning_content, content)
-        reasoning_content, content = self.brain.send_non_stream(messages, is_think_mode)
+        # 調用非串流方法，返回原始 response object
+        response = self.brain.send_non_stream(messages, is_think_mode)
+        
+        # 從原始 response 提取 reasoning_content 同 content
+        msg = response.choices[0].message
+        reasoning_content = getattr(msg, 'reasoning_content', None) or ""
+        content = msg.content or ""
 
         pend_save: list[MessageDTO] = []
         pend_save.append(user_msg)
@@ -178,8 +181,7 @@ class AgentV1:
             MessageDTO.get_assistant_msg(content, is_think_mode)
         )
 
-        # 同步保存訊息到資料庫 (使用 DAO)
-        await self._save_messages_to_db(pend_save)
+        ConnPool.start_db_async_task(self._save_messages_to_db(pend_save))
 
         return reasoning_content, content
     

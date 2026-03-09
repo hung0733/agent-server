@@ -227,26 +227,16 @@ async def _stream_chat_completion(
     )
     yield "data: " + first_response.model_dump_json() + "\n\n"
 
-    # 處理思考標籤（think tags）- 逐字串流
-    reasoning_buffer = ""
-    content_buffer = ""
-    in_think_mode = False
-    
+    # 處理原始 response chunk（包含 reasoning_content 同 content）
     async for chunk in response_gen:
-        if not isinstance(chunk, str):
-            continue
-        
-        # 檢查是否進入 think 模式
-        if not in_think_mode and chunk == "<think>":
-            in_think_mode = True
-            continue  # 不發送標籤本身
+        # chunk 係 OpenAI response object，包含 choices[0].delta
+        if hasattr(chunk, 'choices') and chunk.choices:
+            delta = chunk.choices[0].delta
             
-        # 檢查是否離開 think 模式
-        if in_think_mode and chunk == "</think>":
-            in_think_mode = False
-            # 發送思考過程的完整內容
-            if reasoning_buffer:
-                reasoning_chunk = ChoiceDelta(role="assistant", content=None, reasoning_content=reasoning_buffer)
+            # 提取 reasoning_content
+            reasoning = getattr(delta, 'reasoning_content', None)
+            if reasoning:
+                reasoning_chunk = ChoiceDelta(role="assistant", content=None, reasoning_content=reasoning)
                 reasoning_response = ChatCompletionResponse(
                     id="chatcmpl-" + str(uuid.uuid4()),
                     object="chat.completion.chunk",
@@ -256,38 +246,31 @@ async def _stream_chat_completion(
                     usage=None,
                 )
                 yield "data: " + reasoning_response.model_dump_json() + "\n\n"
-            reasoning_buffer = ""
-            continue
-        
-        # 逐字發送 content chunk
-        if in_think_mode:
-            reasoning_buffer += chunk
-        else:
-            content_buffer += chunk
-            # 立即發送每個 content chunk（串流）
-            final_chunk = ChoiceDelta(role="assistant", content=chunk)
-            final_response = ChatCompletionResponse(
-                id="chatcmpl-" + str(uuid.uuid4()),
-                object="chat.completion.chunk",
-                created=0,
-                model=request.model,
-                choices=[Choice(index=0, delta=final_chunk, finish_reason=None)],
-                usage=None,
-            )
-            yield "data: " + final_response.model_dump_json() + "\n\n"
+            
+            # 提取 content
+            if delta.content:
+                final_chunk = ChoiceDelta(role="assistant", content=delta.content)
+                final_response = ChatCompletionResponse(
+                    id="chatcmpl-" + str(uuid.uuid4()),
+                    object="chat.completion.chunk",
+                    created=0,
+                    model=request.model,
+                    choices=[Choice(index=0, delta=final_chunk, finish_reason=None)],
+                    usage=None,
+                )
+                yield "data: " + final_response.model_dump_json() + "\n\n"
 
     # 發送完成標記（最後一個 chunk 的 finish_reason = "stop"）
-    if content_buffer or reasoning_buffer:
-        last_chunk = ChoiceDelta(role="assistant", content=None)
-        last_response = ChatCompletionResponse(
-            id="chatcmpl-" + str(uuid.uuid4()),
-            object="chat.completion.chunk",
-            created=0,
-            model=request.model,
-            choices=[Choice(index=0, delta=last_chunk, finish_reason="stop")],
-            usage=None,
-        )
-        yield "data: " + last_response.model_dump_json() + "\n\n"
+    last_chunk = ChoiceDelta(role="assistant", content=None)
+    last_response = ChatCompletionResponse(
+        id="chatcmpl-" + str(uuid.uuid4()),
+        object="chat.completion.chunk",
+        created=0,
+        model=request.model,
+        choices=[Choice(index=0, delta=last_chunk, finish_reason="stop")],
+        usage=None,
+    )
+    yield "data: " + last_response.model_dump_json() + "\n\n"
 
     # 發送完成標記
     yield "data: [DONE]\n\n"

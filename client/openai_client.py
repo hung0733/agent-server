@@ -41,41 +41,13 @@ class OpenAIClient:
             )
             
             if not self.stream:
-                msg = response.choices[0].message
-                reasoning = getattr(msg, 'reasoning_content', None)
-                content = msg.content or ""
-                if reasoning:
-                    return f"<think>{reasoning}</think>{content}"
-                return content
+                return response
+            
             else:
-                # 定義 generator 傳返出去
+                # 直接返回 generator，唔好修改原始 data
                 def gen():
-                    has_started_thinking = False
                     for chunk in response:
-                        if not chunk.choices:
-                            continue
-                        
-                        delta = chunk.choices[0].delta
-                        
-                        # 處理 Reasoning 
-                        reasoning = getattr(delta, 'reasoning_content', None)
-                        if reasoning:
-                            if not has_started_thinking:
-                                yield "<think>"
-                                has_started_thinking = True
-                            yield reasoning
-                            
-                        # 處理 Content
-                        if delta.content:
-                            # 如果 content 開始咗但仲未收返粒 think 掣，就補返個掣俾佢
-                            if has_started_thinking:
-                                yield "</think>"
-                                has_started_thinking = False
-                            yield delta.content
-                            
-                    # 完結時檢查
-                    if has_started_thinking:
-                        yield "</think>"
+                        yield chunk
                 return gen()
                 
         except Exception as e:
