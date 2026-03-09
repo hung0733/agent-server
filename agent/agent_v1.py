@@ -10,6 +10,8 @@ from llm.brain_agent import BrainAgent
 
 
 class AgentV1:
+    _pending_tasks = set() # 紀錄未完成嘅儲存任務
+    
     def __init__(
         self,
         db_id: int,
@@ -132,8 +134,9 @@ class AgentV1:
                     MessageDTO.get_assistant_msg(full_content, is_think_mode)
                 )
 
-                # 開啟背景任務儲存，唔會塞住個 return
-                asyncio.create_task(self._save_messages_to_db(pend_save))
+                task = asyncio.create_task(self._save_messages_to_db(pend_save))
+                self._pending_tasks.add(task)
+                task.add_done_callback(self._pending_tasks.discard) # 行完就剔除
 
             return wrapped_generator()
 

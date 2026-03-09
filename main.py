@@ -1,4 +1,5 @@
 import asyncio
+import sys
 from dotenv import load_dotenv
 
 from agent.agent_v1 import AgentV1
@@ -29,21 +30,42 @@ async def main():
     target_id = "agent-9514b4d0-bd2c-4671-bf62-aea14fd8d804" 
     agent = await AgentV1.get_agent(target_id)
     
-    if agent:
-        print(f"✅ 成功載入 Agent: {agent.name}")
-        
-        # 3. 測試對話 (Streaming)
-        user_msg = "Hi"
-        response_gen = await agent.chat(user_msg, False)
-        
-        print(f"💬 {agent.name} 回應：", end="", flush=True)
-        async for chunk in response_gen:
-            print(chunk, end="", flush=True)
-        print("\n" + "-"*100)
-    else:
-        print(f"❌ 搵唔到 ID 係 '{target_id}' 嘅 Agent，請先用 API 或 SQL 入一筆資料。")
+    if not agent:
+        print(f"❌ 搵唔到 ID 係 '{target_id}' 嘅 Agent。")
+        return
 
-    await asyncio.sleep(5)
+    print(f"✅ 成功載入 Agent: {agent.name}")
+    print("--- 已進入對話模式 (輸入 'exit' 或 'quit' 退出) ---")
+
+    while True:
+        if AgentV1._pending_tasks:
+            print(f"⏳ 正在等待 {len(AgentV1._pending_tasks)} 個儲存任務...")
+            await asyncio.gather(*AgentV1._pending_tasks)
+        
+        # 1. 獲取用戶輸入
+        print("\n👤 你 (多行輸入): ")
+        user_msg = sys.stdin.read().strip() # 呢度會等 Ctrl+D
+        
+        if user_msg.lower() in ["exit", "quit", "離開"]:
+            print("🛑 對話結束。")
+            break
+            
+        if not user_msg:
+            continue
+            
+        # 2. 呼叫 Agent Chat (Async Generator)
+        response_gen_func = await agent.chat(user_msg, False)
+        
+        print(f"💬 {agent.name}: ", end="", flush=True)
+        
+        # 3. 處理 Streaming 輸出
+        async for chunk in response_gen_func:
+            print(chunk, end="", flush=True)
+        print("\n" + "-"*50)
+        
+    if AgentV1._pending_tasks:
+        print(f"⏳ 正在等待 {len(AgentV1._pending_tasks)} 個儲存任務...")
+        await asyncio.gather(*AgentV1._pending_tasks)
     # 4. 關閉連線池
     await GlobalVar.conn_pool.engine.dispose()
     
