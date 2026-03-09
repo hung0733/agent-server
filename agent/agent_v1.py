@@ -10,8 +10,6 @@ from llm.brain_agent import BrainAgent
 import tiktoken
 
 class AgentV1:
-    _pending_tasks = set() # 紀錄未完成嘅儲存任務
-    
     def __init__(
         self,
         db_id: int,
@@ -135,8 +133,8 @@ class AgentV1:
                 )
 
                 task = asyncio.create_task(self._save_messages_to_db(pend_save))
-                self._pending_tasks.add(task)
-                task.add_done_callback(self._pending_tasks.discard) # 行完就剔除
+                GlobalVar.conn_pool.pending_tasks.add(task)
+                task.add_done_callback(GlobalVar.conn_pool.pending_tasks.discard)
 
             return wrapped_generator()
 

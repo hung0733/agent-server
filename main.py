@@ -38,9 +38,7 @@ async def main():
     print("--- 已進入對話模式 (輸入 'exit' 或 'quit' 退出) ---")
 
     while True:
-        if AgentV1._pending_tasks:
-            print(f"⏳ 正在等待 {len(AgentV1._pending_tasks)} 個儲存任務...")
-            await asyncio.gather(*AgentV1._pending_tasks)
+        await GlobalVar.conn_pool.wait_task_comp()
         
         # 1. 獲取用戶輸入
         print("\n👤 你 (多行輸入): ")
@@ -62,12 +60,13 @@ async def main():
         async for chunk in response_gen_func:
             print(chunk, end="", flush=True)
         print("\n" + "-"*50)
-        
-    if AgentV1._pending_tasks:
-        print(f"⏳ 正在等待 {len(AgentV1._pending_tasks)} 個儲存任務...")
-        await asyncio.gather(*AgentV1._pending_tasks)
-    # 4. 關閉連線池
-    await GlobalVar.conn_pool.engine.dispose()
+    
+    await GlobalVar.conn_pool.dispose()  
+    
+async def test_summary():
+    
+    await GlobalVar.conn_pool.dispose()  
     
 if __name__ == "__main__":
-    asyncio.run(main())
+    # asyncio.run(main())
+    asyncio.run(test_summary())

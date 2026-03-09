@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 
 class ConnPool:
+    pending_tasks = set()
     def __init__(self) -> None:
         # 資料庫連線設定 (參考 pgsql.yml 嘅設定)
         # 格式: postgresql+asyncpg://user:password@host:port/dbname
@@ -50,6 +51,17 @@ class ConnPool:
         # Shutdown
         await self.engine.dispose()
         print("🛑 Database connection pool closed.")
+        
+    async def dispose(self):
+        await self.wait_task_comp()
+        await self.engine.dispose()
+    
+    @staticmethod
+    async def wait_task_comp():
+        if ConnPool.pending_tasks:
+            import asyncio
+            print(f"⏳ 正在等待 {len(ConnPool.pending_tasks)} 個儲存任務...")
+            await asyncio.gather(*ConnPool.pending_tasks)
 
 # Dependency Injection: 俾其他 API Route 攞 DB Session 用
 async def get_db():
