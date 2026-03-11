@@ -10,9 +10,8 @@ class MessageDAO:
     """Message Data Access Object"""
     
     async def create(
-        self, 
+        self,
         session: AsyncSession,
-        agent_id: int,
         session_id: int,
         step_id: str,
         msg_id: str,
@@ -25,7 +24,6 @@ class MessageDAO:
     ) -> MessageModel:
         """創建 Message"""
         new_message = MessageModel(
-            agent_id=agent_id,
             session_id=session_id,
             step_id=step_id,
             msg_id=msg_id,

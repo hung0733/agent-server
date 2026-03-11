@@ -195,7 +195,6 @@ class AgentV1:
                 for msg_dto in messages:
                     await message_dao.create(
                         session,
-                        agent_id=self.db_id,
                         session_id=self.session_db_id,
                         step_id=step_id,
                         msg_id="msg-" + str(uuid.uuid4()),

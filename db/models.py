@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, Integer, String, Text, ForeignKey, DateTime, func
+from sqlalchemy import Boolean, Column, Integer, String, Text, ForeignKey, TIMESTAMP, func
 from sqlalchemy.orm import declarative_base, relationship
 Base = declarative_base()
 
@@ -30,12 +30,11 @@ class MessageModel(Base):
     __tablename__ = "message"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    agent_id = Column(Integer, ForeignKey("agent.id"), nullable=False)
     step_id = Column(String(100), nullable=False)
     msg_id = Column(String(100), nullable=False)
     msg_type = Column(String(50), nullable=False)
     
-    create_date = Column(DateTime, nullable=False)
+    create_date = Column(TIMESTAMP(timezone=True), nullable=False)
     content = Column(Text, nullable=False)
     is_think_mode = Column(Boolean, nullable=False)
     sent_by = Column(String(20), nullable=False)
@@ -44,6 +43,5 @@ class MessageModel(Base):
     
     token = Column(Integer, default=0, nullable=False)
 
-    # 修正 2：確保反向關聯嘅屬性名稱同 Model 定義一致
-    agent = relationship("AgentModel", back_populates="messages")
+    # 移除 agent_id 後，不再需要與 AgentModel 的反向關聯
     session = relationship("SessionModel", back_populates="messages") # 呢度要對應 SessionModel 嘅 messages
