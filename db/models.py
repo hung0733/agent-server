@@ -45,3 +45,13 @@ class MessageModel(Base):
 
     # 移除 agent_id 後，不再需要與 AgentModel 的反向關聯
     session = relationship("SessionModel", back_populates="messages") # 呢度要對應 SessionModel 嘅 messages
+
+
+class PromptModel(Base):
+    __tablename__ = "prompt"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    code = Column(String(50), unique=True, nullable=False)
+    prompt_type = Column(String(50), nullable=False)
+    prompt = Column(Text, nullable=False)
+    retry_prompt = Column(Text, nullable=True)
