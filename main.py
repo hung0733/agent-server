@@ -14,7 +14,7 @@ from sqlalchemy import select, text
 
 # API Routing
 from router.agent_router import router as agent_router
-from agent.backend_agent import start_backend_agents_loop
+from backend_task import start_backend_agents_loop
 from router.chat_router import router as chat_router
 from router.session_router import router as session_router
 from router.message_router import router as message_router
