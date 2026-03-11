@@ -6,6 +6,7 @@ from sqlalchemy import select
 from typing import AsyncGenerator, List
 
 from db.conn_pool import get_db
+from router.session_router import validate_session_id_format
 from schemas.chat import (
     ChatMessage,
     ChatCompletionRequest,
@@ -67,7 +68,9 @@ async def create_agent_chat_completion(
     """Agent 預設會話的聊天完成端點（支援串流和非串流）"""
     # 獲取 Agent（使用預設 session="default"）
     try:
-        agent = await AgentV1.get_agent(agent_id=agent_id, session_id="default")
+        agent = await AgentV1.get_agent(
+            agent_id=agent_id, session_id="default", stream=request.stream
+        )
     except HTTPException as e:
         raise e
     except Exception:
@@ -95,12 +98,7 @@ async def create_session_chat_completion(
     # 從 session table 查找對應的 agent
     from db.models import SessionModel
 
-    # default session 使用 /agents/{agent_id}/v1/chat/completions 端點，不允許用此端點
-    if session_id == "default":
-        raise HTTPException(
-            status_code=400,
-            detail="Use /agents/{agent_id}/v1/chat/completions for default session",
-        )
+    validate_session_id_format(session_id)
 
     try:
         # 查詢 session record
