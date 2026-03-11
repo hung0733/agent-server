@@ -86,50 +86,83 @@ async def test_summary():
         ]
         
         summary_cont : str = ""
+        valid_count = 0
         for msg in historys:
-            summary_cont += msg.date.strftime("%Y-%m-%d %H:%M:%S") + "\n"
-            summary_cont += msg.sent_by + ":\n"
-            summary_cont += msg.content + "\n\n"
-        
-        print(f"Summary Content:")
-        print("\n" + "-" * 100)
-        print(summary_cont)
-        print("\n" + "-" * 100)
+            if (msg.msg_type in ["user_message", "assistant_message"]):
+                summary_cont += msg.date.strftime("%Y-%m-%d %H:%M:%S") + "\n"
+                summary_cont += msg.sent_by + ":\n"
+                summary_cont += msg.content + "\n\n"
+                valid_count += 1
+    
+    
+
+    sys_prompt : str = """
+**Role**: 你是一個具備語言感知能力的高密度數據提取引擎，專門為「向量資料庫 (Vector DB)」準備 RAG 記憶存檔。
+
+**Task**: 請將對話內容拆解並轉換為多個獨立的「原子化 Record」 JSON 物件。
+
+**Output Format**: 僅輸出一個包含 JSON List 的物件，嚴禁任何解釋性文字。
+
+**Language Constraint (語言約束)**:
+1. **語體一致**: JSON 內的所有文字欄位（topic, event_summary, critical_facts）必須「嚴格遵循原始對話的語言與語氣」。
+2. **廣東話保留**: 若原始對話使用廣東話（如：小丸風格），摘要必須保留廣東話關鍵詞與語法，不得擅自轉為書面語或英文。
+3. **實體不變**: 專有名詞、代碼、密鑰必須 100% 保持原始格式。
+
+**JSON Structure**:
+{
+  "records": [
+    {
+      "record_id": "對話雜湊或序號",
+      "timestamp_range": {
+        "start": "YYYY-MM-DD HH:MM:SS",
+        "end": "YYYY-MM-DD HH:MM:SS"
+      },
+      "topic": "主題名稱（用對話語言撰寫）",
+      "event_summary": "核心事件描述（用對話語言撰寫，一句話總結）",
+      "critical_facts": ["原始數據或語句（如：『抹茶味小籠包』）"],
+      "technical_index": {
+        "logic": "實作的功能描述（嚴禁輸出源碼）",
+        "params": ["具體數值", "方法名稱", "價格"]
+      },
+      "status": "Archived / Success / Pending"
+    }
+  ]
+}
+
+**Strict Constraints**:
+- 禁止輸出任何 JSON 以外的解釋。
+- 主題必須完全隔離，不同事件拆分不同 Record。
+- 確保 `timestamp_range` 反映該話題在對話中出現的實際時間段。
+"""
+    
+    # print(sys_prompt)
+    # print("\n" + "-" * 100)
+    # print(sys_prompt_2)
+    # print("\n" + "-" * 100)
+
     
     from llm.summary_agent import SummaryAgent
     client: SummaryAgent = SummaryAgent()
-    
-    sys_prompt : str = """
-請嚴格遵守 [Universal Multi-Topic Summary Prompt] 協議：
-
-1. [日期] 標註於最上方。
-
-2. 若對話包含多個互不相關的主題，必須使用 ### [Topic Name] 進行分塊摘要。
-
-3. 每個主題區塊需包含：該主題的核心事件、引號包裹的關鍵事實、技術參數、以及該項目的最終狀態。
-
-4. 絕對禁止將不同主題的關鍵事實（如秘密代碼與旅遊景點）混寫在同一個段落。
-
-5. 保持資訊密度，禁止輸出 Source Code。
-"""
-    
-    print(sys_prompt)
-    print("\n" + "-" * 100)
-    
     gen = client.send(sys_prompt, summary_cont, False)
-            
-    if hasattr(gen, '__iter__'):
-        for chunk in gen:
-            print(chunk, end="", flush=True)
-    else:
-        print(gen, end="", flush=True)
-    
-    print("\n" + "-" * 100)
+
+    async for chunk in gen:
+        if hasattr(chunk, 'choices') and chunk.choices:
+            choice = chunk.choices[0]
+            if hasattr(choice, 'delta') and choice.delta:
+                reasoning = getattr(choice.delta, 'reasoning_content', None)
+                if reasoning:
+                    print(reasoning, end="", flush=True)
+                content = choice.delta.content
+                if content:
+                    print(content, end="", flush=True)
+
+    # print("\n" + "-" * 100)
 
     await GlobalVar.conn_pool.dispose()
 
 
 if __name__ == "__main__":
-    # 運行 FastAPI 服務器
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8600)
+    asyncio.run(test_summary())
+    # # 運行 FastAPI 服務器
+    # import uvicorn
+    # uvicorn.run(app, host="0.0.0.0", port=8600)

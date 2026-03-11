@@ -21,7 +21,7 @@ class OpenAIClient:
             api_key=self.api_key
         )
         
-    def send(self, messages: list[Dict[str, str]], is_think_mode : bool = False) -> Union[str, Generator[str, None, None]]:
+    def send(self, messages: list[Dict[str, str]], is_think_mode : bool = False, temperature : float = -1) -> Union[str, Generator[str, None, None]]:
         
         extra_body = {
             "top_k": 20,
@@ -29,12 +29,15 @@ class OpenAIClient:
             "chat_template_kwargs": {"enable_thinking": is_think_mode}
         }
         
+        if (temperature < 0):
+            temperature = 0.6 if is_think_mode else 0.7
+        
         try:
             response = self.client.chat.completions.create(
                 model=self.model_name,
                 messages=messages, # type: ignore
                 stream=self.stream,
-                temperature=0.6 if is_think_mode else 0.7,
+                temperature= temperature,
                 top_p=0.95 if is_think_mode else 0.8,
                 presence_penalty=0.0 if is_think_mode else 0.3,
                 extra_body=extra_body 
