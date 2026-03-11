@@ -1,4 +1,4 @@
-from typing import AsyncGenerator, Optional, Tuple
+from typing import AsyncGenerator, Optional, Tuple, Union
 import uuid
 
 import tiktoken
@@ -11,6 +11,7 @@ from dto.agent import AgentDTO
 from dto.message import MessageDTO
 from dto.session import SessionDTO
 from global_var import GlobalVar
+from openai.types.chat import ChatCompletion, ChatCompletionChunk  # 匯入類型定義
 
 
 class Agent:
@@ -70,55 +71,43 @@ class Agent:
         agent: "Agent",
         is_think_mode: bool,
         sendMsg: MessageDTO,
-        response: Tuple[str, str],
-    ) -> Tuple[str, str]:
-        msg = response.choices[0].message
-        reasoning_content = getattr(msg, "reasoning_content", None) or ""
-        content = msg.content or ""
-
-        messages: list[MessageDTO] = [sendMsg]
-        if reasoning_content:
-            messages.append(
-                MessageDTO.get_reasoning_msg(reasoning_content, is_think_mode)
-            )
-
-        messages.append(MessageDTO.get_assistant_msg(content, is_think_mode))
-
-        ConnPool.start_db_async_task(Agent._save_messages_to_db(agent, messages))
-
-        return reasoning_content, content
-
-    @staticmethod
-    async def handleAsyncGenerator(
-        agent: "Agent", is_think_mode: bool, sendMsg: MessageDTO, gen: AsyncGenerator
-    ):
+        response: Union[ChatCompletion, AsyncGenerator[ChatCompletionChunk, None]],
+    ) -> Union[ChatCompletion, AsyncGenerator[ChatCompletionChunk, None]]:
         full_reasoning = ""
         full_content = ""
 
-        # 使用 async for 遍歷 raw_response_gen（因為它已經是 async generator）
-        async for chunk in gen:
-            yield chunk
+        if agent.stream:
+            # 4. 處理串流
+            async for chunk in response:
+                yield chunk
 
-            # 收集 content 同 reasoning 用於保存
-            if hasattr(chunk, "choices") and chunk.choices:
-                delta = chunk.choices[0].delta
+                if chunk.choices:
+                    delta = chunk.choices[0].delta
+                    # 處理思考過程
+                    reasoning = getattr(delta, "reasoning_content", None)
+                    if reasoning:
+                        full_reasoning += reasoning
+                    # 處理回答內容
+                    if delta.content:
+                        full_content += delta.content
+        else:
+            yield response
 
-                # 提取 reasoning_content
-                reasoning = getattr(delta, "reasoning_content", None)
-                if reasoning:
-                    full_reasoning += reasoning
-
-                # 提取 content
-                if delta.content:
-                    full_content += delta.content
+            msg = response.choices[0].message
+            full_content = msg.content or ""
+            full_reasoning = getattr(msg, "reasoning_content", None) or ""
 
         messages: list[MessageDTO] = [sendMsg]
         if full_reasoning:
-            messages.append(MessageDTO.get_reasoning_msg(full_reasoning, is_think_mode))
+            messages.append(
+                MessageDTO.get_reasoning_msg(full_reasoning, is_think_mode)
+            )
+        if full_content:
+            messages.append(MessageDTO.get_assistant_msg(full_content, is_think_mode))
 
-        messages.append(MessageDTO.get_assistant_msg(full_content, is_think_mode))
+        # 異步存入 DB
+        ConnPool.start_db_async_task(agent._save_messages_to_db(agent, messages))
 
-        ConnPool.start_db_async_task(Agent._save_messages_to_db(agent, messages))
 
     @staticmethod
     async def _save_messages_to_db(agent: "Agent", messages: list[MessageDTO]):
