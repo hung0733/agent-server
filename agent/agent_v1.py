@@ -1,5 +1,6 @@
 import asyncio
 from typing import AsyncGenerator, Dict, Optional, Union
+from fastapi import HTTPException
 
 from sqlalchemy.future import select
 from agent.agent import Agent
@@ -27,20 +28,28 @@ class AgentV1(Agent):
 
         agent, session = await Agent.get_db_agent(agent_id, session_id)
 
+        # 檢查 agent 是否存在
+        if not agent:
+            raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+        
+        # 檢查 session 是否存在
+        if not session:
+            raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found for Agent '{agent_id}'")
+
         # 攞到資料，返傳實例
         return cls(
-            db_id=agent.id,  # type: ignore
-            agent_id=agent.agent_id,  # type: ignore
+            db_id=agent.id,
+            agent_id=agent.agent_id,
             session_db_id=session.id,
             session_id=session.session_id,
-            name=agent.name,  # type: ignore
-            sys_prompt=agent.sys_prompt,  # type: ignore
+            name=agent.name,
+            sys_prompt=agent.sys_prompt,
             stream=stream,
         )
 
     async def chat(
         self, user_input: str, is_think_mode: bool = False
-    ) -> Union[ChatCompletion, AsyncGenerator[ChatCompletionChunk, None]]:
+    ) -> AsyncGenerator[ChatCompletionChunk, None]:
         message_dao = MessageDAO()
 
         # 1. 獲取歷史紀錄
@@ -65,5 +74,4 @@ class AgentV1(Agent):
         user_msg_dto = MessageDTO.get_user_msg(user_input, is_think_mode)
         messages.append(user_msg_dto.to_msg())
 
-        return await self.handleMsgResponse(self, is_think_mode, user_msg_dto, await self.brain.send(messages, is_think_mode))
- 
+        return self.handleMsgResponse(self, is_think_mode, user_msg_dto, await self.brain.send(messages, is_think_mode))

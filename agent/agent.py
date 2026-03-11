@@ -72,7 +72,7 @@ class Agent:
         is_think_mode: bool,
         sendMsg: MessageDTO,
         response: Union[ChatCompletion, AsyncGenerator[ChatCompletionChunk, None]],
-    ) -> Union[ChatCompletion, AsyncGenerator[ChatCompletionChunk, None]]:
+    ) -> AsyncGenerator[ChatCompletionChunk, None]:
         full_reasoning = ""
         full_content = ""
 
@@ -90,24 +90,41 @@ class Agent:
                     # 處理回答內容
                     if delta.content:
                         full_content += delta.content
+            agent._prepare_save_messages_to_db(agent, sendMsg, is_think_mode, full_content, full_reasoning)  
+            
         else:
+            # 2. 處理內部入 DB 用的數據
+            try:
+                # 1. 喺 yield 之前先將內容攞出嚟
+                if hasattr(response, "choices") and response.choices:
+                    msg_obj = response.choices[0].message
+                    msg_data = msg_obj.model_dump() if hasattr(msg_obj, "model_dump") else {}
+                    
+                    full_content = msg_data.get("content") or getattr(msg_obj, "content", "") or ""
+                    full_reasoning = msg_data.get("reasoning_content") or getattr(msg_obj, "reasoning_content", "") or ""
+                
+                print(f"DEBUG [Agent.py]: Content Length = {len(full_content)}, Reasoning Length = {len(full_reasoning)}")
+                
+            except Exception as e:
+                print(f"ERROR [Agent.py] Extraction failed: {str(e)}")
+            
+            agent._prepare_save_messages_to_db(agent, sendMsg, is_think_mode, full_content, full_reasoning)    
             yield response
 
-            msg = response.choices[0].message
-            full_content = msg.content or ""
-            full_reasoning = getattr(msg, "reasoning_content", None) or ""
 
+
+
+    @staticmethod
+    def _prepare_save_messages_to_db(agent: "Agent", sendMsg : MessageDTO, is_think_mode:bool, content: str, reasoning_content : str):
         messages: list[MessageDTO] = [sendMsg]
-        if full_reasoning:
-            messages.append(
-                MessageDTO.get_reasoning_msg(full_reasoning, is_think_mode)
-            )
-        if full_content:
-            messages.append(MessageDTO.get_assistant_msg(full_content, is_think_mode))
 
-        # 異步存入 DB
-        ConnPool.start_db_async_task(agent._save_messages_to_db(agent, messages))
-
+        if content:
+            if reasoning_content:
+                messages.append(
+                    MessageDTO.get_reasoning_msg(reasoning_content, is_think_mode)
+                )
+            messages.append(MessageDTO.get_assistant_msg(content, is_think_mode))
+            ConnPool.start_db_async_task(agent._save_messages_to_db(agent, messages))
 
     @staticmethod
     async def _save_messages_to_db(agent: "Agent", messages: list[MessageDTO]):

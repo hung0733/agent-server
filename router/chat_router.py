@@ -79,6 +79,9 @@ async def create_agent_chat_completion(
     # 檢查 agent 是否為 None（get_agent 可能返回 None）
     if agent is None:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+    
+    # 建議喺 agent_v1.py 加返
+    print(f"DEBUG: Initializing AgentV1 with id: {agent_id}")
 
     if request.stream:
         return StreamingResponse(
@@ -138,6 +141,9 @@ async def create_session_chat_completion(
     # 檢查 agent 是否為 None（get_agent 可能返回 None）
     if agent is None:
         raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found")
+    
+    # 建議喺 agent_v1.py 加返
+    print(f"DEBUG: Initializing AgentV1 with id: {agent_id}")
 
     if request.stream:
         return StreamingResponse(
@@ -167,8 +173,21 @@ async def _non_stream_chat_completion(
             status_code=400, detail="No user message found in conversation"
         )
 
-    # 調用 Agent 的非串流方法，返回 (reasoning_content, content)
-    reasoning_content, content = await agent.chat(last_user_msg, is_think_mode)
+# 調用 Agent 的 chat 方法，依家佢返傳嘅係 AsyncGenerator
+    response_gen = await agent.chat(last_user_msg, is_think_mode)
+
+    content = ""
+    reasoning_content = ""
+
+    # 喺呢度消耗掉 AsyncGenerator 嚟攞返完整內容
+    async for chunk in response_gen:
+        # chunk 係 ChatCompletion 物件 (因為 handleMsgResponse 非串流時 yield 了完整物件)
+        if hasattr(chunk, "choices") and chunk.choices:
+            msg = chunk.choices[0].message
+            content = msg.content or ""
+            reasoning_content = getattr(msg, "reasoning_content", None) or ""
+            # 非串流模式下，通常只有一個 chunk (即完整 response)
+            break
 
     # 計算 token 使用量（簡單估算）
     prompt_tokens = sum(len(msg.content) for msg in request.messages) // 4

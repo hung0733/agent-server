@@ -11,7 +11,6 @@ class AgentModel(Base):
     sys_prompt = Column(Text, nullable=True)
     
     # 修正 1：分開命名屬性，唔好重複用 messages
-    messages = relationship("MessageModel", back_populates="agent", cascade="all, delete-orphan")
     sessions = relationship("SessionModel", back_populates="agent", cascade="all, delete-orphan")
     
 class SessionModel(Base):
