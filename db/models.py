@@ -1,5 +1,6 @@
 from sqlalchemy import JSON, Boolean, Column, Integer, String, Text, ForeignKey, TIMESTAMP, func
 from sqlalchemy.orm import declarative_base, relationship
+from pgvector.sqlalchemy import Vector
 Base = declarative_base()
 
 class AgentModel(Base):
@@ -67,7 +68,7 @@ class LongTermMemoryModel(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)  # SERIAL
     agent_id = Column(Integer, ForeignKey("agent.id"), nullable=False)
     content = Column(JSON, nullable=False)  # JSONB in PostgreSQL
-    vector_content = Column(Text, nullable=True)  # vector(1024) - storing as text for pgvector compatibility
+    vector_content = Column(Vector(1024), nullable=True)  # vector(1024) - pgvector column
     importance = Column(Integer, default=5)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 

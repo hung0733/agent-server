@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional, Union
 
 
 class LongTermMemoryDTO:
@@ -8,7 +8,7 @@ class LongTermMemoryDTO:
     id: int | None
     agent_id: int
     content: Dict[str, Any]
-    vector_content: str | None
+    vector_content: List[float] | None
     importance: int
     created_at: datetime | None
     
@@ -17,7 +17,7 @@ class LongTermMemoryDTO:
         id: int | None = None,
         agent_id: int | None = None,
         content: Dict[str, Any] | None = None,
-        vector_content: str | None = None,
+        vector_content: List[float] | None = None,
         importance: int = 5,
         created_at: datetime | None = None
     ) -> None:

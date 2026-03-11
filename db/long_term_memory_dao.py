@@ -13,7 +13,7 @@ class LongTermMemoryDAO:
         session: AsyncSession,
         agent_id: int,
         content: Dict[str, Any],
-        vector_content: Optional[str] = None,
+        vector_content: Optional[List[float]] = None,
         importance: int = 5
     ) -> LongTermMemoryModel:
         """創建長期記憶"""
@@ -47,7 +47,7 @@ class LongTermMemoryDAO:
         session: AsyncSession,
         id: int,
         content: Optional[Dict[str, Any]] = None,
-        vector_content: Optional[str] = None,
+        vector_content: Optional[List[float]] = None,
         importance: Optional[int] = None
     ) -> Optional[LongTermMemoryModel]:
         """更新長期記憶"""
