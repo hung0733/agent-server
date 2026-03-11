@@ -4,8 +4,11 @@ from typing import Dict, Optional
 
 from sqlalchemy.future import select
 from agent.agent import Agent
+from db.conn_pool import ConnPool
+from db.long_term_memory_dao import LongTermMemoryDAO
 from db.prompt_dao import PromptDAO
 from dto.agent import AgentDTO
+from dto.long_term_memory import LongTermMemoryDTO
 from dto.message import MessageDTO
 from dto.prompt import PromptDTO
 from dto.session import SessionDTO
@@ -82,5 +85,16 @@ class BackendAgent(Agent):
 
             if content:
                 content = re.sub(r"```json|```", "", content)
-                print(content)
+                ConnPool.start_db_async_task(
+                    LongTermMemoryDAO().save_memory(
+                        agent=self,
+                        mem=LongTermMemoryDTO(
+                            content: Dict[str, Any]
+                        vector_content: str | None
+                        importance: int
+                        created_at: datetime | None
+                        ),
+                        message_db_ids=[msg.id for msg in msg_list or []],
+                    )
+                )
                 break

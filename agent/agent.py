@@ -61,7 +61,7 @@ class Agent:
         user_msg = MessageDTO.get_user_msg(user_input, is_think_mode)
         messages.append(user_msg.to_msg())
 
-        return self.send(self, messages, user_msg, is_think_mode)
+        return await self.send(messages, user_msg, is_think_mode)
 
     async def send(
         self,
