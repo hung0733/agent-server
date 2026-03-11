@@ -56,7 +56,6 @@ class PromptModel(Base):
     __tablename__ = "prompt"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    code = Column(String(50), unique=True, nullable=False)
     prompt_type = Column(String(50), nullable=False)
     prompt = Column(Text, nullable=False)
     retry_prompt = Column(Text, nullable=True)

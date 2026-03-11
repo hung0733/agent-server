@@ -1,6 +1,7 @@
-from typing import AsyncGenerator, Optional, Tuple, Union
+from typing import AsyncGenerator, Dict, Optional, Tuple, Union
 import uuid
 
+from fastapi import HTTPException
 import tiktoken
 
 from db.agent_dao import AgentDAO
@@ -33,6 +34,49 @@ class Agent:
         self.sys_prompt = (sys_prompt,)
         self.stream = stream
 
+    async def chat(
+        self, user_input: str, is_think_mode: bool = False
+    ) -> AsyncGenerator[ChatCompletionChunk, None]:
+        message_dao = MessageDAO()
+
+        # 1. 獲取歷史紀錄
+        async with GlobalVar.conn_pool.AsyncSessionLocal() as session:
+            historys = await message_dao.list_by_session(session, self.session_db_id)
+
+        # 2. 構建 messages
+        messages: list[Dict[str, str]] = []
+        if self.sys_prompt:
+            # 確保 sys_prompt 是字串而非 tuple
+            prompt_str = (
+                self.sys_prompt[0]
+                if isinstance(self.sys_prompt, tuple)
+                else self.sys_prompt
+            )
+            messages.append({"role": "system", "content": prompt_str})
+
+        for m in historys:
+            messages.append(MessageDTO.from_model(m).to_msg())
+
+        # 加入使用者當前輸入
+        user_msg = MessageDTO.get_user_msg(user_input, is_think_mode)
+        messages.append(user_msg.to_msg())
+
+        return self.send(self, messages, user_msg, is_think_mode)
+
+    async def send(
+        self,
+        messages: list[Dict[str, str]],
+        user_msg: MessageDTO,
+        is_think_mode: bool,
+        temperature: float = -1,
+    ):
+        return self.handleMsgResponse(
+            self,
+            is_think_mode,
+            user_msg,
+            await self.client.send(messages, is_think_mode, temperature),
+        )
+
     @staticmethod
     async def get_db_agent(
         agent_id: str, session_id: str = "default"
@@ -45,7 +89,6 @@ class Agent:
 
         agent_dto: Optional[AgentDTO] = None
         session_dto: Optional[SessionDTO] = None
-
         # 喺 DB 搵對應嘅 agent_id 同 session
         async with GlobalVar.conn_pool.AsyncSessionLocal() as session:
             db_agent = await agent_dao.get_by_agent_id(session, agent_id)
@@ -64,7 +107,61 @@ class Agent:
                 print(f"⚠️ Session {session_id} 唔存在喺資料庫。")
                 return (agent_dto, session_dto)
 
+        # 檢查 agent 是否存在
+        if not db_agent:
+            raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+
+        # 檢查 session 是否存在
+        if not db_session:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Session '{session_id}' not found for Agent '{agent_id}'",
+            )
+
         return (AgentDTO.from_model(db_agent), SessionDTO.from_model(db_session))
+
+    @staticmethod
+    async def getResponse(
+        agent: "Agent",
+        response: Union[ChatCompletion, AsyncGenerator[ChatCompletionChunk, None]],
+    ) -> Tuple[str, str]:
+        full_reasoning: str = ""
+        full_content: str = ""
+
+        if agent.stream:
+            # 4. 處理串流
+            async for chunk in response:
+                if chunk.choices:
+                    delta = chunk.choices[0].delta
+                    # 處理思考過程
+                    reasoning = getattr(delta, "reasoning_content", None)
+                    if reasoning:
+                        full_reasoning += reasoning
+                    # 處理回答內容
+                    if delta.content:
+                        full_content += delta.content
+        else:
+            # 2. 處理內部入 DB 用的數據
+            try:
+                # 1. 喺 yield 之前先將內容攞出嚟
+                if hasattr(response, "choices") and response.choices:
+                    msg_obj = response.choices[0].message
+                    msg_data = (
+                        msg_obj.model_dump() if hasattr(msg_obj, "model_dump") else {}
+                    )
+
+                    full_content = (
+                        msg_data.get("content") or getattr(msg_obj, "content", "") or ""
+                    )
+                    full_reasoning = (
+                        msg_data.get("reasoning_content")
+                        or getattr(msg_obj, "reasoning_content", "")
+                        or ""
+                    )
+            except Exception as e:
+                print(f"ERROR [Agent.py] Extraction failed: {str(e)}")
+
+        return (full_reasoning, full_content)
 
     @staticmethod
     async def handleMsgResponse(
@@ -73,8 +170,8 @@ class Agent:
         sendMsg: MessageDTO,
         response: Union[ChatCompletion, AsyncGenerator[ChatCompletionChunk, None]],
     ) -> AsyncGenerator[ChatCompletionChunk, None]:
-        full_reasoning = ""
-        full_content = ""
+        full_reasoning: str = ""
+        full_content: str = ""
 
         if agent.stream:
             # 4. 處理串流
@@ -90,32 +187,49 @@ class Agent:
                     # 處理回答內容
                     if delta.content:
                         full_content += delta.content
-            agent._prepare_save_messages_to_db(agent, sendMsg, is_think_mode, full_content, full_reasoning)  
-            
+            agent._prepare_save_messages_to_db(
+                agent, sendMsg, is_think_mode, full_content, full_reasoning
+            )
+
         else:
             # 2. 處理內部入 DB 用的數據
             try:
                 # 1. 喺 yield 之前先將內容攞出嚟
                 if hasattr(response, "choices") and response.choices:
                     msg_obj = response.choices[0].message
-                    msg_data = msg_obj.model_dump() if hasattr(msg_obj, "model_dump") else {}
-                    
-                    full_content = msg_data.get("content") or getattr(msg_obj, "content", "") or ""
-                    full_reasoning = msg_data.get("reasoning_content") or getattr(msg_obj, "reasoning_content", "") or ""
-                
-                print(f"DEBUG [Agent.py]: Content Length = {len(full_content)}, Reasoning Length = {len(full_reasoning)}")
-                
+                    msg_data = (
+                        msg_obj.model_dump() if hasattr(msg_obj, "model_dump") else {}
+                    )
+
+                    full_content = (
+                        msg_data.get("content") or getattr(msg_obj, "content", "") or ""
+                    )
+                    full_reasoning = (
+                        msg_data.get("reasoning_content")
+                        or getattr(msg_obj, "reasoning_content", "")
+                        or ""
+                    )
+
+                print(
+                    f"DEBUG [Agent.py]: Content Length = {len(full_content)}, Reasoning Length = {len(full_reasoning)}"
+                )
+
             except Exception as e:
                 print(f"ERROR [Agent.py] Extraction failed: {str(e)}")
-            
-            agent._prepare_save_messages_to_db(agent, sendMsg, is_think_mode, full_content, full_reasoning)    
+
+            agent._prepare_save_messages_to_db(
+                agent, sendMsg, is_think_mode, full_content, full_reasoning
+            )
             yield response
 
-
-
-
     @staticmethod
-    def _prepare_save_messages_to_db(agent: "Agent", sendMsg : MessageDTO, is_think_mode:bool, content: str, reasoning_content : str):
+    def _prepare_save_messages_to_db(
+        agent: "Agent",
+        sendMsg: MessageDTO,
+        is_think_mode: bool,
+        content: str,
+        reasoning_content: str,
+    ):
         messages: list[MessageDTO] = [sendMsg]
 
         if content:

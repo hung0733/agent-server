@@ -54,7 +54,10 @@ async def list_session_models(
     db: AsyncSession = Depends(get_db),
 ) -> ListModelsResponse:
     """獲取指定 Session 的可用模型列表"""
-    # TODO: 驗證 Session 是否存在（需要根據實際業務邏輯實現）
+
+    validate_session_id_format(session_id)
+    
+    
 
     return ListModelsResponse(object="list", data=AVAILABLE_MODELS)
 

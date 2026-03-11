@@ -11,14 +11,12 @@ class PromptDAO:
     async def create(
         self,
         session: AsyncSession,
-        code: str,
         prompt_type: str,
         prompt: str,
         retry_prompt: Optional[str] = None
     ) -> PromptModel:
         """創建 Prompt"""
         new_prompt = PromptModel(
-            code=code,
             prompt_type=prompt_type,
             prompt=prompt,
             retry_prompt=retry_prompt
@@ -35,10 +33,10 @@ class PromptDAO:
         )
         return result.scalar_one_or_none()
     
-    async def get_by_code(self, session: AsyncSession, code: str) -> Optional[PromptModel]:
+    async def get_by_code(self, session: AsyncSession, prompt_type: str) -> Optional[PromptModel]:
         """根據 code 獲取 Prompt"""
         result = await session.execute(
-            select(PromptModel).where(PromptModel.code == code)
+            select(PromptModel).where(PromptModel.prompt_type == prompt_type)
         )
         return result.scalar_one_or_none()
     

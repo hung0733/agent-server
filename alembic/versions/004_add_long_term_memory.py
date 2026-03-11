@@ -9,7 +9,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
-
+from pgvector.sqlalchemy import Vector
 
 # revision identifiers, used by Alembic.
 revision: str = '004'
@@ -19,13 +19,15 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    op.execute('CREATE EXTENSION IF NOT EXISTS vector')
+    
     # 1. 創建 long_term_memory 表
     op.create_table(
         "long_term_memory",
         sa.Column("id", sa.Integer(), nullable=False),
         sa.Column("agent_id", sa.Integer(), nullable=False),
         sa.Column("content", sa.JSON(), nullable=False),
-        sa.Column("vector_content", sa.Text(), nullable=True),  # pgvector vector(1024)
+        sa.Column("vector_content", Vector(1024), nullable=True),  # pgvector vector(1024)
         sa.Column("importance", sa.Integer(), server_default="5"),
         sa.Column("created_at", sa.TIMESTAMP(timezone=True), server_default=sa.func.now()),
         sa.PrimaryKeyConstraint("id", name="long_term_memory_pkey"),
