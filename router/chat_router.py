@@ -54,7 +54,7 @@ async def list_session_models(
 ) -> ListModelsResponse:
     """獲取指定 Session 的可用模型列表"""
     # TODO: 驗證 Session 是否存在（需要根據實際業務邏輯實現）
-    
+
     return ListModelsResponse(object="list", data=AVAILABLE_MODELS)
 
 
@@ -78,7 +78,9 @@ async def create_agent_chat_completion(
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
     if request.stream:
-        return StreamingResponse(_stream_chat_completion(agent, request), media_type="text/event-stream")
+        return StreamingResponse(
+            _stream_chat_completion(agent, request), media_type="text/event-stream"
+        )
     else:
         return await _non_stream_chat_completion(agent, request)
 
@@ -92,36 +94,44 @@ async def create_session_chat_completion(
     """指定 Session 的聊天完成端點（支援串流和非串流）"""
     # 從 session table 查找對應的 agent
     from db.models import SessionModel
-    
+
     # default session 使用 /agents/{agent_id}/v1/chat/completions 端點，不允許用此端點
     if session_id == "default":
-        raise HTTPException(status_code=400, detail="Use /agents/{agent_id}/v1/chat/completions for default session")
-    
+        raise HTTPException(
+            status_code=400,
+            detail="Use /agents/{agent_id}/v1/chat/completions for default session",
+        )
+
     try:
         # 查詢 session record
         result = await db.execute(
             select(SessionModel).where(SessionModel.session_id == session_id)
         )
         session_record = result.scalar_one_or_none()
-        
+
         if not session_record:
-            raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found")
-        
+            raise HTTPException(
+                status_code=404, detail=f"Session '{session_id}' not found"
+            )
+
         # 獲取對應的 agent_id
         agent_id = session_record.agent_id
-        
+
         # 需要將 agent_id (int) 轉換為 agent.agent_id (string)
         from db.models import AgentModel
-        result = await db.execute(
-            select(AgentModel).where(AgentModel.id == agent_id)
-        )
+
+        result = await db.execute(select(AgentModel).where(AgentModel.id == agent_id))
         agent_model = result.scalar_one_or_none()
-        
+
         if not agent_model:
-            raise HTTPException(status_code=404, detail=f"Agent for session '{session_id}' not found")
-        
+            raise HTTPException(
+                status_code=404, detail=f"Agent for session '{session_id}' not found"
+            )
+
         # 獲取 AgentV1 實例
-        agent = await AgentV1.get_agent(agent_id=agent_model.agent_id, session_id=session_id)
+        agent = await AgentV1.get_agent(
+            agent_id=agent_model.agent_id, session_id=session_id, stream=request.stream
+        )
     except HTTPException as e:
         raise e
     except Exception:
@@ -132,7 +142,9 @@ async def create_session_chat_completion(
         raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found")
 
     if request.stream:
-        return StreamingResponse(_stream_chat_completion(agent, request), media_type="text/event-stream")
+        return StreamingResponse(
+            _stream_chat_completion(agent, request), media_type="text/event-stream"
+        )
     else:
         return await _non_stream_chat_completion(agent, request)
 
@@ -153,15 +165,17 @@ async def _non_stream_chat_completion(
             break
 
     if not last_user_msg:
-        raise HTTPException(status_code=400, detail="No user message found in conversation")
+        raise HTTPException(
+            status_code=400, detail="No user message found in conversation"
+        )
 
     # 調用 Agent 的非串流方法，返回 (reasoning_content, content)
-    reasoning_content, content = await agent.chat_non_stream(last_user_msg, is_think_mode)
+    reasoning_content, content = await agent.chat(last_user_msg, is_think_mode)
 
     # 計算 token 使用量（簡單估算）
     prompt_tokens = sum(len(msg.content) for msg in request.messages) // 4
     completion_tokens = len(content) // 4
-    
+
     if reasoning_content:
         completion_tokens += len(reasoning_content) // 4
 
@@ -173,7 +187,11 @@ async def _non_stream_chat_completion(
         choices=[
             Choice(
                 index=0,
-                message=Message(role="assistant", reasoning_content=reasoning_content, content=content),
+                message=Message(
+                    role="assistant",
+                    reasoning_content=reasoning_content,
+                    content=content,
+                ),
                 finish_reason="stop",
             )
         ],
@@ -231,23 +249,27 @@ async def _stream_chat_completion(
     # 處理原始 response chunk（包含 reasoning_content 同 content）
     async for chunk in response_gen:
         # chunk 係 OpenAI response object，包含 choices[0].delta
-        if hasattr(chunk, 'choices') and chunk.choices:
+        if hasattr(chunk, "choices") and chunk.choices:
             delta = chunk.choices[0].delta
-            
+
             # 提取 reasoning_content
-            reasoning = getattr(delta, 'reasoning_content', None)
+            reasoning = getattr(delta, "reasoning_content", None)
             if reasoning:
-                reasoning_chunk = ChoiceDelta(role="assistant", reasoning_content=reasoning, content=None)
+                reasoning_chunk = ChoiceDelta(
+                    role="assistant", reasoning_content=reasoning, content=None
+                )
                 reasoning_response = ChatCompletionResponse(
                     id="chatcmpl-" + str(uuid.uuid4()),
                     object="chat.completion.chunk",
                     created=0,
                     model=request.model,
-                    choices=[Choice(index=0, delta=reasoning_chunk, finish_reason=None)],
+                    choices=[
+                        Choice(index=0, delta=reasoning_chunk, finish_reason=None)
+                    ],
                     usage=None,
                 )
                 yield "data: " + reasoning_response.model_dump_json() + "\n\n"
-            
+
             # 提取 content
             if delta.content:
                 final_chunk = ChoiceDelta(role="assistant", content=delta.content)
