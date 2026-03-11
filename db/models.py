@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, Integer, String, Text, ForeignKey, TIMESTAMP, func
+from sqlalchemy import JSON, Boolean, Column, Integer, String, Text, ForeignKey, TIMESTAMP, func
 from sqlalchemy.orm import declarative_base, relationship
 Base = declarative_base()
 
@@ -41,10 +41,16 @@ class MessageModel(Base):
     
     session_id = Column(Integer, ForeignKey("session.id"), nullable=False)
     
+    # 長期記憶關聯
+    long_term_mem_id = Column(Integer, ForeignKey("long_term_memory.id"), nullable=True, default=None)
+    
     token = Column(Integer, default=0, nullable=False)
 
     # 移除 agent_id 後，不再需要與 AgentModel 的反向關聯
     session = relationship("SessionModel", back_populates="messages") # 呢度要對應 SessionModel 嘅 messages
+    
+    # 長期記憶關聯
+    long_term_memory = relationship("LongTermMemoryModel", back_populates="messages")
 
 
 class PromptModel(Base):
@@ -55,3 +61,17 @@ class PromptModel(Base):
     prompt_type = Column(String(50), nullable=False)
     prompt = Column(Text, nullable=False)
     retry_prompt = Column(Text, nullable=True)
+
+
+class LongTermMemoryModel(Base):
+    __tablename__ = "long_term_memory"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)  # SERIAL
+    agent_id = Column(Integer, ForeignKey("agent.id"), nullable=False)
+    content = Column(JSON, nullable=False)  # JSONB in PostgreSQL
+    vector_content = Column(Text, nullable=True)  # vector(1024) - storing as text for pgvector compatibility
+    importance = Column(Integer, default=5)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+    # 反向關聯
+    messages = relationship("MessageModel", back_populates="long_term_memory")
