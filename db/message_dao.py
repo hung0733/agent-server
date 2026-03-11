@@ -1,9 +1,11 @@
-from typing import List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+from datetime import datetime
+from sqlalchemy import or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from datetime import datetime
 
-from db.models import MessageModel
+from db.models import MessageModel, SessionModel
+from dto.message import MessageDTO
 
 
 class MessageDAO:
@@ -73,6 +75,55 @@ class MessageDAO:
         
         result = await session.execute(query)
         return result.scalars().all()
+    
+    async def list_grouped_before_today(
+        self,
+        session: AsyncSession,
+        agent_db_id: int
+    ) -> List[Dict[str, Any]]:
+        """根據 agent_db_id 取得 default / session-* sessions 下於今日以前的訊息，並按 session + 日期分組"""
+        today_start = datetime.combine(datetime.now().date(), datetime.min.time())
+        
+        stmt = (
+            select(SessionModel.session_id, MessageModel)
+            .join(SessionModel, SessionModel.id == MessageModel.session_id)
+            .where(
+                SessionModel.agent_id == agent_db_id,
+                MessageModel.long_term_mem_id.is_(None),
+                MessageModel.create_date < today_start,
+                or_(
+                    SessionModel.session_id == "default",
+                    SessionModel.session_id.startswith("session-")
+                )
+            )
+            .order_by(SessionModel.session_id.asc(), MessageModel.create_date.asc())
+        )
+        
+        result = await session.execute(stmt)
+        rows = result.all()
+        
+        grouped: Dict[Tuple[str, str], List[MessageDTO]] = {}
+        ordered_keys: List[Tuple[str, str]] = []
+        
+        for session_identifier, message in rows:
+            date_key = message.create_date.date().isoformat()
+            group_key = (session_identifier, date_key)
+            message_dto = MessageDTO.from_model(message)
+            
+            if group_key not in grouped:
+                grouped[group_key] = []
+                ordered_keys.append(group_key)
+            
+            grouped[group_key].append(message_dto)
+        
+        return [
+            {
+                "session_id": session_identifier,
+                "date": date_key,
+                "messages": grouped[(session_identifier, date_key)],
+            }
+            for session_identifier, date_key in ordered_keys
+        ]
     
     async def update(self, session: AsyncSession, id: int, **kwargs) -> MessageModel:
         """更新 Message (根據 DB ID)"""

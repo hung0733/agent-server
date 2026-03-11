@@ -9,16 +9,12 @@ from llm.brain_agent import BrainAgent
 
 
 class BackendAgent(Agent):
-    """後台 Agent，每 5 分鐘 loop agent table 的 agent id"""
-    
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.brain = BrainAgent(self.stream)
 
     @classmethod
-    async def get_agent(
-        cls, agent_id: str, session_id: str = "default", stream: bool = True
-    ):
+    async def get_agent(cls, agent_id: str, session_id: str):
         agent: Optional[AgentDTO] = None
         session: Optional[SessionDTO] = None
 
@@ -32,7 +28,5 @@ class BackendAgent(Agent):
             session_id=session.session_id,
             name=agent.name,  # type: ignore
             sys_prompt=agent.sys_prompt,  # type: ignore
-            stream=stream,
+            stream=False,
         )
-
-
