@@ -16,38 +16,31 @@ _global_lock = asyncio.Lock()
 
 
 async def run_backend_agents():
-    """每 5 分鐘 loop agent table 的 agent id，執行後台任務
+    """每小時執行一次後台任務
 
-    執行時間：每小時的 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55 分
+    執行時間：每小時的 0 分
     同一時間只能有 1 個實例在運行（通過全局鎖機制確保）
     """
     while True:
         try:
-            # 等待到下一個 5 分鐘標記
+            # 等待到下一個整點
             current_time = datetime.now()
 
-            # 計算距離下一個 5 分鐘標記還需要等待的時間
+            # 計算距離下一個整點還需要等待的時間
             minute = current_time.minute
-            seconds = current_time.second
+            second = current_time.second
+            microsecond = current_time.microsecond
 
-            # 找出下一個要執行的 5 分鐘標記（5, 10, 15, ...）
-            next_marker = ((minute // 5) + 1) * 5
-
-            # 如果當前分數已經是 5 的倍數，則等待到下一輪
-            if minute % 5 == 0 and seconds == 0:
-                wait_minutes = 5
-            else:
-                wait_minutes = next_marker - minute
-
-            # 計算需要等待的秒數（包括當前的秒數）
-            wait_seconds = (wait_minutes * 60) - seconds
+            # 計算需要等待的秒數
+            wait_seconds = (60 - minute) * 60 - second
+            wait_microseconds = -microsecond
 
             print(
-                f"Current time: {current_time}, waiting for {wait_minutes} minutes until minute {next_marker}"
+                f"Current time: {current_time}, waiting for {60 - minute} minutes until next hour"
             )
 
-            # 等待到下一個 5 分鐘標記
-            await asyncio.sleep(wait_seconds)
+            # 等待到下一個整點
+            await asyncio.sleep(wait_seconds + wait_microseconds / 1000000)
 
             # 使用全局鎖確保同一時間只有一個實例在運行
             async with _global_lock:
@@ -76,9 +69,46 @@ async def run_backend_agents():
 
 
 async def start_backend_agents_loop():
-    """啟動後台 Agent 循環"""
+    """啟動後台 Agent 循環
+
+    1. 程式啟動時無條件執行一次
+    2. 之後每小時執行一次
+    """
+    # 程式啟動時先執行一次
+    print("Starting backend agents task at program startup")
+    await run_backend_agents_once()
+
+    # 之後每小時執行一次
     task = asyncio.create_task(run_backend_agents())
     return task
+
+
+async def run_backend_agents_once():
+    """執行一次後台任務（不進行循環）"""
+    try:
+        async with _global_lock:
+            print(
+                f"Acquired global lock at {datetime.now()}, starting backend agents task"
+            )
+
+            agents: list[AgentDTO] = []
+            # 執行後台任務
+            async with GlobalVar.conn_pool.AsyncSessionLocal() as session:
+                agent_dao = AgentDAO()
+                agents = [
+                    AgentDTO.from_model(agent_model)
+                    for agent_model in await agent_dao.list_all(session) or []
+                ]
+
+            for agent_dto in agents:
+                print(f"Processing backend agent: {agent_dto.agent_id}")
+                await init_agent_task(agent_dto)
+                await summary_distillation_task(agent_dto)
+
+            print("Backend agents task completed")
+
+    except Exception as e:
+        print(f"Error in backend agents task: {e}")
 
 
 async def init_agent_task(agent_dto: AgentDTO):

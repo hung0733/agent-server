@@ -1,4 +1,4 @@
-from sqlalchemy import JSON, Boolean, Column, Integer, String, Text, ForeignKey, TIMESTAMP, func
+from sqlalchemy import JSON, Boolean, Column, Integer, String, Text, ForeignKey, TIMESTAMP, func, Float
 from sqlalchemy.orm import declarative_base, relationship
 from pgvector.sqlalchemy import Vector
 Base = declarative_base()
@@ -92,3 +92,19 @@ class MemoryBlockModel(Base):
     
     # 反向關聯
     agent = relationship("AgentModel", back_populates="memory_blocks")
+
+
+class SoulMemoryModel(Base):
+    __tablename__ = "soul_memory"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)  # SERIAL
+    category = Column(String(20), nullable=False)  # 'soul', 'identity', 'user_profile'
+    mem_key = Column(String(100), nullable=False)  # 用於 UPSERT 的唯一鍵
+    content = Column(Text, nullable=False)
+    embedding = Column(Vector(1024), nullable=True)  # vector(1024) - BGE-M3 向量
+    confidence = Column(Float, default=0.1)
+    hit_count = Column(Integer, default=1)
+    status = Column(String(20), default='staging')  # 'staging', 'active', 'archived'
+    last_seen = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    metadata = Column(JSON, nullable=True)  # JSONB
