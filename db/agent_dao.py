@@ -73,3 +73,13 @@ class AgentDAO:
         await session.delete(agent)
         await session.flush()
         return True
+    
+    async def set_inited(self, session: AsyncSession, id: int) -> bool:
+        """設置 agent 的 is_inited 為 true"""
+        agent = await self.get_by_id(session, id)
+        if not agent:
+            return False
+        
+        agent.is_inited = True
+        await session.flush()
+        return True

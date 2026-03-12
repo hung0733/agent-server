@@ -66,6 +66,7 @@ async def run_backend_agents():
 
                 for agent_dto in agents:
                     print(f"Processing backend agent: {agent_dto.agent_id}")
+                    await init_agent_task(agent_dto)
                     await summary_task(agent_dto)
 
                 print("Backend agents task completed")
@@ -78,6 +79,24 @@ async def start_backend_agents_loop():
     """啟動後台 Agent 循環"""
     task = asyncio.create_task(run_backend_agents())
     return task
+
+
+async def init_agent_task(agent_dto: AgentDTO):
+    if agent_dto.is_inited:
+        return
+
+    session_id: str = "init_agent-" + datetime.now().strftime("%Y%m%m")
+    async with GlobalVar.conn_pool.AsyncSessionLocal() as session:
+        await SessionDAO().make_sure_exist(
+            session=session, agent_db_id=agent_dto.id, session_id=session_id
+        )
+
+    agent: ArchiveGhost | None = await ArchiveGhost.get_agent(
+        agent_id=agent_dto.agent_id, session_id=session_id
+    )
+
+    print(f"Start Init Agent: {agent_dto.agent_id}")
+    await agent.init_agent()
 
 
 async def summary_task(agent_dto: AgentDTO):
