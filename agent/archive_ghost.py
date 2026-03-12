@@ -46,27 +46,27 @@ class ArchiveGhost(Agent):
                 is_inited=agent.is_inited,
             )
         return None
-    
+
     async def init_agent(self):
         if self.is_inited:
             return
-        
+
         dto: PromptDTO
         async with GlobalVar.conn_pool.AsyncSessionLocal() as session:
             dto = PromptDTO.from_model(
                 await PromptDAO().get_by_code(session, "init_agent")
             )
-            
-        user_input : str = dto.prompt + self.sys_prompt
-        
+
+        user_input: str = dto.prompt + self.sys_prompt
+
         messages: list[dict] = []
         user_msg: MessageDTO = MessageDTO.get_user_msg(user_input, True)
         messages.append(user_msg.to_msg())
-        
+
         data: Optional[List[Dict[str, Any]]] = None
         for i in range(3):
             temperature: float = 0.1 * i
-            
+
             print("Analyse Genesis Message\n")
             (
                 _,
@@ -87,42 +87,58 @@ class ArchiveGhost(Agent):
                 if not data:
                     continue
                 break
-        
+
         if data:
             print("Collect JSON Records\n")
-            mem_list : list[SoulMemoryDTO] = []
+            mem_list: list[SoulMemoryDTO] = []
             if "law_updates" in data:
                 for item in data["law_updates"]:
-                    mem_list.append(SoulMemoryDTO.from_json(
-                        category="law",
-                        data=item,
-                        embedding_vector=await self._embed_text(item.get("content", ""))
-                    ))
-        
+                    mem_list.append(
+                        SoulMemoryDTO.from_json(
+                            category="law",
+                            data=item,
+                            embedding_vector=await self._embed_text(
+                                item.get("content", "")
+                            ),
+                        )
+                    )
+
             if "soul_updates" in data:
                 for item in data["soul_updates"]:
-                    mem_list.append(SoulMemoryDTO.from_json(
-                        category="soul",
-                        data=item,
-                        embedding_vector=await self._embed_text(item.get("content", ""))
-                    ))
-        
+                    mem_list.append(
+                        SoulMemoryDTO.from_json(
+                            category="soul",
+                            data=item,
+                            embedding_vector=await self._embed_text(
+                                item.get("content", "")
+                            ),
+                        )
+                    )
+
             if "identity_updates" in data:
                 for item in data["identity_updates"]:
-                    mem_list.append(SoulMemoryDTO.from_json(
-                        category="identity",
-                        data=item,
-                        embedding_vector=await self._embed_text(item.get("content", ""))
-                    ))
-        
+                    mem_list.append(
+                        SoulMemoryDTO.from_json(
+                            category="identity",
+                            data=item,
+                            embedding_vector=await self._embed_text(
+                                item.get("content", "")
+                            ),
+                        )
+                    )
+
             if "user_profile_updates" in data:
                 for item in data["user_profile_updates"]:
-                    mem_list.append(SoulMemoryDTO.from_json(
-                        category="user_profile",
-                        data=item,
-                        embedding_vector=await self._embed_text(item.get("content", ""))
-                    ))
-                    
+                    mem_list.append(
+                        SoulMemoryDTO.from_json(
+                            category="user_profile",
+                            data=item,
+                            embedding_vector=await self._embed_text(
+                                item.get("content", "")
+                            ),
+                        )
+                    )
+
             if mem_list:
                 print("Save init memory to Database")
                 async with GlobalVar.conn_pool.AsyncSessionLocal() as session:
@@ -135,12 +151,11 @@ class ArchiveGhost(Agent):
                             embedding=mem.embedding,
                             confidence=mem.confidence,
                             status=mem.status,
-                            metadata=mem.meta_data
+                            metadata=mem.meta_data,
                         )
                     await AgentDAO().set_inited(session, self.db_id)
                     await session.commit()
                     print("Success to init memory")
-        
 
     async def summary(self, msg_list: list[MessageDTO]):
         dto: PromptDTO
@@ -213,7 +228,7 @@ class ArchiveGhost(Agent):
                     )
                 )
                 break
-            
+
     async def distillation(self, msg_list: list[MessageDTO]):
         dto: PromptDTO
         async with GlobalVar.conn_pool.AsyncSessionLocal() as session:
@@ -291,7 +306,12 @@ class ArchiveGhost(Agent):
         try:
             data = json.loads(content)
             if isinstance(data, dict):
-                if "law_updates" in data or "soul_updates" in data or "identity_updates" in data or "user_profile_updates" in data:
+                if (
+                    "law_updates" in data
+                    or "soul_updates" in data
+                    or "identity_updates" in data
+                    or "user_profile_updates" in data
+                ):
                     return data
             elif isinstance(data, list):
                 return data
@@ -356,3 +376,38 @@ class ArchiveGhost(Agent):
             if msg_ids:
                 await MessageDAO().mark_as_summarized(session, msg_ids)
             await session.commit()
+
+    @staticmethod
+    async def assemble_system_prompt():
+        memories = {"law": [], "soul": [], "identity": [], "user_profile": []}
+        async with GlobalVar.conn_pool.AsyncSessionLocal() as session:
+            mem_list = await SoulMemoryDAO().get_core_memory(session)
+            for mem in mem_list:
+                if mem.category in memories:
+                    memories[mem.category].append(mem.content)
+        
+        prompt_segments = []
+        
+        # --- 第一層：定律 (STRICT LAWS) ---
+        if memories['law']:
+            prompt_segments.append("### [STRICT SYSTEM LAWS - DO NOT VIOLATE]")
+            for law in memories['law']:
+                prompt_segments.append(f"- {law}")
+            prompt_segments.append("") # 換行
+
+        # --- 第二層：角色與靈魂 (IDENTITY & SOUL) ---
+        prompt_segments.append("### [AGENT IDENTITY & PERSONA]")
+        for soul in memories['soul']:
+            prompt_segments.append(f"- {soul}")
+        for identity in memories['identity']:
+            prompt_segments.append(f"- {identity}")
+        prompt_segments.append("")
+
+        # --- 第三層：用戶背景 (USER CONTEXT) ---
+        # 註：喺實際對話中，呢部分應該由 Reranker 篩選相關嘅，目前先全部列出
+        if memories['user_profile']:
+            prompt_segments.append("### [USER CONTEXT & BACKGROUND]")
+            for profile in memories['user_profile']:
+                prompt_segments.append(f"- {profile}")
+
+        return "\n".join(prompt_segments)

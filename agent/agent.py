@@ -29,7 +29,7 @@ class Agent:
         name: str,
         sys_prompt: str,
         stream: bool,
-        is_inited:bool
+        is_inited: bool,
     ):
         self.db_id = db_id
         self.agent_id = agent_id
@@ -49,21 +49,25 @@ class Agent:
 
         # 1. 獲取歷史紀錄
         async with GlobalVar.conn_pool.AsyncSessionLocal() as session:
-            historys = await message_dao.get_unsummarized_messages(session, self.session_db_id)
+            historys = await message_dao.get_unsummarized_messages(
+                session, self.session_db_id
+            )
 
         # 2. 構建 messages
         messages: list[Dict[str, str]] = []
-        
+
         # 決定 system prompt
-        prompt_str: str = ""
-        
-        if self.sys_prompt:
+        from agent.archive_ghost import ArchiveGhost
+
+        prompt_str: str = await ArchiveGhost.assemble_system_prompt()
+
+        if not prompt_str and self.sys_prompt:
             prompt_str = (
                 self.sys_prompt
                 if isinstance(self.sys_prompt, str)
                 else str(self.sys_prompt)
             )
-        
+
         if prompt_str:
             messages.append({"role": "system", "content": prompt_str})
 
@@ -76,46 +80,49 @@ class Agent:
         query_vector = await embedding_agent.embed_query(user_input)
         embed_time = time.time() - embed_start
         print(f"[Embedding] 生成 query vector 用咗 {embed_time:.3f} 秒")
-        
+
         # 2. 用 Cosine Distance 搵出最接近的 10-15 條（相似度 > 0.45）
         similar_memories = await long_term_memory_dao.get_similar_memories(
             session, self.db_id, query_vector, top_k=15, similarity_threshold=0.45
         )
-        
+
         # 初始化 pend_save（無論有無相似記憶都需要）
         pend_save: list[MessageDTO] = []
-        
+
         # 3. 將呢 10 幾條記憶連同用戶問題，一齊 send 去 Reranking
         if similar_memories:
-            documents = [json.dumps(mem.content, ensure_ascii=False) for mem in similar_memories]
-            
+            documents = [
+                json.dumps(mem.content, ensure_ascii=False) for mem in similar_memories
+            ]
+
             # 4. 攞 Reranker 分數最高嗰 3-5 條
             rerank_start = time.time()
             rerank_results = await embedding_agent.rerank(
-                query=user_input,
-                documents=documents,
-                top_n=3
+                query=user_input, documents=documents, top_n=3
             )
             rerank_time = time.time() - rerank_start
             print(f"[Rerank] Reranking 用咗 {rerank_time:.3f} 秒")
-            
+
             # 過濾：只保留 score > -7.0 的結果
-            filtered_results = [(idx, score) for idx, score in rerank_results if score > -7.0]
+            filtered_results = [
+                (idx, score) for idx, score in rerank_results if score > -7.0
+            ]
             print(f"[Rerank] 過濾後剩餘 {len(filtered_results)} 條記憶 (score > -7.0)")
-            
+
             # 5. 將 assistant_message 放入 user_msg 之前
             if filtered_results:
                 # 組合最高分數的記憶作為 context
                 context_parts = []
                 for idx, score in filtered_results:
-                    context_parts.append(f"[相關記憶] {documents[idx]} (相關性：{score:.2f})")
-                
+                    context_parts.append(
+                        f"[相關記憶] {documents[idx]} (相關性：{score:.2f})"
+                    )
+
                 context_text = "\n\n".join(context_parts)
                 print(context_text)
                 # 創建 assistant_message 的 MessageDTO
                 memory_msg = MessageDTO.get_assistant_msg(
-                    f"根據相關記憶，我找到以下資訊：\n\n{context_text}",
-                    is_think_mode
+                    f"根據相關記憶，我找到以下資訊：\n\n{context_text}", is_think_mode
                 )
                 messages.append(memory_msg.to_msg())
                 pend_save.append(memory_msg)

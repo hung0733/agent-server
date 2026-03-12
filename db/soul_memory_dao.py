@@ -56,6 +56,13 @@ class SoulMemoryDAO:
         )
         return result.scalars().all()
     
+    async def get_core_memory(self, session: AsyncSession) -> List[SoulMemoryModel]:
+        """根據 category 獲取所有靈魂記憶"""
+        result = await session.execute(
+            select(SoulMemoryModel).where(SoulMemoryModel.status == "core")
+        )
+        return result.scalars().all()
+    
     async def upsert(
         self,
         session: AsyncSession,
