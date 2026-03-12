@@ -1,3 +1,5 @@
+
+from datetime import datetime
 import json
 import os
 import re
@@ -410,4 +412,4 @@ class ArchiveGhost(Agent):
             for profile in memories['user_profile']:
                 prompt_segments.append(f"- {profile}")
 
-        return "\n".join(prompt_segments)
+        return f"當前時間：{datetime.now().isoformat}\n\n" + "\n".join(prompt_segments)
