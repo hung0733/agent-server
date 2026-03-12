@@ -28,7 +28,7 @@ class SoulMemoryDAO:
             embedding=embedding,
             confidence=confidence,
             status=status,
-            metadata=metadata
+            meta_data=metadata
         )
         session.add(new_memory)
         await session.flush()
@@ -78,7 +78,7 @@ class SoulMemoryDAO:
             existing.confidence = confidence
             existing.status = status
             if metadata is not None:
-                existing.metadata = metadata
+                existing.meta_data = metadata
             existing.hit_count += 1
             await session.flush()
             await session.refresh(existing)
@@ -124,7 +124,7 @@ class SoulMemoryDAO:
         if status is not None:
             existing.status = status
         if metadata is not None:
-            existing.metadata = metadata
+            existing.meta_data = metadata
         
         existing.hit_count += 1
         await session.flush()

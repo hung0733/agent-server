@@ -91,4 +91,4 @@ class SoulMemoryModel(Base):
     status = Column(String(20), default='staging')  # 'staging', 'active', 'archived'
     last_seen = Column(TIMESTAMP(timezone=True), server_default=func.now())
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
-    metadata = Column(JSON, nullable=True)  # JSONB
+    meta_data = Column('metadata', JSON, nullable=True)  # JSONB

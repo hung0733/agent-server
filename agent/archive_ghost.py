@@ -9,10 +9,12 @@ from db.conn_pool import ConnPool
 from db.long_term_memory_dao import LongTermMemoryDAO
 from db.message_dao import MessageDAO
 from db.prompt_dao import PromptDAO
+from db.soul_memory_dao import SoulMemoryDAO
 from dto.agent import AgentDTO
 from dto.message import MessageDTO
 from dto.prompt import PromptDTO
 from dto.session import SessionDTO
+from dto.soul_memory import SoulMemoryDTO
 from global_var import GlobalVar
 from llm.brain_agent import BrainAgent
 from llm.embedding_agent import EmbeddingAgent
@@ -61,9 +63,11 @@ class ArchiveGhost(Agent):
         user_msg: MessageDTO = MessageDTO.get_user_msg(user_input, True)
         messages.append(user_msg.to_msg())
         
-        records: Optional[List[Dict[str, Any]]] = None
+        data: Optional[List[Dict[str, Any]]] = None
         for i in range(3):
             temperature: float = 0.1 * i
+            
+            print("Analyse Genesis Message\n")
             (
                 _,
                 content,
@@ -79,12 +83,63 @@ class ArchiveGhost(Agent):
 
             if content:
                 content = re.sub(r"```json|```", "", content)
-                print(content)
-                records = self._load_records(content)
-                if not records:
+                data = self._load_memory_records(content)
+                if not data:
                     continue
                 break
         
+        if data:
+            print("Collect JSON Records\n")
+            mem_list : list[SoulMemoryDTO] = []
+            if "law_updates" in data:
+                for item in data["law_updates"]:
+                    mem_list.append(SoulMemoryDTO.from_json(
+                        category="law",
+                        data=item,
+                        embedding_vector=await self._embed_text(item.get("content", ""))
+                    ))
+        
+            if "soul_updates" in data:
+                for item in data["soul_updates"]:
+                    mem_list.append(SoulMemoryDTO.from_json(
+                        category="soul",
+                        data=item,
+                        embedding_vector=await self._embed_text(item.get("content", ""))
+                    ))
+        
+            if "identity_updates" in data:
+                for item in data["identity_updates"]:
+                    mem_list.append(SoulMemoryDTO.from_json(
+                        category="identity",
+                        data=item,
+                        embedding_vector=await self._embed_text(item.get("content", ""))
+                    ))
+        
+            if "user_profile_updates" in data:
+                for item in data["user_profile_updates"]:
+                    mem_list.append(SoulMemoryDTO.from_json(
+                        category="user_profile",
+                        data=item,
+                        embedding_vector=await self._embed_text(item.get("content", ""))
+                    ))
+                    
+            if mem_list:
+                print("Save init memory to Database")
+                async with GlobalVar.conn_pool.AsyncSessionLocal() as session:
+                    for mem in mem_list:
+                        await SoulMemoryDAO().create(
+                            session=session,
+                            category=mem.category,
+                            mem_key=mem.mem_key,
+                            content=mem.content,
+                            embedding=mem.embedding,
+                            confidence=mem.confidence,
+                            status=mem.status,
+                            metadata=mem.meta_data
+                        )
+                    await AgentDAO().set_inited(session, self.db_id)
+                    await session.commit()
+                    print("Success to init memory")
         
 
     async def summary(self, msg_list: list[MessageDTO]):
@@ -231,6 +286,20 @@ class ArchiveGhost(Agent):
                 )
                 break
 
+    def _load_memory_records(self, content: str) -> Optional[List[Dict[str, Any]]]:
+        """從 JSON 內容中載入 records 陣列"""
+        try:
+            data = json.loads(content)
+            if isinstance(data, dict):
+                if "law_updates" in data or "soul_updates" in data or "identity_updates" in data or "user_profile_updates" in data:
+                    return data
+            elif isinstance(data, list):
+                return data
+            print("memory payload does not contain valid records.")
+        except json.JSONDecodeError as exc:
+            print(f"Failed to parse summary JSON: {exc}")
+        return None
+
     def _load_records(self, content: str) -> Optional[List[Dict[str, Any]]]:
         """從 JSON 內容中載入 records 陣列"""
         try:
@@ -245,7 +314,7 @@ class ArchiveGhost(Agent):
                     return [data]
             elif isinstance(data, list):
                 return data
-            print("Summary payload does not contain valid records.")
+            print("payload does not contain valid records.")
         except json.JSONDecodeError as exc:
             print(f"Failed to parse summary JSON: {exc}")
         return None
