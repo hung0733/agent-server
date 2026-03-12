@@ -101,6 +101,9 @@ class Agent:
             session, self.db_id, query_vector, top_k=15, similarity_threshold=0.45
         )
         
+        # 初始化 pend_save（無論有無相似記憶都需要）
+        pend_save: list[MessageDTO] = []
+        
         # 3. 將呢 10 幾條記憶連同用戶問題，一齊 send 去 Reranking
         if similar_memories:
             documents = [json.dumps(mem.content, ensure_ascii=False) for mem in similar_memories]
@@ -118,8 +121,6 @@ class Agent:
             # 過濾：只保留 score > -7.0 的結果
             filtered_results = [(idx, score) for idx, score in rerank_results if score > -7.0]
             print(f"[Rerank] 過濾後剩餘 {len(filtered_results)} 條記憶 (score > -7.0)")
-            
-            pend_save: list[MessageDTO] = []
             
             # 5. 將 assistant_message 放入 user_msg 之前
             if filtered_results:
