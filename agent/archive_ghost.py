@@ -65,7 +65,79 @@ class ArchiveGhost(Agent):
             for msg in msg_list:
                 if msg.msg_type in ["user_message", "assistant_message"]:
                     user_input += msg.date.isoformat(sep=" ", timespec="seconds") + "\n"
-                    user_input += msg.sent_by + "\n"
+                    user_input += msg.sent_by + ":\n"
+                    user_input += msg.content + "\n\n"
+
+            messages: list[dict] = []
+            messages.append({"role": "system", "content": sys_prompt})
+            user_msg: MessageDTO = MessageDTO.get_user_msg(user_input, True)
+            messages.append(user_msg.to_msg())
+
+            content: str = ""
+
+            (
+                _,
+                content,
+            ) = await self.getResponse(
+                agent=self,
+                response=await self.send(
+                    messages=messages,
+                    pend_save=[user_msg],
+                    is_think_mode=True,
+                    temperature=temperature,
+                ),
+            )
+
+            if content:
+                content = re.sub(r"```json|```", "", content)
+
+                records = self._load_records(content)
+                if not records:
+                    continue
+
+                # 收集所有 records 的數據
+                records_data: List[tuple] = []
+                for record in records:
+                    embedding_text = str(record.get("embedding_text", "")).strip()
+                    importance: int = self._parse_importance(
+                        record.get("importance_score")
+                    )
+
+                    vector: Optional[List[float]] = None
+                    if embedding_text:
+                        vector = await self._embed_text(embedding_text)
+
+                    records_data.append((record, vector, importance))
+
+                # 同一個 JSON 的所有 records 在同一個 transaction 中 commit
+                ConnPool.start_db_async_task(
+                    self._save_long_term_memories_batch(
+                        records_data,
+                        [msg.id for msg in msg_list],
+                    )
+                )
+                break
+            
+    async def distillation(self, msg_list: list[MessageDTO]):
+        dto: PromptDTO
+        async with GlobalVar.conn_pool.AsyncSessionLocal() as session:
+            dto = PromptDTO.from_model(
+                await PromptDAO().get_by_code(session, "summary")
+            )
+
+        sys_prompt: str = dto.prompt
+        retry_prompt: str = dto.retry_prompt or ""
+
+        for i in range(3):
+            temperature: float = 0.1 * i
+            if i == 2:
+                sys_prompt = retry_prompt
+
+            user_input: str = ""
+            for msg in msg_list:
+                if msg.msg_type in ["user_message", "assistant_message"]:
+                    user_input += msg.date.isoformat(sep=" ", timespec="seconds") + "\n"
+                    user_input += msg.sent_by + ":\n"
                     user_input += msg.content + "\n\n"
 
             messages: list[dict] = []

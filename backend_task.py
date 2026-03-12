@@ -67,7 +67,7 @@ async def run_backend_agents():
                 for agent_dto in agents:
                     print(f"Processing backend agent: {agent_dto.agent_id}")
                     await init_agent_task(agent_dto)
-                    await summary_task(agent_dto)
+                    await summary_distillation_task(agent_dto)
 
                 print("Backend agents task completed")
 
@@ -99,7 +99,7 @@ async def init_agent_task(agent_dto: AgentDTO):
     await agent.init_agent()
 
 
-async def summary_task(agent_dto: AgentDTO):
+async def summary_distillation_task(agent_dto: AgentDTO):
 
     grouped_messages: List[Dict[str, Any]] = []
     session_id: str = "summary-" + datetime.now().strftime("%Y%m%m")
@@ -125,3 +125,5 @@ async def summary_task(agent_dto: AgentDTO):
                 messages: List[MessageDTO] = e["messages"]
                 print(f"Start Summary Message: {date} {target_session_id}")
                 await agent.summary(messages)
+                print(f"Start Reflection & Distillation: {date} {target_session_id}")
+                await agent.distillation(messages)
