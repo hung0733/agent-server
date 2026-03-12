@@ -25,14 +25,16 @@ class Agent:
         name: str,
         sys_prompt: str,
         stream: bool,
+        is_inited:bool
     ):
         self.db_id = db_id
         self.agent_id = agent_id
         self.session_db_id = session_db_id
         self.session_id = session_id
         self.name = name
-        self.sys_prompt = (sys_prompt,)
+        self.sys_prompt = sys_prompt
         self.stream = stream
+        self.is_inited = is_inited
 
     async def chat(
         self, user_input: str, is_think_mode: bool = False
@@ -48,7 +50,7 @@ class Agent:
         if self.sys_prompt:
             # 確保 sys_prompt 是字串而非 tuple
             prompt_str = (
-                self.sys_prompt[0]
+                self.sys_prompt
                 if isinstance(self.sys_prompt, tuple)
                 else self.sys_prompt
             )

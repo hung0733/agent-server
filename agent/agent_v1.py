@@ -29,4 +29,5 @@ class AgentV1(Agent):
             name=agent.name,
             sys_prompt=agent.sys_prompt,
             stream=stream,
+            is_inited=agent.is_inited,
         )
