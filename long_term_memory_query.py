@@ -32,6 +32,7 @@ from llm.embedding_agent import EmbeddingAgent
 from db.long_term_memory_dao import LongTermMemoryDAO
 from db.conn_pool import ConnPool
 from sqlalchemy.ext.asyncio import AsyncSession
+from agent.routing_agent import RoutingAgent
 
 
 class LongTermMemoryQueryTool:
@@ -47,6 +48,7 @@ class LongTermMemoryQueryTool:
         self.embedding_agent = EmbeddingAgent()
         self.memory_dao = LongTermMemoryDAO()
         self.conn_pool = ConnPool()
+        self.routing_agent = RoutingAgent()
     
     async def read_user_input(self) -> str:
         """讀取用戶輸入，支持 Ctrl+D 發送
@@ -190,14 +192,22 @@ class LongTermMemoryQueryTool:
             print("❌ 查詢文本為空")
             return []
         
-        # 步驟 1: 將查詢文本轉換為 vector
-        print("\n⏳ 正在生成查詢向量...")
-        query_vector = await self.embedding_agent.embed_query(query_text)
-        print(f"✅ 向量生成完成，維度：{len(query_vector)}")
-        
-        # 步驟 2: 從數據庫獲取相似記憶（相似度 > 0.45）
-        print(f"\n⏳ 正在從數據庫檢索最相似的記憶...（相似度 > 0.45）")
+        # 步驟 1: 使用 RoutingAgent 分析搜索關鍵字
+        print("\n⏳ 正在使用 RoutingAgent 分析搜索關鍵字...")
         async with self.conn_pool.AsyncSessionLocal() as session:
+            keyword = await self.routing_agent.analyse_search_keyword(
+                session=session,
+                user_input=query_text
+            )
+            print(f"✅ 關鍵字分析完成：{keyword}")
+            
+            # 步驟 2: 將關鍵字轉換為 vector
+            print("\n⏳ 正在生成查詢向量...")
+            query_vector = await self.embedding_agent.embed_query(keyword)
+            print(f"✅ 向量生成完成，維度：{len(query_vector)}")
+            
+            # 步驟 3: 從數據庫獲取相似記憶（相似度 > 0.45）
+            print(f"\n⏳ 正在從數據庫檢索最相似的記憶...（相似度 > 0.45）")
             similar_memories = await self.get_similar_memories(
                 session=session,
                 query_vector=query_vector,
@@ -211,15 +221,15 @@ class LongTermMemoryQueryTool:
             print("⚠️ 未找到任何相似記憶")
             return []
         
-        # 步驟 3: 對記憶進行 reranking
+        # 步驟 4: 對記憶進行 reranking（使用原始查詢文本）
         print("\n⏳ 正在進行 Reranking...")
         rerank_results = await self.rerank_memories(
-            query=query_text,
+            query=keyword,
             memories=similar_memories
         )
         print(f"✅ Reranking 完成")
         
-        # 步驟 4: 組合結果
+        # 步驟 5: 組合結果
         final_results = []
         for idx, score in rerank_results:
             mem = similar_memories[idx]
@@ -285,6 +295,7 @@ class LongTermMemoryQueryTool:
         """關閉資源"""
         await self.embedding_agent.close()
         await self.conn_pool.dispose()
+        await self.routing_agent.close()
 
 
 async def main():
