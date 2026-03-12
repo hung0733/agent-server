@@ -13,6 +13,7 @@ class AgentModel(Base):
     
     # 修正 1：分開命名屬性，唔好重複用 messages
     sessions = relationship("SessionModel", back_populates="agent", cascade="all, delete-orphan")
+    long_term_memorys = relationship("LongTermMemoryModel", back_populates="agent", cascade="all, delete-orphan")
     
 class SessionModel(Base):
     __tablename__ = "session"
@@ -51,9 +52,6 @@ class MessageModel(Base):
 
     # 移除 agent_id 後，不再需要與 AgentModel 的反向關聯
     session = relationship("SessionModel", back_populates="messages") # 呢度要對應 SessionModel 嘅 messages
-    
-    # 長期記憶關聯
-    long_term_memory = relationship("LongTermMemoryModel", back_populates="messages")
 
 
 class PromptModel(Base):
@@ -74,6 +72,6 @@ class LongTermMemoryModel(Base):
     vector_content = Column(Vector(1024), nullable=True)  # vector(1024) - pgvector column
     importance = Column(Integer, default=5)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
-
+    
     # 反向關聯
-    messages = relationship("MessageModel", back_populates="long_term_memory")
+    agent = relationship("AgentModel", back_populates="long_term_memorys")

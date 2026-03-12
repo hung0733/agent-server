@@ -1,6 +1,8 @@
 from logging.config import fileConfig
+import os
+from pathlib import Path
 
-from sqlalchemy import engine_from_config
+from sqlalchemy import engine_from_config, create_engine
 from sqlalchemy import pool
 
 from alembic import context
@@ -15,6 +17,29 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
+
+# Load database configuration from .env file
+def get_db_url_from_env() -> str:
+    """Read database configuration from .env file and construct the database URL."""
+    env_path = Path(__file__).parent.parent / ".env"
+    env_vars = {}
+    
+    if env_path.exists():
+        with open(env_path, "r") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    key, value = line.split("=", 1)
+                    # Remove quotes and whitespace
+                    env_vars[key.strip()] = value.strip().strip('"\'')
+    
+    user = env_vars.get("DB_USER", "postgres")
+    password = env_vars.get("DB_PASSWORD", "")
+    host = env_vars.get("DB_HOST", "localhost")
+    port = env_vars.get("DB_PORT", "5432")
+    database = env_vars.get("DB_NAME", "postgres")
+    
+    return f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}"
 
 
 def run_migrations_offline() -> None:
@@ -35,12 +60,10 @@ def run_migrations_online() -> None:
     """Run migrations in 'online' mode."""
     from sqlalchemy import text
     
-    url = config.get_main_option("sqlalchemy.url")
-    connectable = engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
-    )
+    # Use database URL from .env file
+    sync_url = get_db_url_from_env()
+    
+    connectable = create_engine(sync_url, poolclass=pool.NullPool)
 
     with connectable.connect() as connection:
         # 確保 vector extension 已安裝
