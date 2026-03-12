@@ -106,7 +106,8 @@ class LongTermMemoryDAO:
         session: AsyncSession,
         agent_id: int,
         query_vector: List[float],
-        top_k: int = 15
+        top_k: int = 15,
+        similarity_threshold: float = 0.45
     ) -> List[LongTermMemoryModel]:
         """使用 Cosine Distance 獲取最相似的長期記憶
         
@@ -115,6 +116,9 @@ class LongTermMemoryDAO:
             agent_id: Agent ID
             query_vector: 查詢向量
             top_k: 返回前 K 個最相似的記憶
+            similarity_threshold: 相似度閾值（預設 0.45），只返回相似度高於此值的記憶
+                                  由於 pgvector 的 <=> 返回 cosine distance，相似度 = 1 - distance
+                                  所以相似度 > 0.45 即 distance < 0.55
             
         Returns:
             最相似的 LongTermMemoryModel 列表
@@ -123,18 +127,28 @@ class LongTermMemoryDAO:
         # 將向量轉換為 PostgreSQL 數組格式
         vector_str = "[" + ",".join(str(v) for v in query_vector) + "]"
         
+        # 計算 distance 閾值：similarity > threshold => distance < (1 - threshold)
+        distance_threshold = 1.0 - similarity_threshold
+        
         query = text(f"""
-            SELECT id, agent_id, content, vector_content, importance, created_at
+            SELECT id, agent_id, content, vector_content, importance, created_at,
+                   (vector_content <=> :query_vector) AS distance
             FROM long_term_memory
             WHERE agent_id = :agent_id
               AND vector_content IS NOT NULL
+              AND (vector_content <=> :query_vector) < :distance_threshold
             ORDER BY vector_content <=> :query_vector
             LIMIT :top_k
         """)
         
         result = await session.execute(
             query,
-            {"agent_id": agent_id, "query_vector": vector_str, "top_k": top_k}
+            {
+                "agent_id": agent_id,
+                "query_vector": vector_str,
+                "top_k": top_k,
+                "distance_threshold": distance_threshold
+            }
         )
         
         memories = []

@@ -42,44 +42,68 @@ class EmbeddingAgent:
         return self._session
     
     async def _embed_single(self, text: str, normalize: bool = True, pooling: str = "cls") -> List[float]:
-        """內部方法：將單個文本轉換為向量"""
+        """內部方法：將單個文本轉換為向量
+        
+        使用 OpenAI 兼容格式：/v1/embeddings
+        """
         session = await self._get_session()
         
-        url = f"{self.embedding_endpoint}/embed"
+        url = f"{self.embedding_endpoint}/v1/embeddings"
+        
+        # 確保文本正確編碼為 UTF-8
+        text_bytes = text.encode('utf-8').decode('utf-8')
+        
+        # OpenAI 兼容格式
         payload = {
-            "inputs": [text],
-            "normalize": normalize,
-            "pooling": pooling
+            "input": text_bytes,
+            "model": "bge-m3"
         }
         
-        async with session.post(url, json=payload) as response:
+        import json
+        async with session.post(url, data=json.dumps(payload, ensure_ascii=False).encode('utf-8'), headers={"Content-Type": "application/json; charset=utf-8"}) as response:
             if response.status != 200:
                 error_text = await response.text()
                 raise Exception(f"Embedding API error: {response.status} - {error_text}")
             
-            embeddings = await response.json()
+            result = await response.json()
         
-        return embeddings[0] if embeddings else []
+        # OpenAI 格式返回：{"data": [{"embedding": [...], "index": 0, "object": "embedding"}], ...}
+        if "data" in result and len(result["data"]) > 0:
+            return result["data"][0]["embedding"]
+        return []
     
     async def _embed_batch(self, texts: List[str], normalize: bool = True, pooling: str = "cls") -> List[List[float]]:
-        """內部方法：將文本列表轉換為向量"""
+        """內部方法：將文本列表轉換為向量
+        
+        使用 OpenAI 兼容格式：/v1/embeddings
+        """
         session = await self._get_session()
         
-        url = f"{self.embedding_endpoint}/embed"
+        url = f"{self.embedding_endpoint}/v1/embeddings"
+        
+        # 確保所有文本正確編碼為 UTF-8
+        texts_bytes = [t.encode('utf-8').decode('utf-8') for t in texts]
+        
+        # OpenAI 兼容格式
         payload = {
-            "inputs": texts,
-            "normalize": normalize,
-            "pooling": pooling
+            "input": texts_bytes,
+            "model": "bge-m3"
         }
         
-        async with session.post(url, json=payload) as response:
+        import json
+        async with session.post(url, data=json.dumps(payload, ensure_ascii=False).encode('utf-8'), headers={"Content-Type": "application/json; charset=utf-8"}) as response:
             if response.status != 200:
                 error_text = await response.text()
                 raise Exception(f"Embedding API error: {response.status} - {error_text}")
             
-            embeddings = await response.json()
+            result = await response.json()
         
-        return embeddings
+        # OpenAI 格式返回：{"data": [{"embedding": [...], "index": 0, "object": "embedding"}], ...}
+        if "data" in result:
+            # 按 index 排序以確保順序正確
+            embeddings = sorted(result["data"], key=lambda x: x["index"])
+            return [item["embedding"] for item in embeddings]
+        return []
     
     async def embed(
         self,
@@ -139,6 +163,7 @@ class EmbeddingAgent:
         """重新排序文檔
         
         使用 Rerank API 對文檔進行相關性排序
+        使用 OpenAI 兼容格式：/v1/rerank
         
         Args:
             query: 查詢文本
@@ -159,32 +184,40 @@ class EmbeddingAgent:
         """
         session = await self._get_session()
         
-        url = f"{self.rerank_endpoint}/rerank"
+        url = f"{self.rerank_endpoint}/v1/rerank"
+        
+        # 確保所有文本正確編碼為 UTF-8
+        query_bytes = query.encode('utf-8').decode('utf-8')
+        documents_bytes = [d.encode('utf-8').decode('utf-8') for d in documents]
+        
+        # OpenAI 兼容格式
         payload = {
-            "query": query,
-            "texts": documents,
-            "raw_scores": True
+            "model": "bge-reranker-v2-m3",
+            "query": query_bytes,
+            "documents": documents_bytes,
+            "top_n": top_n if top_n is not None else len(documents)
         }
         
-        async with session.post(url, json=payload) as response:
+        import json
+        async with session.post(url, data=json.dumps(payload, ensure_ascii=False).encode('utf-8'), headers={"Content-Type": "application/json; charset=utf-8"}) as response:
             if response.status != 200:
                 error_text = await response.text()
                 raise Exception(f"Rerank API error: {response.status} - {error_text}")
             
-            results = await response.json()
+            result = await response.json()
         
-        # TEI 返回格式：[{"index": 0, "score": 0.95}, {"index": 1, "score": 0.87}, ...]
+        # 調試：打印原始響應
+        # print(f"[DEBUG] Rerank API 原始響應：{result}")
+        
         ranked_results = []
-        for item in results:
-            idx = item["index"]
-            score = item["score"]
-            ranked_results.append((idx, score))
+        if "results" in result:
+            for item in result["results"]:
+                idx = item.get("index", 0)
+                score = item.get("relevance_score", 0.0)
+                ranked_results.append((idx, score))
         
-        # 按分數降序排序
+        # 按分數降序排序（如果 API 未排序）
         ranked_results.sort(key=lambda x: x[1], reverse=True)
-        
-        if top_n is not None:
-            ranked_results = ranked_results[:top_n]
         
         if not return_scores:
             return [idx for idx, _ in ranked_results]

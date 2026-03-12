@@ -1,5 +1,6 @@
 from typing import AsyncGenerator, Dict, List, Optional, Tuple, Union
 import json
+import time
 import uuid
 
 from fastapi import HTTPException
@@ -65,7 +66,7 @@ class Agent:
                 )
                 for block in memory_blocks:
                     # block.content 是 { "content": "...", "importance": N }，直接 json 輸出
-                    content_text = json.dumps(block.content)
+                    content_text = json.dumps(block.content, ensure_ascii=False)
                     if content_text:
                         if block_type == "soul":
                             prompt_str += f"你的核心靈魂： {content_text}\n\n"
@@ -90,36 +91,45 @@ class Agent:
 
         # RAG 功能：從 long term memory 檢索相關記憶
         # 1. 用 user_input 變成 vector
+        embed_start = time.time()
         query_vector = await embedding_agent.embed_query(user_input)
+        embed_time = time.time() - embed_start
+        print(f"[Embedding] 生成 query vector 用咗 {embed_time:.3f} 秒")
         
-        # 2. 用 Cosine Distance 搵出最接近的 10-15 條
+        # 2. 用 Cosine Distance 搵出最接近的 10-15 條（相似度 > 0.45）
         similar_memories = await long_term_memory_dao.get_similar_memories(
-            session, self.db_id, query_vector, top_k=15
+            session, self.db_id, query_vector, top_k=15, similarity_threshold=0.45
         )
         
         # 3. 將呢 10 幾條記憶連同用戶問題，一齊 send 去 Reranking
         if similar_memories:
-            documents = [json.dumps(mem.content) for mem in similar_memories]
+            documents = [json.dumps(mem.content, ensure_ascii=False) for mem in similar_memories]
             
             # 4. 攞 Reranker 分數最高嗰 3-5 條
+            rerank_start = time.time()
             rerank_results = await embedding_agent.rerank(
                 query=user_input,
                 documents=documents,
-                top_n=5
+                top_n=3
             )
+            rerank_time = time.time() - rerank_start
+            print(f"[Rerank] Reranking 用咗 {rerank_time:.3f} 秒")
             
+            # 過濾：只保留 score > -7.0 的結果
+            filtered_results = [(idx, score) for idx, score in rerank_results if score > -7.0]
+            print(f"[Rerank] 過濾後剩餘 {len(filtered_results)} 條記憶 (score > -7.0)")
             
             pend_save: list[MessageDTO] = []
             
             # 5. 將 assistant_message 放入 user_msg 之前
-            if rerank_results:
+            if filtered_results:
                 # 組合最高分數的記憶作為 context
                 context_parts = []
-                for idx, score in rerank_results:
+                for idx, score in filtered_results:
                     context_parts.append(f"[相關記憶] {documents[idx]} (相關性：{score:.2f})")
                 
                 context_text = "\n\n".join(context_parts)
-                
+                print(context_text)
                 # 創建 assistant_message 的 MessageDTO
                 memory_msg = MessageDTO.get_assistant_msg(
                     f"根據相關記憶，我找到以下資訊：\n\n{context_text}",
