@@ -82,7 +82,7 @@ class ArchiveGhost(Agent):
                 agent=self,
                 response=await self.send(
                     messages=messages,
-                    user_msg=user_msg,
+                    pend_save=[user_msg],
                     is_think_mode=True,
                     temperature=temperature,
                 ),
@@ -217,7 +217,7 @@ class ArchiveGhost(Agent):
             content: str = ""
             for i in range(3):
                 temperature: float = 0.1 * i
-                response = await self.send(messages, user_msg, True, temperature)
+                response = await self.send(messages, [user_msg], True, temperature)
 
                 _, content = await Agent.getResponse(
                     agent=self,

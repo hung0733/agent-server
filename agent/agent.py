@@ -1,4 +1,5 @@
-from typing import AsyncGenerator, Dict, Optional, Tuple, Union
+from typing import AsyncGenerator, Dict, List, Optional, Tuple, Union
+import json
 import uuid
 
 from fastapi import HTTPException
@@ -6,12 +7,15 @@ import tiktoken
 
 from db.agent_dao import AgentDAO
 from db.conn_pool import ConnPool
+from db.long_term_memory_dao import LongTermMemoryDAO
+from db.memory_block_dao import MemoryBlockDAO
 from db.message_dao import MessageDAO
 from db.session_dao import SessionDAO
 from dto.agent import AgentDTO
 from dto.message import MessageDTO
 from dto.session import SessionDTO
 from global_var import GlobalVar
+from llm.embedding_agent import EmbeddingAgent
 from openai.types.chat import ChatCompletion, ChatCompletionChunk  # 匯入類型定義
 
 
@@ -40,42 +44,108 @@ class Agent:
         self, user_input: str, is_think_mode: bool = False
     ) -> AsyncGenerator[ChatCompletionChunk, None]:
         message_dao = MessageDAO()
+        memory_block_dao = MemoryBlockDAO()
+        long_term_memory_dao = LongTermMemoryDAO()
+        embedding_agent = EmbeddingAgent()
 
         # 1. 獲取歷史紀錄
         async with GlobalVar.conn_pool.AsyncSessionLocal() as session:
-            historys = await message_dao.list_by_session(session, self.session_db_id)
+            historys = await message_dao.get_unsummarized_messages(session, self.session_db_id)
 
         # 2. 構建 messages
         messages: list[Dict[str, str]] = []
-        if self.sys_prompt:
-            # 確保 sys_prompt 是字串而非 tuple
+        
+        # 決定 system prompt
+        prompt_str: str = ""
+        
+        if self.is_inited:
+            for block_type in ["soul", "identity", "user_profile"]:
+                memory_blocks = await memory_block_dao.get_active_by_agent_id_and_type(
+                    session, self.db_id, block_type
+                )
+                for block in memory_blocks:
+                    # block.content 是 { "content": "...", "importance": N }，直接 json 輸出
+                    content_text = json.dumps(block.content)
+                    if content_text:
+                        if block_type == "soul":
+                            prompt_str += f"你的核心靈魂： {content_text}\n\n"
+                        elif block_type == "identity":
+                            prompt_str += f"你的身份設定 {content_text}\n\n"
+                        elif block_type == "user_profile":
+                            prompt_str += f"關於你的主人： {content_text}\n\n"
+
+        # 如果沒有從 memory_block 獲取到 prompt，使用原本的 sys_prompt
+        if not prompt_str and self.sys_prompt:
             prompt_str = (
                 self.sys_prompt
-                if isinstance(self.sys_prompt, tuple)
-                else self.sys_prompt
+                if isinstance(self.sys_prompt, str)
+                else str(self.sys_prompt)
             )
+        
+        if prompt_str:
             messages.append({"role": "system", "content": prompt_str})
 
         for m in historys:
             messages.append(MessageDTO.from_model(m).to_msg())
 
+        # RAG 功能：從 long term memory 檢索相關記憶
+        # 1. 用 user_input 變成 vector
+        query_vector = await embedding_agent.embed_query(user_input)
+        
+        # 2. 用 Cosine Distance 搵出最接近的 10-15 條
+        similar_memories = await long_term_memory_dao.get_similar_memories(
+            session, self.db_id, query_vector, top_k=15
+        )
+        
+        # 3. 將呢 10 幾條記憶連同用戶問題，一齊 send 去 Reranking
+        if similar_memories:
+            documents = [json.dumps(mem.content) for mem in similar_memories]
+            
+            # 4. 攞 Reranker 分數最高嗰 3-5 條
+            rerank_results = await embedding_agent.rerank(
+                query=user_input,
+                documents=documents,
+                top_n=5
+            )
+            
+            
+            pend_save: list[MessageDTO] = []
+            
+            # 5. 將 assistant_message 放入 user_msg 之前
+            if rerank_results:
+                # 組合最高分數的記憶作為 context
+                context_parts = []
+                for idx, score in rerank_results:
+                    context_parts.append(f"[相關記憶] {documents[idx]} (相關性：{score:.2f})")
+                
+                context_text = "\n\n".join(context_parts)
+                
+                # 創建 assistant_message 的 MessageDTO
+                memory_msg = MessageDTO.get_assistant_msg(
+                    f"根據相關記憶，我找到以下資訊：\n\n{context_text}",
+                    is_think_mode
+                )
+                messages.append(memory_msg.to_msg())
+                pend_save.append(memory_msg)
+
         # 加入使用者當前輸入
         user_msg = MessageDTO.get_user_msg(user_input, is_think_mode)
         messages.append(user_msg.to_msg())
+        pend_save.append(user_msg)
 
-        return await self.send(messages, user_msg, is_think_mode)
+        return await self.send(messages, pend_save, is_think_mode)
 
     async def send(
         self,
         messages: list[Dict[str, str]],
-        user_msg: MessageDTO,
+        pend_save: list[MessageDTO],
         is_think_mode: bool,
         temperature: float = -1,
     ):
         return self.handleMsgResponse(
             self,
             is_think_mode,
-            user_msg,
+            pend_save,
             await self.client.send(messages, is_think_mode, temperature),
         )
 
@@ -169,7 +239,7 @@ class Agent:
     async def handleMsgResponse(
         agent: "Agent",
         is_think_mode: bool,
-        sendMsg: MessageDTO,
+        pend_save: list[MessageDTO],
         response: Union[ChatCompletion, AsyncGenerator[ChatCompletionChunk, None]],
     ) -> AsyncGenerator[ChatCompletionChunk, None]:
         full_reasoning: str = ""
@@ -190,7 +260,7 @@ class Agent:
                     if delta.content:
                         full_content += delta.content
             agent._prepare_save_messages_to_db(
-                agent, sendMsg, is_think_mode, full_content, full_reasoning
+                agent, pend_save, is_think_mode, full_content, full_reasoning
             )
 
         else:
@@ -220,19 +290,18 @@ class Agent:
                 print(f"ERROR [Agent.py] Extraction failed: {str(e)}")
 
             agent._prepare_save_messages_to_db(
-                agent, sendMsg, is_think_mode, full_content, full_reasoning
+                agent, pend_save, is_think_mode, full_content, full_reasoning
             )
             yield response
 
     @staticmethod
     def _prepare_save_messages_to_db(
         agent: "Agent",
-        sendMsg: MessageDTO,
+        messages: list[MessageDTO],
         is_think_mode: bool,
         content: str,
         reasoning_content: str,
     ):
-        messages: list[MessageDTO] = [sendMsg]
 
         if content:
             if reasoning_content:

@@ -74,7 +74,6 @@ class MessageDAO:
             select(MessageModel)
             .where(
                 MessageModel.session_id == session_db_id
-                and MessageModel.is_summaryed == False
             )
             .order_by(MessageModel.create_date.asc())
         )
