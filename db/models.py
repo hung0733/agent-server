@@ -15,7 +15,6 @@ class AgentModel(Base):
     # 修正 1：分開命名屬性，唔好重複用 messages
     sessions = relationship("SessionModel", back_populates="agent", cascade="all, delete-orphan")
     long_term_memorys = relationship("LongTermMemoryModel", back_populates="agent", cascade="all, delete-orphan")
-    memory_blocks = relationship("MemoryBlockModel", back_populates="agent", cascade="all, delete-orphan")
     
 class SessionModel(Base):
     __tablename__ = "session"
@@ -77,21 +76,6 @@ class LongTermMemoryModel(Base):
     
     # 反向關聯
     agent = relationship("AgentModel", back_populates="long_term_memorys")
-
-
-class MemoryBlockModel(Base):
-    __tablename__ = "memory_block"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)  # SERIAL
-    agent_id = Column(Integer, ForeignKey("agent.id"), nullable=False)
-    block_type = Column(String(20), nullable=False)  # 'soul', 'identity', 'user_profile'
-    content = Column(JSON, nullable=False)  # JSONB - 儲存拆解後的文字與細節
-    vector_content = Column(Vector(1024), nullable=True)  # vector(1024) - BGE-M3 向量
-    is_active = Column(Boolean, default=True)
-    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
-    
-    # 反向關聯
-    agent = relationship("AgentModel", back_populates="memory_blocks")
 
 
 class SoulMemoryModel(Base):

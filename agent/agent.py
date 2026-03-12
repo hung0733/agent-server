@@ -9,7 +9,6 @@ import tiktoken
 from db.agent_dao import AgentDAO
 from db.conn_pool import ConnPool
 from db.long_term_memory_dao import LongTermMemoryDAO
-from db.memory_block_dao import MemoryBlockDAO
 from db.message_dao import MessageDAO
 from db.session_dao import SessionDAO
 from dto.agent import AgentDTO
@@ -45,7 +44,6 @@ class Agent:
         self, user_input: str, is_think_mode: bool = False
     ) -> AsyncGenerator[ChatCompletionChunk, None]:
         message_dao = MessageDAO()
-        memory_block_dao = MemoryBlockDAO()
         long_term_memory_dao = LongTermMemoryDAO()
         embedding_agent = EmbeddingAgent()
 
@@ -59,24 +57,7 @@ class Agent:
         # 決定 system prompt
         prompt_str: str = ""
         
-        if self.is_inited:
-            for block_type in ["soul", "identity", "user_profile"]:
-                memory_blocks = await memory_block_dao.get_active_by_agent_id_and_type(
-                    session, self.db_id, block_type
-                )
-                for block in memory_blocks:
-                    # block.content 是 { "content": "...", "importance": N }，直接 json 輸出
-                    content_text = json.dumps(block.content, ensure_ascii=False)
-                    if content_text:
-                        if block_type == "soul":
-                            prompt_str += f"你的核心靈魂： {content_text}\n\n"
-                        elif block_type == "identity":
-                            prompt_str += f"你的身份設定 {content_text}\n\n"
-                        elif block_type == "user_profile":
-                            prompt_str += f"關於你的主人： {content_text}\n\n"
-
-        # 如果沒有從 memory_block 獲取到 prompt，使用原本的 sys_prompt
-        if not prompt_str and self.sys_prompt:
+        if self.sys_prompt:
             prompt_str = (
                 self.sys_prompt
                 if isinstance(self.sys_prompt, str)
