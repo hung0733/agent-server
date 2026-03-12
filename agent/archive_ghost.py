@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 from agent.agent import Agent
 from db.conn_pool import ConnPool
 from db.long_term_memory_dao import LongTermMemoryDAO
+from db.message_dao import MessageDAO
 from db.prompt_dao import PromptDAO
 from dto.agent import AgentDTO
 from dto.message import MessageDTO
@@ -91,7 +92,8 @@ class ArchiveGhost(Agent):
                 if not records:
                     continue
 
-                # 為每個 record 獨立保存
+                # 收集所有 records 的數據
+                records_data: List[tuple] = []
                 for record in records:
                     embedding_text = str(record.get("embedding_text", "")).strip()
                     importance: int = self._parse_importance(
@@ -102,14 +104,15 @@ class ArchiveGhost(Agent):
                     if embedding_text:
                         vector = await self._embed_text(embedding_text)
 
-                    ConnPool.start_db_async_task(
-                        self._save_long_term_memory(
-                            record,
-                            vector,
-                            importance,
-                            [msg.id for msg in msg_list],
-                        )
+                    records_data.append((record, vector, importance))
+
+                # 同一個 JSON 的所有 records 在同一個 transaction 中 commit
+                ConnPool.start_db_async_task(
+                    self._save_long_term_memories_batch(
+                        records_data,
+                        [msg.id for msg in msg_list],
                     )
+                )
                 break
 
     def _load_records(self, content: str) -> Optional[List[Dict[str, Any]]]:
@@ -148,20 +151,23 @@ class ArchiveGhost(Agent):
             print(f"Embedding request failed: {exc}")
             return None
 
-    async def _save_long_term_memory(
+    async def _save_long_term_memories_batch(
         self,
-        content: Dict[str, Any],
-        vector: Optional[List[float]],
-        importance: int,
-        msg_ids : list[int]
+        records_data: List[tuple[Dict[str, Any], Optional[List[float]], int]],
+        msg_ids: list[int]
     ) -> None:
+        """批量保存同一個 JSON 的所有 LongTermMemory，確保同一時間 commit，並標記相關 message 為已摘要"""
         async with GlobalVar.conn_pool.AsyncSessionLocal() as session:
-            await LongTermMemoryDAO().create(
-                session,
-                agent_id=self.db_id,
-                content=content,
-                vector_content=vector,
-                importance=importance,
-            )
-            print(msg_ids)
+            # 保存所有 LongTermMemory records
+            for record, vector, importance in records_data:
+                await LongTermMemoryDAO().create(
+                    session,
+                    agent_id=self.db_id,
+                    content=record,
+                    vector_content=vector,
+                    importance=importance,
+                )
+            # 在同一 transaction 中標記 message 為已摘要
+            if msg_ids:
+                await MessageDAO().mark_as_summarized(session, msg_ids)
             await session.commit()
