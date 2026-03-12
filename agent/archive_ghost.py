@@ -44,6 +44,48 @@ class ArchiveGhost(Agent):
                 is_inited=agent.is_inited,
             )
         return None
+    
+    async def init_agent(self):
+        if self.is_inited:
+            return
+        
+        dto: PromptDTO
+        async with GlobalVar.conn_pool.AsyncSessionLocal() as session:
+            dto = PromptDTO.from_model(
+                await PromptDAO().get_by_code(session, "init_agent")
+            )
+            
+        user_input : str = dto.prompt + self.sys_prompt
+        
+        messages: list[dict] = []
+        user_msg: MessageDTO = MessageDTO.get_user_msg(user_input, True)
+        messages.append(user_msg.to_msg())
+        
+        records: Optional[List[Dict[str, Any]]] = None
+        for i in range(3):
+            temperature: float = 0.1 * i
+            (
+                _,
+                content,
+            ) = await self.getResponse(
+                agent=self,
+                response=await self.send(
+                    messages=messages,
+                    pend_save=[user_msg],
+                    is_think_mode=True,
+                    temperature=temperature,
+                ),
+            )
+
+            if content:
+                content = re.sub(r"```json|```", "", content)
+                print(content)
+                records = self._load_records(content)
+                if not records:
+                    continue
+                break
+        
+        
 
     async def summary(self, msg_list: list[MessageDTO]):
         dto: PromptDTO
