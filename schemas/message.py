@@ -27,6 +27,8 @@ class MessageOut(BaseModel):
     is_think_mode: bool
     sent_by: str
     token: int
+    is_summaryed: bool = False
+    is_analysed: bool = False
     
     class Config:
         from_attributes = True

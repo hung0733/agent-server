@@ -89,7 +89,7 @@ class MessageDAO:
             .join(SessionModel, SessionModel.id == MessageModel.session_id)
             .where(
                 SessionModel.agent_id == agent_db_id,
-                MessageModel.long_term_mem_id.is_(None),
+                MessageModel.is_summaryed == False,
                 MessageModel.create_date < today_start,
                 or_(
                     SessionModel.session_id == "default",
@@ -157,6 +157,52 @@ class MessageDAO:
         
         for message in messages:
             await session.delete(message)
+        
+        await session.flush()
+        return True
+        
+    async def get_unsummarized_messages(self, session: AsyncSession, session_db_id: int) -> List[MessageModel]:
+        """獲取指定 Session 中尚未被摘要的消息"""
+        result = await session.execute(
+            select(MessageModel).where(
+                MessageModel.session_id == session_db_id,
+                MessageModel.is_summaryed == False
+            ).order_by(MessageModel.create_date.asc())
+        )
+        return result.scalars().all()
+        
+    async def get_unanalysed_messages(self, session: AsyncSession, session_db_id: int) -> List[MessageModel]:
+        """獲取指定 Session 中尚未被分析的消息"""
+        result = await session.execute(
+            select(MessageModel).where(
+                MessageModel.session_id == session_db_id,
+                MessageModel.is_analysed == False
+            ).order_by(MessageModel.create_date.asc())
+        )
+        return result.scalars().all()
+        
+    async def mark_as_summarized(self, session: AsyncSession, message_ids: List[int]) -> bool:
+        """標記消息為已摘要"""
+        result = await session.execute(
+            select(MessageModel).where(MessageModel.id.in_(message_ids))
+        )
+        messages = result.scalars().all()
+        
+        for message in messages:
+            message.is_summaryed = True
+        
+        await session.flush()
+        return True
+        
+    async def mark_as_analysed(self, session: AsyncSession, message_ids: List[int]) -> bool:
+        """標記消息為已分析"""
+        result = await session.execute(
+            select(MessageModel).where(MessageModel.id.in_(message_ids))
+        )
+        messages = result.scalars().all()
+        
+        for message in messages:
+            message.is_analysed = True
         
         await session.flush()
         return True

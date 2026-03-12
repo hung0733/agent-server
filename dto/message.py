@@ -13,6 +13,8 @@ class MessageDTO:
     date: datetime             # Creation timestamp
     token: int                 # Token count
     step_id: str | None        # Conversation step ID (group related messages)
+    is_summaryed: bool         # Whether the message has been summarized
+    is_analysed: bool          # Whether the message has been analyzed
     
     def __init__(
         self,
@@ -23,7 +25,9 @@ class MessageDTO:
         date: datetime | None = None,
         content: str | None = None,
         token: int = 0,
-        step_id: str | None = None
+        step_id: str | None = None,
+        is_summaryed: bool = False,
+        is_analysed: bool = False
     ) -> None:
         self.id = id
         self.msg_type = msg_type or ""
@@ -33,6 +37,8 @@ class MessageDTO:
         self.content = content or ""
         self.token = token
         self.step_id = step_id
+        self.is_summaryed = is_summaryed
+        self.is_analysed = is_analysed
     
     def to_msg(self) -> dict:
         """Convert to chat message format"""
@@ -49,7 +55,9 @@ class MessageDTO:
             date=m.create_date,
             content=m.content,
             token=m.token,
-            step_id=m.step_id
+            step_id=m.step_id,
+            is_summaryed=getattr(m, 'is_summaryed', False),
+            is_analysed=getattr(m, 'is_analysed', False)
         )
     
     @classmethod

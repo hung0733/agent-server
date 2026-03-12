@@ -41,8 +41,11 @@ class MessageModel(Base):
     
     session_id = Column(Integer, ForeignKey("session.id"), nullable=False)
     
-    # 長期記憶關聯
-    long_term_mem_id = Column(Integer, ForeignKey("long_term_memory.id"), nullable=True, default=None)
+    # 摘要狀態標記
+    is_summaryed = Column(Boolean, default=False, nullable=False)
+    
+    # 分析狀態標記
+    is_analysed = Column(Boolean, default=False, nullable=False)
     
     token = Column(Integer, default=0, nullable=False)
 

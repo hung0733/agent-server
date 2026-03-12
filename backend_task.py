@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from agent.agent import Agent
-from agent.backend_agent import BackendAgent
+from agent.archive_ghost import ArchiveGhost
 from db.agent_dao import AgentDAO
 from db.message_dao import MessageDAO
 from db.session_dao import SessionDAO
@@ -96,7 +96,7 @@ async def summary_task(agent_dto: AgentDTO):
             )
 
     if grouped_messages:
-        agent: BackendAgent = await BackendAgent.get_agent(
+        agent: ArchiveGhost | None = await ArchiveGhost.get_agent(
             agent_id=agent_dto.agent_id, session_id=session_id
         )
         if agent:
