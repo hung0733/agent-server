@@ -60,7 +60,8 @@ async def run_backend_agents():
                 for agent_dto in agents:
                     print(f"Processing backend agent: {agent_dto.agent_id}")
                     await init_agent_task(agent_dto)
-                    await summary_distillation_task(agent_dto)
+                    await summary_task(agent_dto)
+                    await distillation_task(agent_dto)
 
                 print("Backend agents task completed")
 
@@ -103,7 +104,7 @@ async def run_backend_agents_once():
             for agent_dto in agents:
                 print(f"Processing backend agent: {agent_dto.agent_id}")
                 await init_agent_task(agent_dto)
-                await summary_distillation_task(agent_dto)
+                await summary_task(agent_dto)
 
             print("Backend agents task completed")
 
@@ -128,15 +129,14 @@ async def init_agent_task(agent_dto: AgentDTO):
     print(f"Start Init Agent: {agent_dto.agent_id}")
     await agent.init_agent()
 
-
-async def summary_distillation_task(agent_dto: AgentDTO):
+async def summary_task(agent_dto: AgentDTO):
 
     grouped_messages: List[Dict[str, Any]] = []
     session_id: str = "summary-" + datetime.now().strftime("%Y%m%m")
 
     print(f"Try Find {agent_dto.agent_id} non summary Messages")
     async with GlobalVar.conn_pool.AsyncSessionLocal() as session:
-        grouped_messages = await MessageDAO().list_grouped_before_today(
+        grouped_messages = await MessageDAO().list_non_summary_grouped_before_today(
             session=session, agent_db_id=agent_dto.id
         )
         if grouped_messages:
@@ -155,5 +155,30 @@ async def summary_distillation_task(agent_dto: AgentDTO):
                 messages: List[MessageDTO] = e["messages"]
                 print(f"Start Summary Message: {date} {target_session_id}")
                 await agent.summary(messages)
+
+async def distillation_task(agent_dto: AgentDTO):
+
+    grouped_messages: List[Dict[str, Any]] = []
+    session_id: str = "distillation-" + datetime.now().strftime("%Y%m%m")
+
+    print(f"Try Find {agent_dto.agent_id} non analyst Messages")
+    async with GlobalVar.conn_pool.AsyncSessionLocal() as session:
+        grouped_messages = await MessageDAO().list_non_analysed_grouped_before_today(
+            session=session, agent_db_id=agent_dto.id
+        )
+        if grouped_messages:
+            await SessionDAO().make_sure_exist(
+                session=session, agent_db_id=agent_dto.id, session_id=session_id
+            )
+
+    if grouped_messages:
+        agent: ArchiveGhost | None = await ArchiveGhost.get_agent(
+            agent_id=agent_dto.agent_id, session_id=session_id
+        )
+        if agent:
+            for e in grouped_messages:
+                target_session_id: str = e["session_id"]
+                date: str = e["date"]
+                messages: List[MessageDTO] = e["messages"]
                 print(f"Start Reflection & Distillation: {date} {target_session_id}")
                 await agent.distillation(messages)
