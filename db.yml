@@ -1,0 +1,57 @@
+services:
+  postgres:
+    user: 1000:1000
+    image: postgres:15-alpine
+    container_name: agent-postgres
+    restart: on-failure
+    environment:
+      POSTGRES_DB: agentserver
+      POSTGRES_USER: agentserver
+      POSTGRES_PASSWORD: bB6C8tQu9YuLWqMq
+    ports:
+      - "5432:5432"
+    volumes:
+      - /mnt/data/misc/agent-server/pgsql:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agentserver -d agentserver"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
+        reservations:
+          memory: 256M
+          cpus: '0.5'
+
+  qdrant:
+    user: 1000:1000
+    image: qdrant/qdrant:latest
+    container_name: agent-qdrant
+    restart: on-failure
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - /mnt/data/misc/agent-server/qdrant:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:6333/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.5'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
