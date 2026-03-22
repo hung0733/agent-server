@@ -2,7 +2,8 @@
 """
 PostgreSQL implementation of SessionStorage using asyncpg.
 
-Provides async connection pooling and unified schema with tenant_id for multitenancy.
+Provides unified schema with tenant_id for multitenancy.
+Uses the centralized database pool from tools.db_pool.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ from uuid import uuid4
 
 import asyncpg
 
+from tools.db_pool import configure_pool, get_pool
 from .base import SessionStorage
 from simplemem_cross_lite.types import (
     CrossObservation,
@@ -37,51 +39,48 @@ class PostgresSessionStorage(SessionStorage):
     PostgreSQL implementation of SessionStorage using asyncpg.
 
     Manages session lifecycle, events, observations, and summaries with
-    async connection pooling and tenant isolation.
+    tenant isolation. Uses the centralized global database pool.
     """
 
     def __init__(
         self,
-        dsn: str = "postgresql://localhost/simplemem",
+        dsn: Optional[str] = None,
         min_connections: int = 5,
         max_connections: int = 20,
     ) -> None:
         """
-        Initialize PostgreSQL storage with connection pool.
+        Initialize PostgreSQL storage.
 
         Args:
-            dsn: PostgreSQL connection string (Data Source Name)
-            min_connections: Minimum pool connections
-            max_connections: Maximum pool connections
+            dsn: PostgreSQL connection string. If provided, configures the global
+                 pool with this DSN (primarily for testing). If None, uses the
+                 existing global pool (configured via environment variables).
+            min_connections: Minimum pool connections (used when DSN provided)
+            max_connections: Maximum pool connections (used when DSN provided)
         """
         self._dsn = dsn
-        self._min_connections = min_connections
-        self._max_connections = max_connections
-        self._pool: Optional[asyncpg.Pool] = None
         self._initialized = False
 
-    async def _get_pool(self) -> asyncpg.Pool:
-        """Get or create the connection pool."""
-        if self._pool is None:
-            self._pool = await asyncpg.create_pool(
-                dsn=self._dsn,
-                min_size=self._min_connections,
-                max_size=self._max_connections,
-            )
-        return self._pool
-
     async def initialize(self) -> None:
-        """Initialize database schema. Must be called before use."""
-        pool = await self._get_pool()
+        """Initialize database schema. Must be called before use.
+
+        If a DSN was provided in __init__, configures the global pool with it.
+        Then runs schema migrations.
+        """
+        if self._dsn is not None:
+            await configure_pool(dsn=self._dsn)
+        
+        pool = await get_pool()
         async with pool.acquire() as conn:
             await self._run_migrations(conn)
         self._initialized = True
 
     async def close(self) -> None:
-        """Close the connection pool and release resources."""
-        if self._pool is not None:
-            await self._pool.close()
-            self._pool = None
+        """Mark storage as closed. Does NOT close the global pool.
+
+        The global pool is shared across the application and should only
+        be closed at application shutdown, not per-storage instance.
+        """
         self._initialized = False
 
     async def __aenter__(self) -> "PostgresSessionStorage":
@@ -191,7 +190,7 @@ class PostgresSessionStorage(SessionStorage):
         started_at = self._now_datetime()
         metadata_json = json.dumps(metadata) if metadata is not None else None
 
-        pool = await self._get_pool()
+        pool = await get_pool()
         async with pool.acquire() as conn:
             try:
                 await conn.execute(
@@ -224,7 +223,7 @@ class PostgresSessionStorage(SessionStorage):
         self, content_session_id: str
     ) -> Optional[SessionRecord]:
         """Retrieve session by content session ID."""
-        pool = await self._get_pool()
+        pool = await get_pool()
         async with pool.acquire() as conn:
             try:
                 row = await conn.fetchrow(
@@ -240,7 +239,7 @@ class PostgresSessionStorage(SessionStorage):
         self, memory_session_id: str
     ) -> Optional[SessionRecord]:
         """Retrieve session by memory session ID."""
-        pool = await self._get_pool()
+        pool = await get_pool()
         async with pool.acquire() as conn:
             try:
                 row = await conn.fetchrow(
@@ -254,7 +253,7 @@ class PostgresSessionStorage(SessionStorage):
 
     async def get_session_by_id(self, session_id: int) -> Optional[SessionRecord]:
         """Retrieve session by database ID."""
-        pool = await self._get_pool()
+        pool = await get_pool()
         async with pool.acquire() as conn:
             try:
                 row = await conn.fetchrow(
@@ -281,7 +280,7 @@ class PostgresSessionStorage(SessionStorage):
         elif status_value in {"completed", "failed"}:
             ended_at_dt = self._now_datetime()
 
-        pool = await self._get_pool()
+        pool = await get_pool()
         async with pool.acquire() as conn:
             try:
                 await conn.execute(
@@ -332,7 +331,7 @@ class PostgresSessionStorage(SessionStorage):
         )
         params.extend([limit, offset])
 
-        pool = await self._get_pool()
+        pool = await get_pool()
         async with pool.acquire() as conn:
             try:
                 rows = await conn.fetch(query, *params)
@@ -354,7 +353,7 @@ class PostgresSessionStorage(SessionStorage):
         kind_value = self._enum_to_value(kind)
         redaction_value = self._enum_to_value(redaction_level, default="none")
 
-        pool = await self._get_pool()
+        pool = await get_pool()
         async with pool.acquire() as conn:
             try:
                 row = await conn.fetchrow(
@@ -384,7 +383,7 @@ class PostgresSessionStorage(SessionStorage):
         kinds: Optional[list[EventKind]] = None,
     ) -> list[SessionEvent]:
         """Retrieve events for a session."""
-        pool = await self._get_pool()
+        pool = await get_pool()
         async with pool.acquire() as conn:
             try:
                 if kinds:
@@ -421,7 +420,7 @@ class PostgresSessionStorage(SessionStorage):
         timestamp = self._now_datetime()
         type_value = type.value if hasattr(type, "value") else str(type)
 
-        pool = await self._get_pool()
+        pool = await get_pool()
         async with pool.acquire() as conn:
             try:
                 row = await conn.fetchrow(
@@ -454,7 +453,7 @@ class PostgresSessionStorage(SessionStorage):
         self, memory_session_id: str
     ) -> list[CrossObservation]:
         """Retrieve observations for a session."""
-        pool = await self._get_pool()
+        pool = await get_pool()
         async with pool.acquire() as conn:
             try:
                 rows = await conn.fetch(
@@ -477,7 +476,7 @@ class PostgresSessionStorage(SessionStorage):
         types: Optional[list[ObservationType]] = None,
     ) -> list[CrossObservation]:
         """Get recent observations for a project."""
-        pool = await self._get_pool()
+        pool = await get_pool()
         async with pool.acquire() as conn:
             try:
                 if types:
@@ -515,7 +514,7 @@ class PostgresSessionStorage(SessionStorage):
         if not obs_ids:
             return []
 
-        pool = await self._get_pool()
+        pool = await get_pool()
         async with pool.acquire() as conn:
             try:
                 placeholders = ", ".join(f"${i + 1}" for i in range(len(obs_ids)))
@@ -539,7 +538,7 @@ class PostgresSessionStorage(SessionStorage):
         """Store a session summary."""
         timestamp = self._now_datetime()
 
-        pool = await self._get_pool()
+        pool = await get_pool()
         async with pool.acquire() as conn:
             try:
                 row = await conn.fetchrow(
@@ -570,7 +569,7 @@ class PostgresSessionStorage(SessionStorage):
         self, memory_session_id: str
     ) -> Optional[SessionSummary]:
         """Retrieve summary for a session."""
-        pool = await self._get_pool()
+        pool = await get_pool()
         async with pool.acquire() as conn:
             try:
                 row = await conn.fetchrow(
@@ -591,7 +590,7 @@ class PostgresSessionStorage(SessionStorage):
         self, project: str, limit: int = 10
     ) -> list[SessionSummary]:
         """Get recent summaries for a project."""
-        pool = await self._get_pool()
+        pool = await get_pool()
         async with pool.acquire() as conn:
             try:
                 rows = await conn.fetch(
