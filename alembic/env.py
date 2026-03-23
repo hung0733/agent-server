@@ -13,10 +13,25 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config, AsyncEngine
 
-from db.base import Base
+from db.entity.base import EntityBase as Base
 
-# Import all models to ensure they are registered with metadata for autogenerate
-from db.schema import users, audit  # noqa: F401
+# Import all entities to ensure they are registered with metadata for autogenerate
+from db.entity import (  # noqa: F401
+    agent_capability_entity,
+    agent_entity,
+    agent_tool_entity,
+    audit_entity,
+    collaboration_entity,
+    dead_letter_queue_entity,
+    llm_endpoint_entity,
+    task_entity,
+    task_queue_entity,
+    task_schedule_entity,
+    token_usage_entity,
+    tool_call_entity,
+    tool_entity,
+    user_entity,
+)
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
