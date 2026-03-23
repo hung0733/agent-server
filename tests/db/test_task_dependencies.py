@@ -20,17 +20,38 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from db import create_engine, AsyncSession
-from db.schema.task_dependencies import TaskDependency
-from db.schema.tasks import Task
+from db.entity.task_entity import TaskDependency, Task
 from db.types import DependencyType, TaskStatus, gen_random_uuid
-from db.queries.task_dag import (
-    CycleDetectedError,
-    detect_cycle,
-    get_ancestors,
-    get_descendants,
-    get_dependency_order,
-    validate_new_dependency,
-)
+from db.dao.task_dao import TaskDAO, TaskDependencyDAO, CycleDetectedError
+
+
+# Wrapper functions to maintain backward compatibility with old function signatures
+# Old signature: function(session, parent_id, child_id)
+# New DAO signature: TaskDAO.method(parent_id, child_id, session)
+
+async def detect_cycle(session, parent_task_id: UUID, child_task_id: UUID):
+    """Wrapper for TaskDAO.detect_cycle with old signature order."""
+    return await TaskDAO.detect_cycle(parent_task_id, child_task_id, session)
+
+
+async def get_ancestors(session, task_id: UUID):
+    """Wrapper for TaskDAO.get_ancestors with old signature order."""
+    return await TaskDAO.get_ancestors(task_id, session)
+
+
+async def get_descendants(session, task_id: UUID):
+    """Wrapper for TaskDAO.get_descendants with old signature order."""
+    return await TaskDAO.get_descendants(task_id, session)
+
+
+async def get_dependency_order(session, task_ids):
+    """Wrapper for TaskDAO.get_dependency_order with old signature order."""
+    return await TaskDAO.get_dependency_order(task_ids, session)
+
+
+async def validate_new_dependency(session, parent_task_id: UUID, child_task_id: UUID):
+    """Wrapper for TaskDAO.validate_new_dependency with old signature order."""
+    return await TaskDAO.validate_new_dependency(parent_task_id, child_task_id, session)
 
 
 @pytest_asyncio.fixture

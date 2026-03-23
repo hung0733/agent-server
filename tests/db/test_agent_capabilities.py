@@ -18,8 +18,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from db import create_engine, AsyncSession
-from db.schema.agent_capabilities import AgentCapability
-from db.schema.agents import AgentType  # noqa: F401 - Import for FK relationship
+from db.entity.agent_capability_entity import AgentCapability
+from db.entity.agent_entity import AgentType  # noqa: F401 - Import for FK relationship
 
 
 @pytest_asyncio.fixture

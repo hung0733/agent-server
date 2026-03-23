@@ -38,18 +38,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
 from db import create_engine, AsyncSession
-from db.schema.agents import AgentType, AgentInstance
-from db.schema.collaboration import (
-    CollaborationSession,
-    AgentMessage,
-)
-from db.schema.llm_endpoints import LLMEndpoint, LLMEndpointGroup, LLMLevelEndpoint
-from db.schema.tasks import Task
-from db.schema.task_queue import TaskQueue
-from db.schema.task_dependencies import TaskDependency
-from db.schema.task_schedules import TaskSchedule
-from db.schema.dead_letter_queue import DeadLetterQueue
-from db.schema.users import User
+from db.entity.agent_entity import AgentType, AgentInstance
+from db.entity.collaboration_entity import CollaborationSession, AgentMessage
+from db.entity.llm_endpoint_entity import LLMEndpoint, LLMEndpointGroup, LLMLevelEndpoint
+from db.entity.task_entity import Task, TaskDependency
+from db.entity.task_queue_entity import TaskQueue
+from db.entity.task_schedule_entity import TaskSchedule
+from db.entity.dead_letter_queue_entity import DeadLetterQueue
+from db.entity.user_entity import User
 from db.types import (
     AgentStatus,
     TaskStatus,
@@ -60,16 +56,15 @@ from db.types import (
 from db.crypto import CryptoManager, generate_key
 
 
-# Import all schema modules to ensure SQLAlchemy relationship resolution
-from db.schema import users  # noqa: F401
-from db.schema import agents  # noqa: F401
-from db.schema import llm_endpoints  # noqa: F401
-from db.schema import collaboration  # noqa: F401
-from db.schema import tasks  # noqa: F401
-from db.schema import task_queue  # noqa: F401
-from db.schema import task_dependencies  # noqa: F401
-from db.schema import task_schedules  # noqa: F401
-from db.schema import dead_letter_queue  # noqa: F401
+# Import all entity modules to ensure SQLAlchemy relationship resolution
+from db.entity import user_entity  # noqa: F401
+from db.entity import agent_entity  # noqa: F401
+from db.entity import llm_endpoint_entity  # noqa: F401
+from db.entity import collaboration_entity  # noqa: F401
+from db.entity import task_entity  # noqa: F401
+from db.entity import task_queue_entity  # noqa: F401
+from db.entity import task_schedule_entity  # noqa: F401
+from db.entity import dead_letter_queue_entity  # noqa: F401
 
 
 # ============================================================================

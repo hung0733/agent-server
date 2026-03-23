@@ -20,9 +20,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from db import create_engine, AsyncSession
-from db.schema.token_usage import TokenUsage
-from db.schema.users import User  # noqa: F401 - Import for FK constraint
-from db.schema.agents import AgentInstance, AgentType  # noqa: F401 - Import for FK constraint
+from db.entity.token_usage_entity import TokenUsage
+from db.entity.user_entity import User  # noqa: F401 - Import for FK constraint
+from db.entity.agent_entity import AgentInstance, AgentType  # noqa: F401 - Import for FK constraint
 
 
 @pytest_asyncio.fixture

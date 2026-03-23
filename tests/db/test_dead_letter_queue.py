@@ -19,11 +19,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from db import create_engine, AsyncSession
-from db.schema.dead_letter_queue import DeadLetterQueue
-from db.schema.tasks import Task
-from db.schema.task_queue import TaskQueue
-from db.schema.users import User
-from db.schema.llm_endpoints import LLMEndpointGroup  # noqa: F401 - Import for relationship resolution
+from db.entity.dead_letter_queue_entity import DeadLetterQueue
+from db.entity.task_entity import Task
+from db.entity.task_queue_entity import TaskQueue
+from db.entity.user_entity import User
+from db.entity.llm_endpoint_entity import LLMEndpointGroup  # noqa: F401 - Import for relationship resolution
 from db.types import TaskStatus, gen_random_uuid
 
 

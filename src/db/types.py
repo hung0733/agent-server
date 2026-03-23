@@ -135,6 +135,72 @@ class ActorType(StrEnum):
     """Action performed by the system itself."""
 
 
+class CollaborationStatus(StrEnum):
+    """
+    Status of a collaboration session.
+    
+    Tracks the lifecycle state of collaborative agent sessions.
+    String values ensure proper JSON serialization.
+    """
+
+    active = "active"
+    """Session is currently active and ongoing."""
+
+    completed = "completed"
+    """Session finished successfully."""
+
+    failed = "failed"
+    """Session ended due to an error."""
+
+    cancelled = "cancelled"
+    """Session was cancelled before completion."""
+
+
+class MessageRedactionLevel(StrEnum):
+    """
+    Redaction level for agent messages.
+    
+    Defines how much content is visible/redacted in messages.
+    String values ensure proper JSON serialization.
+    """
+
+    none = "none"
+    """No redaction - full content visible."""
+
+    partial = "partial"
+    """Partial redaction - some content hidden."""
+
+    full = "full"
+    """Full redaction - content completely hidden."""
+
+
+class MessageType(StrEnum):
+    """
+    Type of agent message.
+    
+    Defines the nature of messages exchanged between agents.
+    String values ensure proper JSON serialization.
+    """
+
+    request = "request"
+    """Request for action or information."""
+
+    response = "response"
+    """Response to a request."""
+
+    notification = "notification"
+    """One-way notification without expected response."""
+
+    ack = "ack"
+    """Acknowledgment of received message."""
+
+    tool_call = "tool_call"
+    """Invocation of a tool/capability."""
+
+    tool_result = "tool_result"
+    """Result from a tool/capability execution."""
+
+
 def gen_random_uuid() -> UUID:
     """
     Generate a random UUID v4.

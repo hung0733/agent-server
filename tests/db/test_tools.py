@@ -19,7 +19,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from db import create_engine, AsyncSession
-from db.schema.tools import Tool, ToolVersion
+from db.entity.tool_entity import Tool, ToolVersion
 
 
 @pytest_asyncio.fixture

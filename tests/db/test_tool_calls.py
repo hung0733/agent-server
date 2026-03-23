@@ -19,9 +19,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from db import create_engine
-from db.schema.tool_calls import ToolCall
-from db.schema.tasks import Task
-from db.schema.tools import Tool, ToolVersion
+from db.entity.tool_call_entity import ToolCall
+from db.entity.task_entity import Task
+from db.entity.tool_entity import Tool, ToolVersion
 from db.types import TaskStatus
 from sqlalchemy.ext.asyncio import AsyncSession
 

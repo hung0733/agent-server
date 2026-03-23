@@ -24,24 +24,18 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from db import create_engine, AsyncSession
-from db.schema.agents import AgentType, AgentInstance
-from db.schema.agent_capabilities import AgentCapability
-from db.schema.collaboration import (
-    CollaborationSession,
-    AgentMessage,
-    CollaborationStatus,
-    MessageType,
-    MessageRedactionLevel,
-)
-from db.schema.tasks import Task
-from db.schema.task_queue import TaskQueue
-from db.schema.task_dependencies import TaskDependency
-from db.schema.task_schedules import TaskSchedule
-from db.schema.dead_letter_queue import DeadLetterQueue
-from db.schema.tools import Tool, ToolVersion
-from db.schema.tool_calls import ToolCall
-from db.schema.token_usage import TokenUsage
-from db.schema.users import User
+from db.entity.agent_entity import AgentType, AgentInstance
+from db.entity.agent_capability_entity import AgentCapability
+from db.entity.collaboration_entity import CollaborationSession, AgentMessage
+from db.types import CollaborationStatus, MessageType, MessageRedactionLevel
+from db.entity.task_entity import Task, TaskDependency
+from db.entity.task_queue_entity import TaskQueue
+from db.entity.task_schedule_entity import TaskSchedule
+from db.entity.dead_letter_queue_entity import DeadLetterQueue
+from db.entity.tool_entity import Tool, ToolVersion
+from db.entity.tool_call_entity import ToolCall
+from db.entity.token_usage_entity import TokenUsage
+from db.entity.user_entity import User
 from db.types import (
     AgentStatus,
     TaskStatus,

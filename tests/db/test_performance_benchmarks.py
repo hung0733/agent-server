@@ -26,12 +26,12 @@ from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from db import create_engine, AsyncSession
-from db.schema.task_queue import TaskQueue
-from db.schema.tasks import Task
-from db.schema.audit import AuditLog
-from db.schema.token_usage import TokenUsage
-from db.schema.users import User
-from db.schema.agents import AgentInstance, AgentType
+from db.entity.task_queue_entity import TaskQueue
+from db.entity.task_entity import Task
+from db.entity.audit_entity import AuditLog
+from db.entity.token_usage_entity import TokenUsage
+from db.entity.user_entity import User
+from db.entity.agent_entity import AgentInstance, AgentType
 from db.types import TaskStatus, ActorType, gen_random_uuid
 
 

@@ -20,7 +20,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from db import create_engine, AsyncSession
-from db.schema.collaboration import CollaborationSession, AgentMessage, CollaborationStatus, MessageRedactionLevel, MessageType
+from db.entity.collaboration_entity import CollaborationSession, AgentMessage
+from db.types import CollaborationStatus, MessageRedactionLevel, MessageType
 
 
 @pytest_asyncio.fixture

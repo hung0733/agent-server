@@ -2,23 +2,22 @@
 """
 Pytest configuration for database tests.
 
-This module ensures all schema modules are imported before tests run,
+This module ensures all entity modules are imported before tests run,
 which is necessary for SQLAlchemy relationship resolution.
 """
 from __future__ import annotations
 
-# Import all schema modules to ensure SQLAlchemy can resolve relationships
-from db.schema import users  # noqa: F401
-from db.schema import agents  # noqa: F401
-from db.schema import llm_endpoints  # noqa: F401
-from db.schema import audit  # noqa: F401
-from db.schema import agent_capabilities  # noqa: F401
-from db.schema import tasks  # noqa: F401
-from db.schema import task_dependencies  # noqa: F401
-from db.schema import task_schedules  # noqa: F401
-from db.schema import task_queue  # noqa: F401
-from db.schema import dead_letter_queue  # noqa: F401
-from db.schema import collaboration  # noqa: F401
-from db.schema import tools  # noqa: F401
-from db.schema import token_usage  # noqa: F401
-from db.schema import tool_calls  # noqa: F401
+# Import all entity modules for SQLAlchemy relationship resolution
+from db.entity import user_entity  # noqa: F401
+from db.entity import token_usage_entity  # noqa: F401
+from db.entity import agent_entity  # noqa: F401
+from db.entity import agent_capability_entity  # noqa: F401
+from db.entity import task_entity  # noqa: F401
+from db.entity import tool_entity  # noqa: F401
+from db.entity import tool_call_entity  # noqa: F401
+from db.entity import llm_endpoint_entity  # noqa: F401
+from db.entity import task_queue_entity  # noqa: F401
+from db.entity import task_schedule_entity  # noqa: F401
+from db.entity import dead_letter_queue_entity  # noqa: F401
+from db.entity import collaboration_entity  # noqa: F401
+from db.entity import audit_entity  # noqa: F401

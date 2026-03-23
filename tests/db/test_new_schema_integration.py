@@ -21,8 +21,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from db import create_engine, AsyncSession
-from db.schema.users import User
-from db.schema.agents import AgentType, AgentInstance
+from db.entity.user_entity import User
+from db.entity.agent_entity import AgentType, AgentInstance
 
 
 @pytest_asyncio.fixture

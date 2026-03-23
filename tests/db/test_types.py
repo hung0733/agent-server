@@ -19,7 +19,7 @@ from db.types import (
     TaskStatus,
     gen_random_uuid,
 )
-from db.models.base import BaseModelWithID, now_utc
+from db.dto.base import BaseModelWithID, now_utc
 
 
 class TestAgentStatus:

@@ -18,7 +18,7 @@ from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from db import create_engine, AsyncSession
-from db.schema.audit import AuditLog
+from db.entity.audit_entity import AuditLog
 from db.types import ActorType, gen_random_uuid
 
 

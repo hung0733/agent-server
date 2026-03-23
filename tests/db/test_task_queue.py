@@ -19,9 +19,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from db import create_engine, AsyncSession
-from db.schema.task_queue import TaskQueue
-from db.schema.tasks import Task
-from db.schema.llm_endpoints import LLMEndpointGroup  # noqa: F401 - Import for relationship resolution
+from db.entity.task_queue_entity import TaskQueue
+from db.entity.task_entity import Task
+from db.entity.llm_endpoint_entity import LLMEndpointGroup  # noqa: F401 - Import for relationship resolution
 from db.types import TaskStatus, gen_random_uuid
 
 

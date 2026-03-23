@@ -18,7 +18,7 @@ from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from db import create_engine, AsyncSession
-from db.schema.users import User, APIKey
+from db.entity.user_entity import User, APIKey
 from db.types import gen_random_uuid
 
 

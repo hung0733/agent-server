@@ -19,7 +19,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from db import create_engine, AsyncSession
-from db.schema.task_schedules import TaskSchedule
+from db.entity.task_schedule_entity import TaskSchedule
 from db.types import ScheduleType, gen_random_uuid
 
 

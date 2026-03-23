@@ -20,8 +20,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from db import create_engine, AsyncSession
-from db.schema.agents import AgentType, AgentInstance
-from db.schema.llm_endpoints import LLMEndpointGroup  # noqa: F401 - Import for relationship resolution
+from db.entity.agent_entity import AgentType, AgentInstance
+from db.entity.llm_endpoint_entity import LLMEndpointGroup  # noqa: F401 - Import for relationship resolution
 from db.types import AgentStatus, gen_random_uuid
 
 

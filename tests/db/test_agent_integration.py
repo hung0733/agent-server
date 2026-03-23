@@ -31,16 +31,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
 from db import create_engine, AsyncSession
-from db.schema.agents import AgentType, AgentInstance
-from db.schema.collaboration import (
-    CollaborationSession,
-    AgentMessage,
-    CollaborationStatus,
-    MessageRedactionLevel,
-    MessageType,
-)
-from db.schema.agent_capabilities import AgentCapability
-from db.schema.users import User
+from db.entity.agent_entity import AgentType, AgentInstance
+from db.entity.collaboration_entity import CollaborationSession, AgentMessage
+from db.types import CollaborationStatus, MessageRedactionLevel, MessageType
+from db.entity.agent_capability_entity import AgentCapability
+from db.entity.user_entity import User
 from db.types import AgentStatus, gen_random_uuid
 
 
