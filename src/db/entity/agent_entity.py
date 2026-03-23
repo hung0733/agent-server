@@ -20,7 +20,7 @@ from sqlalchemy import (
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PostgreSQLUUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from db.entity.base import EntityBase as Base
 
@@ -165,7 +165,47 @@ class AgentInstance(Base):
         nullable=True,
     )
     """Last heartbeat timestamp for liveness detection."""
-    
+
+    agent_id: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        unique=True,
+        index=True,
+        comment="Unique identifier for agent instance",
+    )
+    """Unique string identifier for this agent instance (e.g. 'butler-001')."""
+
+    endpoint_group_id: Mapped[Optional[UUID]] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("llm_endpoint_groups.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="Reference to LLM endpoint group configuration",
+    )
+    """Foreign key to the LLM endpoint group assigned to this instance."""
+
+    phone_no: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Agent phone number in free-form format",
+    )
+    """Phone number associated with this agent instance."""
+
+    whatsapp_key: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        comment="WhatsApp authentication key for agent",
+    )
+    """WhatsApp authentication key for this agent instance."""
+
+    # Relationship to llm_endpoint_group
+    endpoint_group: Mapped[Optional["LLMEndpointGroup"]] = relationship(  # type: ignore[name-defined]
+        "LLMEndpointGroup",
+        foreign_keys=[endpoint_group_id],
+        lazy="select",
+    )
+    """The LLM endpoint group assigned to this agent instance."""
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -186,10 +226,11 @@ class AgentInstance(Base):
     __table_args__ = (
         Index("idx_agent_instances_status", "status"),
         Index("idx_agent_instances_user", "user_id"),
+        Index("idx_agent_instances_endpoint_group_id", "endpoint_group_id"),
         {"extend_existing": True},
     )
 
 
 # Type checking imports for forward references
 if TYPE_CHECKING:
-    pass
+    from db.entity.llm_endpoint_entity import LLMEndpointGroup

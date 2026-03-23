@@ -211,7 +211,31 @@ class AgentInstanceBase(BaseModel):
         description="Last heartbeat timestamp for liveness detection",
     )
     """Last heartbeat timestamp."""
-    
+
+    agent_id: Optional[str] = Field(
+        default=None,
+        description="Unique string identifier for this agent instance",
+    )
+    """Unique string agent identifier (e.g. 'butler-001')."""
+
+    endpoint_group_id: Optional[UUID] = Field(
+        default=None,
+        description="ID of the LLM endpoint group assigned to this instance",
+    )
+    """FK to llm_endpoint_groups."""
+
+    phone_no: Optional[str] = Field(
+        default=None,
+        description="Phone number associated with this agent instance",
+    )
+    """Agent phone number."""
+
+    whatsapp_key: Optional[str] = Field(
+        default=None,
+        description="WhatsApp authentication key for this agent instance",
+    )
+    """WhatsApp key."""
+
     model_config = ConfigDict(
         extra="ignore",
         json_schema_extra={
@@ -220,6 +244,10 @@ class AgentInstanceBase(BaseModel):
                 "status": "idle",
                 "config": {"max_results": 20},
                 "last_heartbeat_at": "2026-03-22T12:00:00Z",
+                "agent_id": "butler-001",
+                "endpoint_group_id": None,
+                "phone_no": None,
+                "whatsapp_key": None,
             }
         }
     )
@@ -280,7 +308,31 @@ class AgentInstanceUpdate(BaseModel):
         description="New heartbeat timestamp",
     )
     """New heartbeat timestamp (optional)."""
-    
+
+    agent_id: Optional[str] = Field(
+        default=None,
+        description="New unique string identifier for this agent instance",
+    )
+    """New agent_id (optional)."""
+
+    endpoint_group_id: Optional[UUID] = Field(
+        default=None,
+        description="New LLM endpoint group ID",
+    )
+    """New endpoint group FK (optional)."""
+
+    phone_no: Optional[str] = Field(
+        default=None,
+        description="New phone number",
+    )
+    """New phone number (optional)."""
+
+    whatsapp_key: Optional[str] = Field(
+        default=None,
+        description="New WhatsApp key",
+    )
+    """New WhatsApp key (optional)."""
+
     model_config = ConfigDict(
         extra="ignore",
     )
