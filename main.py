@@ -74,6 +74,8 @@ async def main() -> None:
     from src.tools.db_pool import configure_pool, close_pool
     from src.msg_queue.manager import get_queue_manager
     from src.msg_queue.handler import register_all_handlers
+    from src.msg_queue.dedup import MessageDeduplicator
+    from src.channels.whatsapp import WhatsAppChannel, WhatsAppWSClient
 
     # Init asyncpg pool (used by DAOs / SQLAlchemy layer)
     await configure_pool()
@@ -87,10 +89,24 @@ async def main() -> None:
     register_all_handlers(qm)
     qm.start()
 
+    # Init WhatsApp listener
+    instance = _require_env("EVOLUTION_INSTANCE")
+    wa_channel = WhatsAppChannel()
+    wa_dedup = MessageDeduplicator()
+    wa_client = WhatsAppWSClient(
+        instance_name=instance,
+        queue=qm,
+        channel=wa_channel,
+        dedup=wa_dedup,
+    )
+    await wa_client.start()
+    logger.info(_("WhatsApp listener started (instance=%s)"), instance)
+
     try:
         logger.info(_("Agent server started — waiting for messages"))
         await asyncio.Event().wait()  # block until interrupted
     finally:
+        await wa_client.stop()
         qm.stop()
         await lg_pool.close()
         await close_pool()
