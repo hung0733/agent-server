@@ -112,8 +112,7 @@ class WhatsAppWSClient:
         )
 
     async def stop(self) -> None:
-        """Set all instances offline, then cancel the listener task."""
-        await self._set_all_presence("unavailable")
+        """Cancel the listener task."""
         if self._task and not self._task.done():
             self._task.cancel()
             try:
