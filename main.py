@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import signal
 from urllib.parse import quote
 
 from dotenv import load_dotenv
@@ -106,16 +107,43 @@ async def main() -> None:
     await wa_client.start()
     logger.info(_("WhatsApp listener started (global mode)"))
 
+    # Use signal handlers so shutdown runs in a clean (non-cancelled) context.
+    # loop.add_signal_handler() intercepts SIGINT/SIGTERM before Python can
+    # raise KeyboardInterrupt, so the finally block can safely await.
+    loop = asyncio.get_running_loop()
+    shutdown_event = asyncio.Event()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(sig, shutdown_event.set)
+
+    logger.info(_("Agent server started — waiting for messages"))
     try:
-        logger.info(_("Agent server started — waiting for messages"))
-        await asyncio.Event().wait()  # block until interrupted
-    finally:
-        await wa_client.stop()
-        qm.stop()
-        await lg_pool.close()
-        await close_pool()
-        logger.info(_("Shutdown complete"))
+        await shutdown_event.wait()
+    except asyncio.CancelledError:
+        # asyncio.run() cancels the main task on KeyboardInterrupt.
+        # Uncancel so the cleanup awaits below work normally.
+        t = asyncio.current_task()
+        if t is not None:
+            t.uncancel()
+
+    logger.info(_("Shutdown signal received — draining queue"))
+    # Stop accepting new inbound messages first
+    await wa_client.stop()
+
+    # Wait for in-flight tasks to finish (max 30 s)
+    drain_timeout = float(os.getenv("SHUTDOWN_DRAIN_TIMEOUT", "30"))
+    try:
+        await qm.wait_for_completion(timeout=drain_timeout)
+    except asyncio.TimeoutError:
+        logger.warning(_("Queue drain timed out after %ds — forcing shutdown"), int(drain_timeout))
+
+    qm.stop()
+    await lg_pool.close()
+    await close_pool()
+    logger.info(_("Shutdown complete"))
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass

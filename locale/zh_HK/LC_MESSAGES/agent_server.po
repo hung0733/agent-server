@@ -23,6 +23,12 @@ msgstr "WhatsApp 監聽器已啟動（全局模式）"
 msgid "Agent server started — waiting for messages"
 msgstr "Agent 伺服器已啟動 — 等待訊息中"
 
+msgid "Shutdown signal received — draining queue"
+msgstr "收到關閉信號 — 正在等待隊列清空"
+
+msgid "Queue drain timed out after %ds — forcing shutdown"
+msgstr "隊列清空等待逾時（%d 秒）— 強制關閉"
+
 msgid "Shutdown complete"
 msgstr "關閉完成"
 

@@ -102,8 +102,6 @@ class WhatsAppWSClient:
         self._api_url = (api_url or _require_env("EVOLUTION_API_URL")).rstrip("/")
         self._api_key = api_key or _require_env("EVOLUTION_API_KEY")
         self._task: Optional[asyncio.Task] = None
-        # Populated after sync: {instance_name: wa_key}
-        self._instance_keys: dict[str, str] = {}
 
     async def start(self) -> None:
         """Spawn the Socket.IO listener as a background task."""
@@ -156,7 +154,6 @@ class WhatsAppWSClient:
         @sio.event
         async def connect() -> None:
             logger.info(_("Socket.IO connected to Evolution API (global mode)"))
-            asyncio.create_task(self._sync_agent_names())
 
         @sio.event
         async def disconnect() -> None:
@@ -181,186 +178,6 @@ class WhatsAppWSClient:
         )
         await disconnected.wait()
         await sio.disconnect()
-
-    async def _sync_agent_names(self) -> None:
-        """On connect: check each agent's WhatsApp profile name matches agent.name.
-
-        agent.whatsapp_key is the instance-specific Evolution API key.
-        Use it as the apikey header to fetch that instance's own info.
-
-        Flow per agent:
-          1. GET /instance/fetchInstances (apikey=whatsapp_key) → instanceName + profileName
-          2. If profileName != agent.name → POST /chat/updateProfileName/{instanceName}
-        """
-        try:
-            from db.dao.agent_instance_dao import AgentInstanceDAO
-
-            self._instance_keys.clear()
-            agents = await AgentInstanceDAO.get_with_whatsapp_key()
-            if not agents:
-                logger.debug(_("No agents with whatsapp_key — skipping name sync"))
-                return
-
-            async with aiohttp.ClientSession() as http:
-                for agent in agents:
-                    wa_key = agent.whatsapp_key or ""
-                    agent_name = agent.name or ""
-                    headers = {
-                        "apikey": wa_key,
-                        "Content-Type": "application/json",
-                    }
-
-                    # 1. Fetch the instance tied to this key
-                    async with http.get(
-                        f"{self._api_url}/instance/fetchInstances",
-                        headers=headers,
-                    ) as resp:
-                        if resp.status >= 400:
-                            body = await resp.text()
-                            logger.warning(
-                                _("fetchInstances failed for agent %s [%s]: %s"),
-                                agent.name,
-                                resp.status,
-                                body,
-                            )
-                            continue
-                        instances: list = await resp.json()
-
-                    if not instances:
-                        logger.warning(
-                            _("No instance found for agent %s — skipping"), agent.name
-                        )
-                        continue
-
-                    # The instance-specific key returns exactly one instance
-                    item = instances[0]
-                    inst = item.get("instance") or item
-                    instance_name: str = (
-                        inst.get("instanceName") or inst.get("name") or ""
-                    )
-                    wa_profile_name: str = (
-                        inst.get("profileName") or inst.get("pushName") or ""
-                    )
-
-                    if not instance_name:
-                        logger.warning(
-                            _("Could not determine instanceName for agent %s"), agent.name
-                        )
-                        continue
-
-                    # 2. Check connection state — skip if not open
-                    async with http.get(
-                        f"{self._api_url}/instance/connectionState/{instance_name}",
-                        headers=headers,
-                    ) as resp:
-                        if resp.status >= 400:
-                            logger.warning(
-                                _("connectionState check failed for %s [%s] — skipping"),
-                                instance_name,
-                                resp.status,
-                            )
-                            continue
-                        state_data = await resp.json()
-
-                    conn_state: str = (
-                        state_data.get("instance", {}).get("state")
-                        or state_data.get("state")
-                        or ""
-                    )
-                    if conn_state != "open":
-                        logger.warning(
-                            _("Instance %s not connected (state=%s) — skipping"),
-                            instance_name,
-                            conn_state,
-                        )
-                        continue
-
-                    # Cache for presence (only connected instances)
-                    self._instance_keys[instance_name] = wa_key
-
-                    if wa_profile_name == agent_name:
-                        logger.info(
-                            _("Agent %s WhatsApp name already correct (%s)"),
-                            agent.name,
-                            wa_profile_name,
-                        )
-                        continue
-
-                    # 3. Names differ — update
-                    logger.info(
-                        _("Agent %s: WhatsApp name mismatch ('%s' → '%s'), updating"),
-                        agent.name,
-                        wa_profile_name,
-                        agent_name,
-                    )
-                    async with http.post(
-                        f"{self._api_url}/chat/updateProfileName/{instance_name}",
-                        json={"name": agent_name},
-                        headers=headers,
-                    ) as resp:
-                        if resp.status >= 400:
-                            body = await resp.text()
-                            logger.error(
-                                _("updateProfileName failed for %s [%s]: %s"),
-                                instance_name,
-                                resp.status,
-                                body,
-                            )
-                        else:
-                            logger.info(
-                                _("Agent %s WhatsApp name updated to '%s'"),
-                                agent.name,
-                                agent_name,
-                            )
-
-        except Exception as exc:
-            logger.error(_("Agent name sync failed: %s"), exc)
-            return
-
-        # Set all instances online after sync completes
-        await self._set_all_presence("available")
-
-    async def _set_all_presence(self, presence: str) -> None:
-        """Set presence for every cached agent instance.
-
-        Args:
-            presence: "available" (online) or "unavailable" (offline).
-        """
-        if not self._instance_keys:
-            return
-        async with aiohttp.ClientSession() as http:
-            for instance_name, wa_key in self._instance_keys.items():
-                try:
-                    async with http.post(
-                        f"{self._api_url}/instance/setPresence/{instance_name}",
-                        json={"presence": presence},
-                        headers={
-                            "apikey": wa_key,
-                            "Content-Type": "application/json",
-                        },
-                    ) as resp:
-                        if resp.status >= 400:
-                            body = await resp.text()
-                            logger.error(
-                                _("setPresence(%s) failed for %s [%s]: %s"),
-                                presence,
-                                instance_name,
-                                resp.status,
-                                body,
-                            )
-                        else:
-                            logger.info(
-                                _("Instance %s presence set to %s"),
-                                instance_name,
-                                presence,
-                            )
-                except Exception as exc:
-                    logger.error(
-                        _("setPresence(%s) error for %s: %s"),
-                        presence,
-                        instance_name,
-                        exc,
-                    )
 
     async def _handle_raw(self, event: str, data: dict) -> None:
         """Parse a Socket.IO event and enqueue if it's a valid inbound message."""
