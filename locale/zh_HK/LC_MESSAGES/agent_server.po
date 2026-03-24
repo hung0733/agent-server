@@ -1,0 +1,77 @@
+# Agent Server — zh-HK Translations
+# 香港繁體中文
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Language: zh_HK\n"
+
+# logging_setup.py
+msgid "Logging initialised — files: %s"
+msgstr "日誌初始化完成 — 檔案位置：%s"
+
+# main.py
+msgid "asyncpg pool initialized"
+msgstr "asyncpg 連線池初始化完成"
+
+msgid "LangGraph checkpointer initialized (schema=%s)"
+msgstr "LangGraph checkpointer 初始化完成（schema=%s）"
+
+msgid "Health server listening on http://%s:%d/health"
+msgstr "健康檢查伺服器已啟動：http://%s:%d/health"
+
+msgid "Agent server started — waiting for messages"
+msgstr "Agent 伺服器已啟動 — 等待訊息中"
+
+msgid "Shutdown signal received"
+msgstr "收到關閉訊號"
+
+msgid "Shutdown complete"
+msgstr "關閉完成"
+
+# channels/whatsapp.py — WhatsAppChannel
+msgid "Evolution API send_text failed [%s]: %s"
+msgstr "Evolution API 發送訊息失敗 [%s]：%s"
+
+msgid "Sent message to %s via instance %s"
+msgstr "訊息已透過實例 %s 成功發送至 %s"
+
+# channels/whatsapp.py — WhatsAppWSClient
+msgid "WhatsAppWSClient stopped (instance=%s)"
+msgstr "WhatsApp WebSocket 客戶端已停止（實例=%s）"
+
+msgid "WS connected to Evolution API (instance=%s)"
+msgstr "已連線至 Evolution API WebSocket（實例=%s）"
+
+msgid "WS closed by server (instance=%s)"
+msgstr "伺服器已關閉 WebSocket 連線（實例=%s）"
+
+msgid "WS disconnected (instance=%s, attempt=%d): %s — retrying in %ds"
+msgstr "WebSocket 斷線（實例=%s，第 %d 次嘗試）：%s — %d 秒後重試"
+
+msgid "Queued message from %s (id=%s, priority=%d)"
+msgstr "已排隊訊息，來自 %s（id=%s，優先級=%d）"
+
+msgid "Duplicate message dropped: %s"
+msgstr "重複訊息已丟棄：%s"
+
+# msg_queue/dedup.py
+msgid "Dedup: purged %d expired entries"
+msgstr "已清除 %d 條過期去重記錄"
+
+# msg_queue/message_queue.py
+msgid "MessageWorker started"
+msgstr "訊息處理工作器已啟動"
+
+msgid "MessageWorker stopped"
+msgstr "訊息處理工作器已停止"
+
+msgid "Processing message from %s (id=%s, channel=%s)"
+msgstr "正在處理訊息，來自 %s（id=%s，頻道=%s）"
+
+msgid "Error processing message id=%s from %s"
+msgstr "處理訊息時發生錯誤，id=%s，來自 %s"
+
+# graph/butler.py
+msgid "Butler processing message id=%s from %s: %r"
+msgstr "Butler 正在處理訊息 id=%s，來自 %s：%r"
