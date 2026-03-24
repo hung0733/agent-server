@@ -215,3 +215,12 @@ msgstr "Agent %s 的 WhatsApp 名稱已更新為「%s」"
 
 msgid "Agent name sync failed: %s"
 msgstr "Agent 名稱同步失敗：%s"
+
+msgid "Instance %s presence set to %s"
+msgstr "實例 %s 上線狀態已設為 %s"
+
+msgid "setPresence(%s) failed for %s [%s]: %s"
+msgstr "設定實例 %s 上線狀態（%s）失敗 [%s]：%s"
+
+msgid "setPresence(%s) error for %s: %s"
+msgstr "設定實例 %s 上線狀態（%s）時發生錯誤：%s"
