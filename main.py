@@ -18,7 +18,8 @@ load_dotenv()
 import sys
 sys.path.insert(0, "src")
 from src.logging_setup import setup_logging
-setup_logging()
+_log_level = logging.DEBUG if os.getenv("DEBUG", "").lower() == "true" else logging.INFO
+setup_logging(level=_log_level)
 from src.i18n import _
 
 logger = logging.getLogger(__name__)
@@ -89,18 +90,16 @@ async def main() -> None:
     register_all_handlers(qm)
     qm.start()
 
-    # Init WhatsApp listener
-    instance = _require_env("EVOLUTION_INSTANCE")
+    # Init WhatsApp listener (global mode — receives all instances)
     wa_channel = WhatsAppChannel()
     wa_dedup = MessageDeduplicator()
     wa_client = WhatsAppWSClient(
-        instance_name=instance,
         queue=qm,
         channel=wa_channel,
         dedup=wa_dedup,
     )
     await wa_client.start()
-    logger.info(_("WhatsApp listener started (instance=%s)"), instance)
+    logger.info(_("WhatsApp listener started (global mode)"))
 
     try:
         logger.info(_("Agent server started — waiting for messages"))

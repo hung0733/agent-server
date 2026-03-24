@@ -2,7 +2,8 @@
 
 Two components:
   - WhatsAppChannel   : outbound REST sender (POST /message/sendText)
-  - WhatsAppWSClient  : inbound WebSocket listener, enqueues IncomingMessage
+  - WhatsAppWSClient  : inbound Socket.IO listener (WEBSOCKET_GLOBAL_EVENTS=true)
+                        One connection receives events from ALL registered instances.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Optional
 
 import aiohttp
+import socketio
 
 from channels.base import AbstractChannel, ChannelType, IncomingMessage
 from i18n import _
@@ -30,7 +32,7 @@ _WS_RECONNECT_DELAYS = [1, 2, 4, 8, 16]  # seconds, exponential backoff
 def _require_env(name: str) -> str:
     value = os.getenv(name)
     if value is None:
-        raise RuntimeError(f"Required environment variable '{name}' is not set")
+        raise RuntimeError(_("Required environment variable '%s' is not set") % name)
     return value
 
 
@@ -53,7 +55,7 @@ class WhatsAppChannel(AbstractChannel):
         Args:
             instance_id:  Evolution API instance name.
             recipient_id: Recipient phone number (international format, no +).
-            text:         Message body.
+            text:         Message content.
         """
         url = f"{self._api_url}/message/sendText/{instance_id}"
         payload = {"number": recipient_id, "text": text}
@@ -78,22 +80,22 @@ class WhatsAppChannel(AbstractChannel):
 
 
 class WhatsAppWSClient:
-    """Connects to Evolution API WebSocket and enqueues incoming messages.
+    """Global Socket.IO listener for Evolution API (WEBSOCKET_GLOBAL_EVENTS=true).
 
+    One connection receives events from ALL registered instances.
+    The instance name is read from each event payload and used to route replies.
     Reconnects automatically with exponential backoff on disconnect.
     Duplicate messages are filtered via MessageDeduplicator.
     """
 
     def __init__(
         self,
-        instance_name: str,
         queue: "QueueManager",
         channel: WhatsAppChannel,
-        dedup: MessageDeduplicator,
+        dedup: "MessageDeduplicator",
         api_url: Optional[str] = None,
         api_key: Optional[str] = None,
     ) -> None:
-        self._instance = instance_name
         self._queue = queue
         self._channel = channel
         self._dedup = dedup
@@ -102,9 +104,9 @@ class WhatsAppWSClient:
         self._task: Optional[asyncio.Task] = None
 
     async def start(self) -> None:
-        """Spawn the WebSocket listener as a background task."""
+        """Spawn the Socket.IO listener as a background task."""
         self._task = asyncio.create_task(
-            self._listen_loop(), name=f"ws-whatsapp-{self._instance}"
+            self._listen_loop(), name="sio-whatsapp-global"
         )
 
     async def stop(self) -> None:
@@ -115,7 +117,7 @@ class WhatsAppWSClient:
                 await self._task
             except asyncio.CancelledError:
                 pass
-        logger.info(_("WhatsAppWSClient stopped (instance=%s)"), self._instance)
+        logger.info(_("WhatsAppWSClient stopped"))
 
     async def _listen_loop(self) -> None:
         """Outer loop: reconnects on failure with exponential backoff."""
@@ -123,7 +125,7 @@ class WhatsAppWSClient:
         while True:
             try:
                 await self._connect_and_receive()
-                attempt = 0  # reset on clean disconnect
+                attempt = 0
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -131,8 +133,7 @@ class WhatsAppWSClient:
                     min(attempt, len(_WS_RECONNECT_DELAYS) - 1)
                 ]
                 logger.warning(
-                    _("WS disconnected (instance=%s, attempt=%d): %s — retrying in %ds"),
-                    self._instance,
+                    _("Socket.IO disconnected (attempt=%d): %s — retrying in %ds"),
                     attempt + 1,
                     exc,
                     delay,
@@ -141,44 +142,60 @@ class WhatsAppWSClient:
                 attempt += 1
 
     async def _connect_and_receive(self) -> None:
-        """Open one WebSocket connection and receive events until it closes."""
-        # Evolution API WebSocket URL
-        ws_url = (
-            self._api_url.replace("http://", "ws://").replace("https://", "wss://")
-            + f"/{self._instance}?apikey={self._api_key}"
+        """Connect via Socket.IO and block until disconnected."""
+        sio = socketio.AsyncClient(
+            reconnection=False,
+            logger=False,
+            engineio_logger=False,
         )
 
-        async with aiohttp.ClientSession() as session:
-            async with session.ws_connect(ws_url, heartbeat=30) as ws:
-                logger.info(
-                    _("WS connected to Evolution API (instance=%s)"), self._instance
-                )
-                async for msg in ws:
-                    if msg.type == aiohttp.WSMsgType.TEXT:
-                        await self._handle_raw(msg.json())
-                    elif msg.type == aiohttp.WSMsgType.ERROR:
-                        raise RuntimeError(f"WS error: {ws.exception()}")
-                    elif msg.type in (
-                        aiohttp.WSMsgType.CLOSE,
-                        aiohttp.WSMsgType.CLOSING,
-                        aiohttp.WSMsgType.CLOSED,
-                    ):
-                        logger.info(
-                            _("WS closed by server (instance=%s)"), self._instance
-                        )
-                        break
+        disconnected = asyncio.Event()
 
-    async def _handle_raw(self, payload: dict) -> None:
-        """Parse a raw WS payload and enqueue if it's a valid inbound message."""
-        msg = self._parse_event(payload)
+        @sio.event
+        async def connect() -> None:
+            logger.info(_("Socket.IO connected to Evolution API (global mode)"))
+
+        @sio.event
+        async def disconnect() -> None:
+            logger.warning(_("Socket.IO disconnected from Evolution API"))
+            disconnected.set()
+
+        # Evolution API emits both lowercase and uppercase event names
+        @sio.on("messages.upsert")
+        async def on_messages_upsert(data: dict) -> None:
+            await self._handle_raw("messages.upsert", data)
+
+        @sio.on("MESSAGES_UPSERT")
+        async def on_messages_upsert_upper(data: dict) -> None:
+            await self._handle_raw("MESSAGES_UPSERT", data)
+
+        logger.debug(_("Socket.IO connecting: %s"), self._api_url)
+        await sio.connect(
+            self._api_url,
+            headers={"apikey": self._api_key},
+            transports=["websocket"],
+            wait_timeout=10,
+        )
+        await disconnected.wait()
+        await sio.disconnect()
+
+    async def _handle_raw(self, event: str, data: dict) -> None:
+        """Parse a Socket.IO event and enqueue if it's a valid inbound message."""
+        # With WEBSOCKET_GLOBAL_EVENTS=true, Evolution API wraps data as:
+        # { "instance": "<name>", "data": { ... } }
+        # The instance name is used to route the reply back.
+        instance_id: str = data.get("instance", "")
+        inner_data = data.get("data", data)  # fallback: data IS the inner payload
+
+        msg = self._parse_message(event, instance_id, inner_data)
         if msg is None:
             return
+
         if await self._dedup.is_duplicate(msg.id):
             logger.debug(_("Duplicate message dropped: %s"), msg.id)
             return
         await self._dedup.register(msg.id)
-        # Map IncomingMessage → QueueTask.
-        # agent_id is read from env; session_id is the sender's phone number.
+
         agent_id = os.getenv("DEFAULT_AGENT_ID", "default")
         await self._queue.enqueue(
             agent_id=agent_id,
@@ -192,25 +209,21 @@ class WhatsAppWSClient:
             },
         )
         logger.info(
-            _("Queued message from %s (id=%s)"),
+            _("Queued message from %s via instance %s (id=%s)"),
             msg.sender_id,
+            msg.instance_id,
             msg.id,
         )
 
-    def _parse_event(self, payload: dict) -> Optional[IncomingMessage]:
-        """Parse an Evolution API event payload into an IncomingMessage.
+    def _parse_message(
+        self, event: str, instance_id: str, data: dict
+    ) -> Optional[IncomingMessage]:
+        """Parse event data into an IncomingMessage.
 
-        Returns None for events we don't handle (non-message events,
-        outbound messages, group messages, etc.).
+        Returns None for outbound messages, group messages, or non-text events.
         """
-        event = payload.get("event") or payload.get("type") or ""
-        if event not in ("messages.upsert", "MESSAGES_UPSERT"):
-            return None
-
-        data = payload.get("data", {})
         key = data.get("key", {})
 
-        # Drop messages sent by the bot itself
         if key.get("fromMe"):
             return None
 
@@ -220,7 +233,10 @@ class WhatsAppWSClient:
         if not remote_jid or not msg_id:
             return None
 
-        # Extract text (conversation > extendedTextMessage > caption)
+        # Skip group messages (@g.us)
+        if "@g.us" in remote_jid:
+            return None
+
         message = data.get("message", {})
         text: str = (
             message.get("conversation")
@@ -233,17 +249,17 @@ class WhatsAppWSClient:
 
         sender_number = WhatsAppChannel._clean_number(remote_jid)
 
-        # Capture for closure
-        instance = self._instance
-        channel = self._channel
+        # Capture for closure — use instance_id from payload, not a fixed value
+        _instance = instance_id
+        _channel = self._channel
 
         async def _callback(reply: str) -> None:
-            await channel.send_text(instance, sender_number, reply)
+            await _channel.send_text(_instance, sender_number, reply)
 
         return IncomingMessage(
             id=msg_id,
             channel=ChannelType.whatsapp,
-            instance_id=self._instance,
+            instance_id=instance_id,
             sender_id=sender_number,
             text=text,
             received_at=datetime.now(timezone.utc).replace(tzinfo=None),
