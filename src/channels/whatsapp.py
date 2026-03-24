@@ -162,11 +162,11 @@ class WhatsAppWSClient:
             disconnected.set()
 
         # Evolution API emits both lowercase and uppercase event names
-        @sio.on("messages.upsert")
+        @sio.on("messages.upsert") # type: ignore
         async def on_messages_upsert(data: dict) -> None:
             await self._handle_raw("messages.upsert", data)
 
-        @sio.on("MESSAGES_UPSERT")
+        @sio.on("MESSAGES_UPSERT") # type: ignore
         async def on_messages_upsert_upper(data: dict) -> None:
             await self._handle_raw("MESSAGES_UPSERT", data)
 
@@ -183,89 +183,93 @@ class WhatsAppWSClient:
     async def _sync_agent_names(self) -> None:
         """On connect: check each agent's WhatsApp profile name matches agent.name.
 
-        Flow:
-          1. GET /instance/fetchInstances  → list of {instanceName, profileName}
-          2. Query DB for agents with whatsapp_key set
-          3. Match agent.whatsapp_key == instanceName
-          4. If profileName != agent.name → POST /chat/updateProfileName/{instance}
+        agent.whatsapp_key is the instance-specific Evolution API key.
+        Use it as the apikey header to fetch that instance's own info.
+
+        Flow per agent:
+          1. GET /instance/fetchInstances (apikey=whatsapp_key) → instanceName + profileName
+          2. If profileName != agent.name → POST /chat/updateProfileName/{instanceName}
         """
         try:
             from db.dao.agent_instance_dao import AgentInstanceDAO
 
-            headers = {"apikey": self._api_key}
-            async with aiohttp.ClientSession() as session:
-                # 1. Fetch all Evolution API instances
-                async with session.get(
-                    f"{self._api_url}/instance/fetchInstances", headers=headers
-                ) as resp:
-                    if resp.status >= 400:
-                        logger.warning(
-                            _("fetchInstances failed [%s] — skipping name sync"), resp.status
-                        )
-                        return
-                    instances: list = await resp.json()
-
-            # Build map: instanceName → profileName
-            profile_map: dict[str, str] = {}
-            for item in instances:
-                inst = item.get("instance") or item  # handle both response shapes
-                name = inst.get("instanceName") or inst.get("name", "")
-                profile = inst.get("profileName") or inst.get("pushName") or ""
-                if name:
-                    profile_map[name] = profile
-
-            if not profile_map:
-                logger.debug(_("No instances returned — skipping name sync"))
-                return
-
-            # 2. Query DB agents with whatsapp_key
             agents = await AgentInstanceDAO.get_with_whatsapp_key()
             if not agents:
                 logger.debug(_("No agents with whatsapp_key — skipping name sync"))
                 return
 
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession() as http:
                 for agent in agents:
-                    key = agent.whatsapp_key or ""
-                    if key not in profile_map:
-                        logger.debug(
-                            _("Agent %s whatsapp_key=%s not found in instances"),
-                            agent.name,
-                            key,
+                    wa_key = agent.whatsapp_key or ""
+                    agent_name = agent.name or ""
+                    headers = {
+                        "apikey": wa_key,
+                        "Content-Type": "application/json",
+                    }
+
+                    # 1. Fetch the instance tied to this key
+                    async with http.get(
+                        f"{self._api_url}/instance/fetchInstances",
+                        headers=headers,
+                    ) as resp:
+                        if resp.status >= 400:
+                            body = await resp.text()
+                            logger.warning(
+                                _("fetchInstances failed for agent %s [%s]: %s"),
+                                agent.name,
+                                resp.status,
+                                body,
+                            )
+                            continue
+                        instances: list = await resp.json()
+
+                    if not instances:
+                        logger.warning(
+                            _("No instance found for agent %s — skipping"), agent.name
                         )
                         continue
 
-                    wa_name = profile_map[key]
-                    agent_name = agent.name or ""
+                    # The instance-specific key returns exactly one instance
+                    item = instances[0]
+                    inst = item.get("instance") or item
+                    instance_name: str = (
+                        inst.get("instanceName") or inst.get("name") or ""
+                    )
+                    wa_profile_name: str = (
+                        inst.get("profileName") or inst.get("pushName") or ""
+                    )
 
-                    if wa_name == agent_name:
+                    if not instance_name:
+                        logger.warning(
+                            _("Could not determine instanceName for agent %s"), agent.name
+                        )
+                        continue
+
+                    if wa_profile_name == agent_name:
                         logger.info(
                             _("Agent %s WhatsApp name already correct (%s)"),
                             agent.name,
-                            wa_name,
+                            wa_profile_name,
                         )
                         continue
 
-                    # 4. Names differ — update WhatsApp profile name
+                    # 2. Names differ — update
                     logger.info(
                         _("Agent %s: WhatsApp name mismatch ('%s' → '%s'), updating"),
                         agent.name,
-                        wa_name,
+                        wa_profile_name,
                         agent_name,
                     )
-                    async with session.post(
-                        f"{self._api_url}/chat/updateProfileName/{key}",
+                    async with http.post(
+                        f"{self._api_url}/chat/updateProfileName/{instance_name}",
                         json={"name": agent_name},
-                        headers={
-                            "apikey": self._api_key,
-                            "Content-Type": "application/json",
-                        },
+                        headers=headers,
                     ) as resp:
                         if resp.status >= 400:
                             body = await resp.text()
                             logger.error(
                                 _("updateProfileName failed for %s [%s]: %s"),
-                                key,
+                                instance_name,
                                 resp.status,
                                 body,
                             )

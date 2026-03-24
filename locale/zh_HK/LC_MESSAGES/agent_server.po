@@ -186,11 +186,14 @@ msgid "Error closing global database pool"
 msgstr "關閉全局資料庫連線池時發生錯誤"
 
 # channels/whatsapp.py — agent name sync
-msgid "fetchInstances failed [%s] — skipping name sync"
-msgstr "獲取實例列表失敗 [%s] — 跳過名稱同步"
+msgid "fetchInstances failed for agent %s [%s]: %s"
+msgstr "獲取 Agent %s 實例列表失敗 [%s]：%s"
 
-msgid "No instances returned — skipping name sync"
-msgstr "未取得任何實例 — 跳過名稱同步"
+msgid "No instance found for agent %s — skipping"
+msgstr "找不到 Agent %s 的實例 — 跳過"
+
+msgid "Could not determine instanceName for agent %s"
+msgstr "無法確定 Agent %s 的實例名稱"
 
 msgid "No agents with whatsapp_key — skipping name sync"
 msgstr "沒有設定 whatsapp_key 的 Agent — 跳過名稱同步"
