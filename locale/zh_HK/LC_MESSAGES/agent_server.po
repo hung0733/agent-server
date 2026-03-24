@@ -17,61 +17,170 @@ msgstr "asyncpg 連線池初始化完成"
 msgid "LangGraph checkpointer initialized (schema=%s)"
 msgstr "LangGraph checkpointer 初始化完成（schema=%s）"
 
-msgid "Health server listening on http://%s:%d/health"
-msgstr "健康檢查伺服器已啟動：http://%s:%d/health"
+msgid "WhatsApp listener started (global mode)"
+msgstr "WhatsApp 監聽器已啟動（全局模式）"
 
 msgid "Agent server started — waiting for messages"
 msgstr "Agent 伺服器已啟動 — 等待訊息中"
 
-msgid "Shutdown signal received"
-msgstr "收到關閉訊號"
-
 msgid "Shutdown complete"
 msgstr "關閉完成"
 
-# channels/whatsapp.py — WhatsAppChannel
+# channels/whatsapp.py
+msgid "Required environment variable '%s' is not set"
+msgstr "必要環境變數 '%s' 未設定"
+
 msgid "Evolution API send_text failed [%s]: %s"
 msgstr "Evolution API 發送訊息失敗 [%s]：%s"
 
 msgid "Sent message to %s via instance %s"
-msgstr "訊息已透過實例 %s 成功發送至 %s"
+msgstr "訊息已透過實例 %s 發送至 %s"
 
-# channels/whatsapp.py — WhatsAppWSClient
-msgid "WhatsAppWSClient stopped (instance=%s)"
-msgstr "WhatsApp WebSocket 客戶端已停止（實例=%s）"
+msgid "WhatsAppWSClient stopped"
+msgstr "WhatsApp 監聽器已停止"
 
-msgid "WS connected to Evolution API (instance=%s)"
-msgstr "已連線至 Evolution API WebSocket（實例=%s）"
+msgid "Socket.IO connecting: %s"
+msgstr "正在連線至 Socket.IO：%s"
 
-msgid "WS closed by server (instance=%s)"
-msgstr "伺服器已關閉 WebSocket 連線（實例=%s）"
+msgid "Socket.IO connected to Evolution API (global mode)"
+msgstr "已連線至 Evolution API（全局模式）"
 
-msgid "WS disconnected (instance=%s, attempt=%d): %s — retrying in %ds"
-msgstr "WebSocket 斷線（實例=%s，第 %d 次嘗試）：%s — %d 秒後重試"
+msgid "Socket.IO disconnected from Evolution API"
+msgstr "已與 Evolution API 斷線"
 
-msgid "Queued message from %s (id=%s, priority=%d)"
-msgstr "已排隊訊息，來自 %s（id=%s，優先級=%d）"
+msgid "Socket.IO disconnected (attempt=%d): %s — retrying in %ds"
+msgstr "Socket.IO 斷線（第 %d 次嘗試）：%s — %d 秒後重試"
 
 msgid "Duplicate message dropped: %s"
 msgstr "重複訊息已丟棄：%s"
+
+msgid "Queued message from %s via instance %s (id=%s)"
+msgstr "已排隊訊息，來自 %s（實例=%s，id=%s）"
 
 # msg_queue/dedup.py
 msgid "Dedup: purged %d expired entries"
 msgstr "已清除 %d 條過期去重記錄"
 
-# msg_queue/message_queue.py
-msgid "MessageWorker started"
-msgstr "訊息處理工作器已啟動"
+# msg_queue/manager.py
+msgid "QueueManager initialised (max_concurrent=%d, max_queue=%d, max_workers=%d)"
+msgstr "QueueManager 已初始化（最大並發=%d，最大隊列=%d，最大工作線程=%d）"
 
-msgid "MessageWorker stopped"
-msgstr "訊息處理工作器已停止"
+msgid "Registered handler for state=%s"
+msgstr "已為狀態 %s 註冊處理函數"
 
-msgid "Processing message from %s (id=%s, channel=%s)"
-msgstr "正在處理訊息，來自 %s（id=%s，頻道=%s）"
+msgid "Registered handler for state=%s (max_connections=%d)"
+msgstr "已為狀態 %s 註冊處理函數（最大並發=%d）"
 
-msgid "Error processing message id=%s from %s"
-msgstr "處理訊息時發生錯誤，id=%s，來自 %s"
+msgid "Unregistered handler for state=%s"
+msgstr "已為狀態 %s 移除處理函數"
 
-# graph/butler.py
-msgid "Butler processing message id=%s from %s: %r"
-msgstr "Butler 正在處理訊息 id=%s，來自 %s：%r"
+msgid "Queue is full (max_size=%d)"
+msgstr "隊列已滿（最大容量=%d）"
+
+msgid "Task %s enqueued (priority=%s, agent=%s)"
+msgstr "任務 %s 已加入隊列（優先級=%s，agent=%s）"
+
+msgid "Task %s cancelled"
+msgstr "任務 %s 已取消"
+
+msgid "Task %s is processing — cannot cancel"
+msgstr "任務 %s 正在處理中，無法取消"
+
+msgid "Task %s enqueued"
+msgstr "任務 %s 已加入隊列"
+
+msgid "QueueManager already running"
+msgstr "QueueManager 已在運行中"
+
+msgid "QueueManager started"
+msgstr "QueueManager 已啟動"
+
+msgid "QueueManager stopped"
+msgstr "QueueManager 已停止"
+
+msgid "Queue processor loop started"
+msgstr "隊列處理循環已啟動"
+
+msgid "Queue processor loop stopped"
+msgstr "隊列處理循環已停止"
+
+msgid "Queue processor error: %s"
+msgstr "隊列處理器錯誤：%s"
+
+msgid "No handler for state=%s — skipping task %s"
+msgstr "狀態 %s 無對應處理函數 — 跳過任務 %s"
+
+msgid "Processing task %s (agent=%s)"
+msgstr "正在處理任務 %s（agent=%s）"
+
+msgid "Task %s completed"
+msgstr "任務 %s 已完成"
+
+msgid "Task %s failed: %s"
+msgstr "任務 %s 失敗：%s"
+
+msgid "error_callback failed: %s"
+msgstr "錯誤回調失敗：%s"
+
+# msg_queue/task.py
+msgid "Task %s error: %s"
+msgstr "任務 %s 發生錯誤：%s"
+
+msgid "Task %s: stream ended"
+msgstr "任務 %s：串流結束"
+
+msgid "Task %s: generator force-closed"
+msgstr "任務 %s：生成器被強制關閉"
+
+msgid "Task %s: stream_gen error: %s"
+msgstr "任務 %s：串流生成器錯誤：%s"
+
+# msg_queue/handler.py
+msgid "Creating queue task for agent=%s session=%s"
+msgstr "正在為 agent=%s session=%s 建立隊列任務"
+
+msgid "Task %s: collect_db_data (agent=%s)"
+msgstr "任務 %s：正在載入 agent 資料（agent=%s）"
+
+msgid "Task %s: collect_db_data failed: %s"
+msgstr "任務 %s：載入 agent 資料失敗：%s"
+
+msgid "Task %s: pack_sys_prompt"
+msgstr "任務 %s：正在打包系統提示詞"
+
+msgid "Task %s: pack_sys_prompt failed: %s"
+msgstr "任務 %s：打包系統提示詞失敗：%s"
+
+msgid "Task %s: pack_memory"
+msgstr "任務 %s：正在打包長期記憶"
+
+msgid "Task %s: pack_memory failed: %s"
+msgstr "任務 %s：打包長期記憶失敗：%s"
+
+msgid "Task %s: pack_message"
+msgstr "任務 %s：正在打包訊息"
+
+msgid "Task %s: pack_message failed: %s"
+msgstr "任務 %s：打包訊息失敗：%s"
+
+msgid "Task %s: analyse_msg_diff"
+msgstr "任務 %s：正在分析訊息難度"
+
+msgid "Task %s: analyse_msg_diff failed: %s"
+msgstr "任務 %s：分析訊息難度失敗：%s"
+
+msgid "Task %s: select_llm_model"
+msgstr "任務 %s：正在選擇 LLM 模型"
+
+msgid "Task %s: select_llm_model failed: %s"
+msgstr "任務 %s：選擇 LLM 模型失敗：%s"
+
+msgid "Task %s: send_llm_msg"
+msgstr "任務 %s：正在發送 LLM 請求"
+
+msgid "Task %s: send_llm_msg failed: %s"
+msgstr "任務 %s：發送 LLM 請求失敗：%s"
+
+# tools/db_pool.py
+msgid "Error closing global database pool"
+msgstr "關閉全局資料庫連線池時發生錯誤"
