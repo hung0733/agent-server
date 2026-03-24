@@ -96,9 +96,8 @@ def create_engine(
     if max_size is not None:
         connect_args["max_size"] = max_size
     
-    # Add search_path to match existing pattern from db_pool.py
-    # This ensures consistency with the existing database configuration
-    connect_args["server_settings"] = {"search_path": "langgraph,public"}
+    # App tables live in public schema only
+    connect_args["server_settings"] = {"search_path": "public"}
     
     return create_async_engine(
         dsn,

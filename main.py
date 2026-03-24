@@ -64,6 +64,11 @@ async def init_langgraph_checkpointer():
     )
     await pool.open()
 
+    # Ensure the langgraph schema exists before setup() creates tables
+    schema = _require_env("LANGGRAPH_SCHEMA")
+    async with pool.connection() as conn:
+        await conn.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
+
     checkpointer = AsyncPostgresSaver(conn=pool) # type: ignore
     await checkpointer.setup()
 
