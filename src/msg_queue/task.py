@@ -11,6 +11,7 @@ from typing import Any, AsyncGenerator, Dict, Optional
 from pydantic import BaseModel, Field
 
 from i18n import _
+from models.llm import LLMSet
 from msg_queue.models import (
     MsgDiffLevel,
     QueueTaskPriority,
@@ -32,7 +33,7 @@ class QueueTask(BaseModel):
 
     # Input
     message: str
-    think_mode: bool = False
+    think_mode: Optional[bool] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
     # Scheduling
@@ -49,8 +50,7 @@ class QueueTask(BaseModel):
     # Pipeline intermediates (populated by handler stages)
     packed_message: Optional[str] = None
     packed_prompt: Optional[str] = None
-    msg_diff_level: Optional[MsgDiffLevel] = None
-    selected_models: Optional[list] = None  # list[BaseChatModel] once LLM layer exists
+    model_set: Optional[LLMSet] = None  # list[BaseChatModel] once LLM layer exists
     agent: Optional[Any] = None  # Agent instance once graph layer exists
 
     # Internal stream channel
@@ -105,3 +105,4 @@ class QueueTask(BaseModel):
                 yield StreamChunk(chunk_type="done")
 
         return _gen()
+    

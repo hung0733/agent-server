@@ -187,6 +187,7 @@ class AgentInstance(Base):
     phone_no: Mapped[Optional[str]] = mapped_column(
         Text,
         nullable=True,
+        index=True,
         comment="Agent phone number in free-form format",
     )
     """Phone number associated with this agent instance."""

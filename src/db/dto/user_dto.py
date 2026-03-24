@@ -40,12 +40,18 @@ class UserBase(BaseModel):
         description="Unique username for login and identification",
     )
     """Unique username."""
-    
+
     email: str = Field(
         ...,
         description="Unique email address",
     )
     """User email address."""
+
+    phone_no: Optional[str] = Field(
+        default=None,
+        description="WhatsApp phone number (international format, no +)",
+    )
+    """WhatsApp phone number for inbound message authentication."""
     
     is_active: bool = Field(
         default=True,

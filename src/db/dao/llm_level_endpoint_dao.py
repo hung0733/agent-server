@@ -16,9 +16,14 @@ from sqlalchemy import select, func, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.dto.llm_endpoint_dto import (
-    LLMLevelEndpointCreate, LLMLevelEndpoint, LLMLevelEndpointUpdate
+    LLMEndpointWithLevel,
+    LLMLevelEndpointCreate,
+    LLMLevelEndpoint,
+    LLMLevelEndpointUpdate,
 )
+from db.entity.llm_endpoint_entity import LLMEndpoint as LLMEndpointEntity
 from db.entity.llm_endpoint_entity import LLMLevelEndpoint as LLMLevelEndpointEntity
+from db.entity.agent_entity import AgentInstance as AgentInstanceEntity
 
 
 class LLMLevelEndpointDAO:
@@ -365,3 +370,74 @@ class LLMLevelEndpointDAO:
                 count = await _query(s)
             await engine.dispose()
             return count
+
+    @staticmethod
+    async def get_by_agent_instance_id(
+        agent_instance_id: UUID,
+        session: Optional[AsyncSession] = None,
+    ) -> List[LLMEndpointWithLevel]:
+        """Return all active endpoints for an agent, enriched with level metadata.
+
+        Joins agent_instances → llm_level_endpoints → llm_endpoints using the
+        agent's endpoint_group_id.  Both the level assignment and the endpoint
+        itself must be active (is_active = true) to be included.
+
+        Args:
+            agent_instance_id: UUID of the AgentInstance (agent_db_id).
+            session: Optional async session for transaction control.
+
+        Returns:
+            List of LLMEndpointWithLevel DTOs ordered by difficulty_level,
+            priority descending.
+        """
+        async def _query(s: AsyncSession) -> List[LLMEndpointWithLevel]:
+            rows = await s.execute(
+                select(
+                    LLMEndpointEntity,
+                    LLMLevelEndpointEntity.difficulty_level,
+                    LLMLevelEndpointEntity.involves_secrets,
+                    LLMLevelEndpointEntity.priority,
+                )
+                .join(
+                    LLMLevelEndpointEntity,
+                    LLMLevelEndpointEntity.endpoint_id == LLMEndpointEntity.id,
+                )
+                .join(
+                    AgentInstanceEntity,
+                    AgentInstanceEntity.endpoint_group_id == LLMLevelEndpointEntity.group_id,
+                )
+                .where(
+                    AgentInstanceEntity.id == agent_instance_id,
+                    LLMLevelEndpointEntity.is_active.is_(True),
+                    LLMEndpointEntity.is_active.is_(True),
+                )
+                .order_by(
+                    LLMLevelEndpointEntity.difficulty_level,
+                    LLMLevelEndpointEntity.priority.asc(),
+                )
+            )
+
+            result: List[LLMEndpointWithLevel] = []
+            for ep_entity, difficulty_level, involves_secrets, priority in rows:
+                data = {
+                    **{
+                        c.key: getattr(ep_entity, c.key)
+                        for c in ep_entity.__table__.columns
+                    },
+                    "difficulty_level": difficulty_level,
+                    "involves_secrets": involves_secrets,
+                    "priority": priority,
+                }
+                result.append(LLMEndpointWithLevel.model_validate(data))
+            return result
+
+        if session is not None:
+            return await _query(session)
+        else:
+            from db import create_engine, AsyncSession, async_sessionmaker
+            engine = create_engine()
+            async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+            async with async_session() as s:
+                endpoints = await _query(s)
+            await engine.dispose()
+            return endpoints

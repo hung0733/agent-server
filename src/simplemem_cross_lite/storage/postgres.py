@@ -18,7 +18,7 @@ from uuid import uuid4
 
 import asyncpg
 
-from tools.db_pool import configure_pool, get_pool
+from utils.db_pool import configure_pool, get_pool
 from .base import SessionStorage
 from simplemem_cross_lite.types import (
     CrossObservation,

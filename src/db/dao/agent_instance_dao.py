@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.dto.agent_dto import AgentInstanceCreate, AgentInstance, AgentInstanceUpdate
 from db.entity.agent_entity import AgentInstance as AgentInstanceEntity
+from db.entity.user_entity import User as UserEntity
 
 
 class AgentInstanceDAO:
@@ -380,6 +381,53 @@ class AgentInstanceDAO:
                 count = await _query(s)
             await engine.dispose()
             return count
+
+    @staticmethod
+    async def get_by_phones(
+        sender_phone_no: str,
+        receiver_phone_no: str,
+        session: Optional[AsyncSession] = None,
+    ) -> Optional[AgentInstance]:
+        """Retrieve an agent instance by verifying both phone numbers.
+
+        Ensures only the owning user (matched by sender_phone_no) can
+        interact with the agent at receiver_phone_no.
+
+        Args:
+            sender_phone_no:   The user's phone number (message sender).
+            receiver_phone_no: The agent's phone number (message receiver).
+            session:           Optional async session for transaction control.
+
+        Returns:
+            AgentInstance DTO if both phones match a valid pairing, None otherwise.
+        """
+
+        async def _query(s: AsyncSession) -> Optional[AgentInstanceEntity]:
+            result = await s.execute(
+                select(AgentInstanceEntity)
+                .join(UserEntity, AgentInstanceEntity.user_id == UserEntity.id)
+                .where(
+                    AgentInstanceEntity.phone_no == receiver_phone_no,
+                    UserEntity.phone_no == sender_phone_no,
+                    AgentInstanceEntity.whatsapp_key.isnot(None),
+                    AgentInstanceEntity.whatsapp_key != "",
+                )
+            )
+            return result.scalar_one_or_none()
+
+        if session is not None:
+            entity = await _query(session)
+        else:
+            from db import create_engine, AsyncSession, async_sessionmaker
+            engine = create_engine()
+            async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+            async with async_session() as s:
+                entity = await _query(s)
+            await engine.dispose()
+
+        if entity is None:
+            return None
+        return AgentInstance.model_validate(entity)
 
     @staticmethod
     async def get_with_whatsapp_key(

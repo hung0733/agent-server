@@ -25,7 +25,6 @@ logger = logging.getLogger(__name__)
 _pool: Optional[DatabasePool] = None
 _pool_lock = asyncio.Lock()
 
-
 async def configure_pool(config: Optional[PoolConfig] = None, dsn: Optional[str] = None) -> DatabasePool:
     """Configure the global database pool with custom settings.
 

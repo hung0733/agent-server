@@ -20,7 +20,7 @@ import pytest_asyncio
 # Ensure src imports resolve
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from tools.db_pool import DatabasePool, PoolConfig, close_pool
+from utils.db_pool import DatabasePool, PoolConfig, close_pool
 
 
 # =============================================================================

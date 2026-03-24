@@ -108,7 +108,7 @@ class QueueManager:
         agent_id: str,
         session_id: str,
         message: str,
-        think_mode: bool = False,
+        think_mode: Optional[bool] = None,
         priority: QueueTaskPriority = QueueTaskPriority.NORMAL,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> tuple[str, Any]:  # (task_id, AsyncGenerator[StreamChunk, None])

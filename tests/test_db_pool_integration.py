@@ -21,7 +21,7 @@ import pytest_asyncio
 # Ensure src imports resolve
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from tools.db_pool import DatabasePool, PoolConfig, configure_pool, close_pool
+from utils.db_pool import DatabasePool, PoolConfig, configure_pool, close_pool
 
 
 # =============================================================================
@@ -696,5 +696,5 @@ class TestGlobalPoolIntegration:
         await close_pool()
         
         # Pool should be None after close
-        from tools.db_pool import _pool
+        from utils.db_pool import _pool
         assert _pool is None

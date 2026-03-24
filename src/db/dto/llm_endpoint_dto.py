@@ -569,3 +569,23 @@ class LLMLevelEndpoint(LLMLevelEndpointBase):
             }
         }
     )
+
+
+# =============================================================================
+# Combined DTO — used by LLMSet.from_model()
+# =============================================================================
+
+class LLMEndpointWithLevel(LLMEndpoint):
+    """LLMEndpoint enriched with its LLMLevelEndpoint assignment metadata.
+
+    Carries both the endpoint connection details (base_url, api_key_encrypted,
+    model_name, …) and the level-routing fields (difficulty_level,
+    involves_secrets, priority, is_active) so that LLMSet.from_model() can
+    bucket endpoints into the right difficulty/secrets slot.
+    """
+
+    difficulty_level: int = Field(..., ge=1, le=3)
+    involves_secrets: bool = Field(default=False)
+    priority: int = Field(default=0, ge=0)
+
+    model_config = ConfigDict(extra="ignore", from_attributes=True)

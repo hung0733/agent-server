@@ -12,13 +12,15 @@ import asyncio
 import logging
 import os
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, AsyncGenerator, Optional
 
 import aiohttp
 import socketio
 
 from channels.base import AbstractChannel, ChannelType, IncomingMessage
 from i18n import _
+from msg_queue.handler import MsgQueueHandler
+from msg_queue.models import StreamChunk
 
 if TYPE_CHECKING:
     from msg_queue.manager import QueueManager
@@ -47,9 +49,7 @@ class WhatsAppChannel(AbstractChannel):
         self._api_url = (api_url or _require_env("EVOLUTION_API_URL")).rstrip("/")
         self._api_key = api_key or _require_env("EVOLUTION_API_KEY")
 
-    async def send_text(
-        self, instance_id: str, recipient_id: str, text: str
-    ) -> None:
+    async def send_text(self, instance_id: str, recipient_id: str, text: str) -> None:
         """Send a plain-text WhatsApp message.
 
         Args:
@@ -70,7 +70,49 @@ class WhatsAppChannel(AbstractChannel):
                     )
                 else:
                     logger.debug(
-                        _("Sent message to %s via instance %s"), recipient_id, instance_id
+                        _("Sent message to %s via instance %s"),
+                        recipient_id,
+                        instance_id,
+                    )
+
+    async def mark_message_read(
+        self,
+        instance_id: str,
+        msg_id: str,
+        remote_jid: str,
+        api_key: Optional[str] = None,
+    ) -> None:
+        """Mark a received message as read.
+
+        Args:
+            instance_id: Evolution API instance name.
+            msg_id:      Message ID (from the ``key.id`` field of the event).
+            remote_jid:  Sender JID including suffix (e.g. ``628xxx@s.whatsapp.net``).
+            api_key:     Per-instance API key; falls back to the global key when omitted.
+        """
+        url = f"{self._api_url}/chat/markMessageAsRead/{instance_id}"
+        payload = {
+            "readMessages": [{"id": msg_id, "fromMe": False, "remoteJid": remote_jid}]
+        }
+        headers = {
+            "apikey": api_key or self._api_key,
+            "Content-Type": "application/json",
+        }
+
+        async with aiohttp.ClientSession() as session:
+            async with session.put(url, json=payload, headers=headers) as resp:
+                if resp.status >= 400:
+                    body = await resp.text()
+                    logger.warning(
+                        _("Evolution API markMessageAsRead failed [%s]: %s"),
+                        resp.status,
+                        body,
+                    )
+                else:
+                    logger.debug(
+                        _("Marked message %s as read on instance %s"),
+                        msg_id,
+                        instance_id,
                     )
 
     @staticmethod
@@ -161,11 +203,11 @@ class WhatsAppWSClient:
             disconnected.set()
 
         # Evolution API emits both lowercase and uppercase event names
-        @sio.on("messages.upsert") # type: ignore
+        @sio.on("messages.upsert")  # type: ignore
         async def on_messages_upsert(data: dict) -> None:
             await self._handle_raw("messages.upsert", data)
 
-        @sio.on("MESSAGES_UPSERT") # type: ignore
+        @sio.on("MESSAGES_UPSERT")  # type: ignore
         async def on_messages_upsert_upper(data: dict) -> None:
             await self._handle_raw("MESSAGES_UPSERT", data)
 
@@ -196,24 +238,80 @@ class WhatsAppWSClient:
             return
         await self._dedup.register(msg.id)
 
-        agent_id = os.getenv("DEFAULT_AGENT_ID", "default")
-        await self._queue.enqueue(
-            agent_id=agent_id,
-            session_id=msg.sender_id,
-            message=msg.text,
-            metadata={
-                "channel": msg.channel,
-                "instance_id": msg.instance_id,
-                "msg_id": msg.id,
-                "callback": msg.callback,
-            },
+        sender_phone_no: str = msg.sender_id
+        receiver_phone_no: str = msg.receiver_id
+
+        from db.dao.agent_instance_dao import AgentInstanceDAO
+
+        agent_instance = await AgentInstanceDAO.get_by_phones(
+            sender_phone_no, receiver_phone_no
         )
+        if agent_instance is None or agent_instance.agent_id is None:
+            logger.warning(
+                _("No agent instance found for phone %s — dropping message %s"),
+                receiver_phone_no,
+                msg.id,
+            )
+            return
+
+        whatsapp_key: str = agent_instance.whatsapp_key  # type: ignore[assignment]
+        remote_jid = f"{msg.sender_id}@s.whatsapp.net"
+        await self._channel.mark_message_read(
+            msg.instance_id, msg.id, remote_jid, api_key=whatsapp_key
+        )
+
+        message: str = msg.text
+
+        stream_generator: AsyncGenerator[StreamChunk, None] = (
+            MsgQueueHandler.create_msg_queue(
+                agent_id=agent_instance.agent_id,
+                session_id=f"default-{agent_instance.agent_id[6:]}",
+                message=message,
+            )
+        )
+
         logger.info(
             _("Queued message from %s via instance %s (id=%s)"),
             msg.sender_id,
             msg.instance_id,
             msg.id,
         )
+
+        asyncio.create_task(
+            self._consume_stream(stream_generator, msg),
+            name=f"stream-{msg.id}",
+        )
+
+    async def _consume_stream(
+        self,
+        gen: "AsyncGenerator[StreamChunk, None]",
+        msg: IncomingMessage,
+    ) -> None:
+        """Drain *gen*, accumulate content chunks, then reply via msg.callback."""
+        reply_parts: list[str] = []
+        try:
+            async for chunk in gen:
+                if chunk.chunk_type == "content" and chunk.content:
+                    reply_parts.append(chunk.content)
+                elif chunk.chunk_type == "done":
+                    break
+        except Exception:
+            logger.exception(
+                _("Stream error for message %s from %s"),
+                msg.id,
+                msg.sender_id,
+            )
+            return
+
+        reply = "".join(reply_parts).strip()
+        if not reply:
+            logger.warning(
+                _("Empty reply for message %s — skipping send"),
+                msg.id,
+            )
+            return
+
+        await msg.callback(reply)
 
     def _parse_message(
         self, event: str, instance_id: str, data: dict
@@ -248,6 +346,9 @@ class WhatsAppWSClient:
         )
 
         sender_number = WhatsAppChannel._clean_number(remote_jid)
+        # Evolution API includes the bot's own JID as "owner" in global events
+        owner_jid: str = data.get("owner", "")
+        receiver_number = WhatsAppChannel._clean_number(owner_jid) if owner_jid else ""
 
         # Capture for closure — use instance_id from payload, not a fixed value
         _instance = instance_id
@@ -261,6 +362,7 @@ class WhatsAppWSClient:
             channel=ChannelType.whatsapp,
             instance_id=instance_id,
             sender_id=sender_number,
+            receiver_id=receiver_number,
             text=text,
             received_at=datetime.now(timezone.utc).replace(tzinfo=None),
             callback=_callback,

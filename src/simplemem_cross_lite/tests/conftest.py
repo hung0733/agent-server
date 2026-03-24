@@ -187,7 +187,7 @@ async def postgres_storage() -> AsyncGenerator[PostgresSessionStorage, None]:
     Uses the global database pool, configuring it with the test DSN.
     """
     from simplemem_cross_lite.storage.postgres import PostgresSessionStorage
-    from tools.db_pool import configure_pool, close_pool
+    from utils.db_pool import configure_pool, close_pool
     
     if not _is_docker_running():
         pytest.skip("Docker is not running - skipping PostgreSQL integration tests")

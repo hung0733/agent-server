@@ -71,6 +71,15 @@ class User(Base):
     )
     """Unique email address for communication and recovery."""
     
+    phone_no: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        unique=True,
+        index=True,
+        comment="User's WhatsApp phone number (international format, no +)",
+    )
+    """WhatsApp phone number for inbound message authentication."""
+
     is_active: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,

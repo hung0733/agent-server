@@ -12,6 +12,8 @@ from __future__ import annotations
 from typing import List, Optional
 from uuid import UUID
 
+from datetime import datetime, timezone
+
 from sqlalchemy import select, func, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -328,3 +330,57 @@ class LLMEndpointDAO:
                 count = await _query(s)
             await engine.dispose()
             return count
+
+    @staticmethod
+    async def record_feedback(
+        endpoint_id: UUID,
+        success: bool,
+        session: Optional[AsyncSession] = None,
+    ) -> None:
+        """Update endpoint health counters after an invocation.
+
+        On success: sets last_success_at to now and resets failure_count to 0.
+        On failure: sets last_failure_at to now and increments failure_count.
+
+        Uses a single atomic UPDATE — no prior SELECT needed.
+
+        Args:
+            endpoint_id: UUID of the LLMEndpoint to update.
+            success: True if the model call succeeded, False if it failed.
+            session: Optional async session for transaction control.
+        """
+        now = datetime.now(timezone.utc)
+
+        if success:
+            values = {
+                "last_success_at": now,
+                "failure_count": 0,
+            }
+        else:
+            values = {
+                "last_failure_at": now,
+                "failure_count": LLMEndpointEntity.failure_count + 1,
+            }
+
+        stmt = (
+            update(LLMEndpointEntity)
+            .where(LLMEndpointEntity.id == endpoint_id)
+            .values(**values)
+        )
+
+        async def _run(s: AsyncSession) -> None:
+            await s.execute(stmt)
+            await s.commit()
+
+        if session is not None:
+            await _run(session)
+        else:
+            from db import create_engine, AsyncSession, async_sessionmaker
+
+            engine = create_engine()
+            async_session = async_sessionmaker(
+                engine, class_=AsyncSession, expire_on_commit=False
+            )
+            async with async_session() as s:
+                await _run(s)
+            await engine.dispose()

@@ -34,6 +34,7 @@ class IncomingMessage:
     channel: ChannelType
     instance_id: str
     sender_id: str
+    receiver_id: str
     text: str
     media_url: Optional[str] = None
     priority: int = 0

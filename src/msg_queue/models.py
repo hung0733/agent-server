@@ -30,10 +30,8 @@ class QueueTaskPriority(StrEnum):
 class QueueTaskState(StrEnum):
     INIT = "init"
     COLLECTED_DB_DATA = "collected_db_data"
-    PACKED_SYS_PROMPT = "packed_sys_prompt"
     PACKED_MEMORY = "packed_memory"
     MESSAGES_PACKED = "messages_packed"
-    ANALYSED_MSG_DIFF = "analysed_msg_diff"
     SELECTED_LLM_MODEL = "selected_llm_model"
     SENDING_TO_LLM = "sending_to_llm"
     WAITING_RESPONSE = "waiting_response"
@@ -41,12 +39,6 @@ class QueueTaskState(StrEnum):
     STREAMING_TO_CLIENT = "streaming_to_client"
     COMPLETED = "completed"
     ERROR = "error"
-
-
-class MsgDiffLevel(StrEnum):
-    EASY = "easy"
-    NORMAL = "normal"
-    HARD = "hard"
 
 
 class StreamChunk(BaseModel):

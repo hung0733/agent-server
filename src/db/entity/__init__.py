@@ -18,8 +18,8 @@ Example:
 # like: from db.entity.user_entity import User, APIKey
 # rather than relying on wildcard imports from the __init__.py
 
+from db.entity.memory_block_entity import MemoryBlock
+
 __all__ = [
-    # Individual entity modules would be listed here if they were added,
-    # but due to circular import considerations, specific module imports
-    # are preferred over wildcard imports. 
+    "MemoryBlock",
 ]
