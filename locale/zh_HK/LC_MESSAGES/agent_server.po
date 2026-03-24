@@ -195,6 +195,12 @@ msgstr "找不到 Agent %s 的實例 — 跳過"
 msgid "Could not determine instanceName for agent %s"
 msgstr "無法確定 Agent %s 的實例名稱"
 
+msgid "connectionState check failed for %s [%s] — skipping"
+msgstr "檢查實例 %s 連線狀態失敗 [%s] — 跳過"
+
+msgid "Instance %s not connected (state=%s) — skipping"
+msgstr "實例 %s 未連線（狀態=%s）— 跳過名稱同步及上線設定"
+
 msgid "No agents with whatsapp_key — skipping name sync"
 msgstr "沒有設定 whatsapp_key 的 Agent — 跳過名稱同步"
 

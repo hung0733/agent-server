@@ -249,6 +249,36 @@ class WhatsAppWSClient:
                         )
                         continue
 
+                    # 2. Check connection state — skip if not open
+                    async with http.get(
+                        f"{self._api_url}/instance/connectionState/{instance_name}",
+                        headers=headers,
+                    ) as resp:
+                        if resp.status >= 400:
+                            logger.warning(
+                                _("connectionState check failed for %s [%s] — skipping"),
+                                instance_name,
+                                resp.status,
+                            )
+                            continue
+                        state_data = await resp.json()
+
+                    conn_state: str = (
+                        state_data.get("instance", {}).get("state")
+                        or state_data.get("state")
+                        or ""
+                    )
+                    if conn_state != "open":
+                        logger.warning(
+                            _("Instance %s not connected (state=%s) — skipping"),
+                            instance_name,
+                            conn_state,
+                        )
+                        continue
+
+                    # Cache for presence (only connected instances)
+                    self._instance_keys[instance_name] = wa_key
+
                     if wa_profile_name == agent_name:
                         logger.info(
                             _("Agent %s WhatsApp name already correct (%s)"),
@@ -257,7 +287,7 @@ class WhatsAppWSClient:
                         )
                         continue
 
-                    # 2. Names differ — update
+                    # 3. Names differ — update
                     logger.info(
                         _("Agent %s: WhatsApp name mismatch ('%s' → '%s'), updating"),
                         agent.name,
@@ -283,9 +313,6 @@ class WhatsAppWSClient:
                                 agent.name,
                                 agent_name,
                             )
-
-            # Cache instance → key mapping for presence management
-            self._instance_keys[instance_name] = wa_key
 
         except Exception as exc:
             logger.error(_("Agent name sync failed: %s"), exc)
