@@ -12,6 +12,8 @@ from typing import Any, AsyncIterator, Optional, Type
 
 import asyncpg
 
+from i18n import _
+
 logger = logging.getLogger(__name__)
 
 
@@ -105,7 +107,7 @@ async def close_pool() -> None:
             try:
                 await _pool.close()
             except Exception:
-                logger.exception("Error closing global database pool")
+                logger.exception(_("Error closing global database pool"))
             finally:
                 _pool = None
 

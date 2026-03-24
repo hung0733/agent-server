@@ -10,6 +10,7 @@ from typing import Any, AsyncGenerator, Dict, Optional
 
 from pydantic import BaseModel, Field
 
+from i18n import _
 from msg_queue.models import (
     MsgDiffLevel,
     QueueTaskPriority,
@@ -72,7 +73,7 @@ class QueueTask(BaseModel):
         await self._queue.put(None)
 
     async def error_callback(self, error: str) -> None:
-        logger.error("Task %s error: %s", self.id, error)
+        logger.error(_("Task %s error: %s"), self.id, error)
         await self._queue.put(None)
 
     # ------------------------------------------------------------------
@@ -94,13 +95,13 @@ class QueueTask(BaseModel):
                 while True:
                     chunk = await self._queue.get()
                     if chunk is None:
-                        logger.debug("Task %s: stream ended", self.id)
+                        logger.debug(_("Task %s: stream ended"), self.id)
                         return
                     yield chunk
             except GeneratorExit:
-                logger.debug("Task %s: generator force-closed", self.id)
+                logger.debug(_("Task %s: generator force-closed"), self.id)
             except Exception as exc:
-                logger.error("Task %s: stream_gen error: %s", self.id, exc)
+                logger.error(_("Task %s: stream_gen error: %s"), self.id, exc)
                 yield StreamChunk(chunk_type="done")
 
         return _gen()

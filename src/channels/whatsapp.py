@@ -145,7 +145,7 @@ class WhatsAppWSClient:
         # Evolution API WebSocket URL
         ws_url = (
             self._api_url.replace("http://", "ws://").replace("https://", "wss://")
-            + f"/ws?apikey={self._api_key}&instanceName={self._instance}"
+            + f"/{self._instance}?apikey={self._api_key}"
         )
 
         async with aiohttp.ClientSession() as session:

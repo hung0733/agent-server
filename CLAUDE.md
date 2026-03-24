@@ -68,7 +68,22 @@ All required; no defaults — missing vars must raise at startup. See `.env.exam
 
 ## i18n
 
-Default locale is `zh-HK` (香港繁體中文). All user-facing strings must use `gettext` or equivalent i18n library. Store translations in language resource files.
+Default locale is `zh-HK` (香港繁體中文).
+
+**All human-readable strings must be wrapped with `_()`** — this includes every `logger.*()` call, every `raise SomeError(...)` message, and every `print()` statement. No bare string literals in log/error output.
+
+```python
+# correct
+from i18n import _
+logger.info(_("Task %s completed"), task_id)
+raise RuntimeError(_("Pool not initialised"))
+
+# wrong — never do this
+logger.info("Task %s completed", task_id)
+raise RuntimeError("Pool not initialised")
+```
+
+Store translations in `locale/<lang>/LC_MESSAGES/agent_server.po`. Compile with `msgfmt` before deployment.
 
 ## Commit Messages
 
