@@ -154,6 +154,7 @@ class WhatsAppWSClient:
         @sio.event
         async def connect() -> None:
             logger.info(_("Socket.IO connected to Evolution API (global mode)"))
+            asyncio.create_task(self._sync_agent_names())
 
         @sio.event
         async def disconnect() -> None:
@@ -178,6 +179,105 @@ class WhatsAppWSClient:
         )
         await disconnected.wait()
         await sio.disconnect()
+
+    async def _sync_agent_names(self) -> None:
+        """On connect: check each agent's WhatsApp profile name matches agent.name.
+
+        Flow:
+          1. GET /instance/fetchInstances  → list of {instanceName, profileName}
+          2. Query DB for agents with whatsapp_key set
+          3. Match agent.whatsapp_key == instanceName
+          4. If profileName != agent.name → POST /chat/updateProfileName/{instance}
+        """
+        try:
+            from db.dao.agent_instance_dao import AgentInstanceDAO
+
+            headers = {"apikey": self._api_key}
+            async with aiohttp.ClientSession() as session:
+                # 1. Fetch all Evolution API instances
+                async with session.get(
+                    f"{self._api_url}/instance/fetchInstances", headers=headers
+                ) as resp:
+                    if resp.status >= 400:
+                        logger.warning(
+                            _("fetchInstances failed [%s] — skipping name sync"), resp.status
+                        )
+                        return
+                    instances: list = await resp.json()
+
+            # Build map: instanceName → profileName
+            profile_map: dict[str, str] = {}
+            for item in instances:
+                inst = item.get("instance") or item  # handle both response shapes
+                name = inst.get("instanceName") or inst.get("name", "")
+                profile = inst.get("profileName") or inst.get("pushName") or ""
+                if name:
+                    profile_map[name] = profile
+
+            if not profile_map:
+                logger.debug(_("No instances returned — skipping name sync"))
+                return
+
+            # 2. Query DB agents with whatsapp_key
+            agents = await AgentInstanceDAO.get_with_whatsapp_key()
+            if not agents:
+                logger.debug(_("No agents with whatsapp_key — skipping name sync"))
+                return
+
+            async with aiohttp.ClientSession() as session:
+                for agent in agents:
+                    key = agent.whatsapp_key or ""
+                    if key not in profile_map:
+                        logger.debug(
+                            _("Agent %s whatsapp_key=%s not found in instances"),
+                            agent.name,
+                            key,
+                        )
+                        continue
+
+                    wa_name = profile_map[key]
+                    agent_name = agent.name or ""
+
+                    if wa_name == agent_name:
+                        logger.info(
+                            _("Agent %s WhatsApp name already correct (%s)"),
+                            agent.name,
+                            wa_name,
+                        )
+                        continue
+
+                    # 4. Names differ — update WhatsApp profile name
+                    logger.info(
+                        _("Agent %s: WhatsApp name mismatch ('%s' → '%s'), updating"),
+                        agent.name,
+                        wa_name,
+                        agent_name,
+                    )
+                    async with session.post(
+                        f"{self._api_url}/chat/updateProfileName/{key}",
+                        json={"name": agent_name},
+                        headers={
+                            "apikey": self._api_key,
+                            "Content-Type": "application/json",
+                        },
+                    ) as resp:
+                        if resp.status >= 400:
+                            body = await resp.text()
+                            logger.error(
+                                _("updateProfileName failed for %s [%s]: %s"),
+                                key,
+                                resp.status,
+                                body,
+                            )
+                        else:
+                            logger.info(
+                                _("Agent %s WhatsApp name updated to '%s'"),
+                                agent.name,
+                                agent_name,
+                            )
+
+        except Exception as exc:
+            logger.error(_("Agent name sync failed: %s"), exc)
 
     async def _handle_raw(self, event: str, data: dict) -> None:
         """Parse a Socket.IO event and enqueue if it's a valid inbound message."""

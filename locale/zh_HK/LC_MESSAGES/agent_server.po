@@ -184,3 +184,31 @@ msgstr "任務 %s：發送 LLM 請求失敗：%s"
 # tools/db_pool.py
 msgid "Error closing global database pool"
 msgstr "關閉全局資料庫連線池時發生錯誤"
+
+# channels/whatsapp.py — agent name sync
+msgid "fetchInstances failed [%s] — skipping name sync"
+msgstr "獲取實例列表失敗 [%s] — 跳過名稱同步"
+
+msgid "No instances returned — skipping name sync"
+msgstr "未取得任何實例 — 跳過名稱同步"
+
+msgid "No agents with whatsapp_key — skipping name sync"
+msgstr "沒有設定 whatsapp_key 的 Agent — 跳過名稱同步"
+
+msgid "Agent %s whatsapp_key=%s not found in instances"
+msgstr "Agent %s 的 whatsapp_key=%s 在實例列表中找不到"
+
+msgid "Agent %s WhatsApp name already correct (%s)"
+msgstr "Agent %s 的 WhatsApp 名稱已正確（%s）"
+
+msgid "Agent %s: WhatsApp name mismatch ('%s' → '%s'), updating"
+msgstr "Agent %s：WhatsApp 名稱不符（'%s' → '%s'），正在更新"
+
+msgid "updateProfileName failed for %s [%s]: %s"
+msgstr "更新 %s 的 WhatsApp 名稱失敗 [%s]：%s"
+
+msgid "Agent %s WhatsApp name updated to '%s'"
+msgstr "Agent %s 的 WhatsApp 名稱已更新為「%s」"
+
+msgid "Agent name sync failed: %s"
+msgstr "Agent 名稱同步失敗：%s"

@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import List, Optional
 from uuid import UUID
 
-from sqlalchemy import select, func, update, delete
+from sqlalchemy import select, func, update, delete, not_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.dto.agent_dto import AgentInstanceCreate, AgentInstance, AgentInstanceUpdate
@@ -380,3 +380,30 @@ class AgentInstanceDAO:
                 count = await _query(s)
             await engine.dispose()
             return count
+
+    @staticmethod
+    async def get_with_whatsapp_key(
+        session: Optional[AsyncSession] = None,
+    ) -> List[AgentInstance]:
+        """Return all active agent instances that have a whatsapp_key set."""
+
+        async def _query(s: AsyncSession) -> List[AgentInstanceEntity]:
+            result = await s.execute(
+                select(AgentInstanceEntity).where(
+                    AgentInstanceEntity.whatsapp_key.isnot(None),
+                    AgentInstanceEntity.whatsapp_key != "",
+                )
+            )
+            return list(result.scalars().all())
+
+        if session is not None:
+            entities = await _query(session)
+        else:
+            from db import create_engine, AsyncSession, async_sessionmaker
+            engine = create_engine()
+            async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+            async with async_session() as s:
+                entities = await _query(s)
+            await engine.dispose()
+
+        return [AgentInstance.model_validate(e) for e in entities]
