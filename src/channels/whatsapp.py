@@ -100,7 +100,7 @@ class WhatsAppChannel(AbstractChannel):
         }
 
         async with aiohttp.ClientSession() as session:
-            async with session.put(url, json=payload, headers=headers) as resp:
+            async with session.post(url, json=payload, headers=headers) as resp:
                 if resp.status >= 400:
                     body = await resp.text()
                     logger.warning(
