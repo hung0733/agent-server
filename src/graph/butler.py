@@ -111,6 +111,10 @@ CRITICAL: Your entire response must be ONLY the JSON object. Nothing else.
 
     messages_to_send += state["messages"]
 
+    # Add assistant message prefix to force JSON format
+    # This is a powerful technique called "prefill" to make LLM follow format
+    messages_to_send.append(AIMessage(content='{"level":'))
+
     model: BaseChatModel = models.rte_model
     temperature = 0.0
 
@@ -133,6 +137,10 @@ CRITICAL: Your entire response must be ONLY the JSON object. Nothing else.
     # 呼叫模型 (用 ainvoke 獲取完整回應)
     response = await model.ainvoke(messages_to_send)
     raw_content = response.content.strip()  # type: ignore
+
+    # Prepend the prefix back to make it valid JSON
+    if not raw_content.startswith("{"):
+        raw_content = '{"level":' + raw_content
 
     # --- 關鍵防護機制 (Defensive Programming) ---
     # 4B 模型有時會發癲照出 ```json ... ```，我哋用 Regex 抹走佢
