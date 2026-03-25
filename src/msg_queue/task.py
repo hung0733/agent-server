@@ -13,7 +13,6 @@ from pydantic import BaseModel, Field
 from i18n import _
 from models.llm import LLMSet
 from msg_queue.models import (
-    MsgDiffLevel,
     QueueTaskPriority,
     QueueTaskState,
     QueueTaskStatus,
@@ -105,4 +104,3 @@ class QueueTask(BaseModel):
                 yield StreamChunk(chunk_type="done")
 
         return _gen()
-    

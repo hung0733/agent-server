@@ -265,6 +265,11 @@ class QueueManager:
                 task.id,
             )
             return
+        logger.info(
+            _("DEBUG: Dispatching task %s to handler for state=%s"),
+            task.id,
+            task.state.value,
+        )
         sem = self._state_semaphores.get(task.state)
         if sem:
             async with sem:
@@ -313,9 +318,15 @@ class QueueManager:
                 async with self._lock:
                     task = await self._get_next_task()
                 if task:
+                    logger.info(
+                        _("DEBUG: Got task %s from queue, creating process task"),
+                        task.id,
+                    )
                     asyncio.create_task(self._process_task_with_semaphore(task))
                 else:
-                    await asyncio.sleep(0.1)
+                    # Log queue status periodically
+                    pass
+                await asyncio.sleep(0.1)
             except asyncio.CancelledError:
                 break
             except Exception as exc:
@@ -334,7 +345,11 @@ _manager: Optional[QueueManager] = None
 def get_queue_manager() -> QueueManager:
     global _manager
     if _manager is None:
+        import logging
+        logger = logging.getLogger(__name__)
+        from i18n import _
         _manager = QueueManager()
+        logger.info(_("DEBUG: Created new QueueManager instance (id=%s)"), id(_manager))
     return _manager
 
 

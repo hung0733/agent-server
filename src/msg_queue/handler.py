@@ -27,7 +27,6 @@ from msg_queue.manager import QueueManager, get_queue_manager
 from msg_queue.models import (
     QueueTaskPriority,
     QueueTaskState,
-    QueueTaskStatus,
     StreamChunk,
 )
 from msg_queue.task import QueueTask
@@ -48,8 +47,14 @@ class MsgQueueHandler:
     ) -> AsyncGenerator[StreamChunk, None]:
         """Enqueue a task and return an async generator of StreamChunks."""
         qm = get_queue_manager()
-        logger.info(
+        logger.debug(
             _("Creating queue task for agent=%s session=%s"), agent_id, session_id
+        )
+        logger.debug(
+            _("DEBUG: QueueManager instance (id=%s, running=%s, handlers=%s)"),
+            id(qm),
+            qm._running,
+            list(qm._state_handlers.keys()),
         )
         task_id, gen = await qm.enqueue(
             agent_id=agent_id,
@@ -59,7 +64,7 @@ class MsgQueueHandler:
             metadata=metadata,
             think_mode=think_mode,
         )
-        logger.info(_("Task %s enqueued"), task_id)
+        logger.debug(_("Task %s enqueued"), task_id)
         async for chunk in gen:
             yield chunk
 
@@ -70,9 +75,9 @@ class MsgQueueHandler:
     @staticmethod
     async def collect_db_data(task: QueueTask) -> None:
         """Load the Agent object from DB."""
-        logger.info(_("Task %s: collect_db_data (agent=%s)"), task.id, task.agent_id)
+        logger.debug(_("Task %s: collect_db_data (agent=%s)"), task.id, task.agent_id)
         try:
-            task.agent = Bulter.get_agent(task.agent_id, task.session_id)
+            task.agent = await Bulter.get_agent(task.agent_id, task.session_id)
         except NotImplementedError:
             raise
         except Exception as exc:
@@ -85,11 +90,11 @@ class MsgQueueHandler:
     @staticmethod
     async def pack_memory(task: QueueTask) -> None:
         """Attach long-term memory context to the message."""
-        logger.info(_("Task %s: pack_memory"), task.id)
+        logger.debug(_("Task %s: pack_memory"), task.id)
         try:
             task.packed_prompt = await task.agent.get_memory_prompt() # type: ignore
-            task.packed_prompt += "現在時間: " + datetime.now().isoformat("YYYY-MM-DD HH:MM") + "\n\n"
-            
+            task.packed_prompt += "現在時間: " + datetime.now().strftime("%Y-%m-%d %H:%M") + "\n\n" # type: ignore
+
             task.update_state(QueueTaskState.PACKED_MEMORY)
         except Exception as exc:
             logger.error(_("Task %s: pack_memory failed: %s"), task.id, exc)
@@ -100,7 +105,7 @@ class MsgQueueHandler:
     @staticmethod
     async def pack_message(task: QueueTask) -> None:
         """Finalise the user message string."""
-        logger.info(_("Task %s: pack_message"), task.id)
+        logger.debug(_("Task %s: pack_message"), task.id)
         try:
             if task.packed_message is None:
                 task.packed_message = ""
@@ -115,10 +120,10 @@ class MsgQueueHandler:
     @staticmethod
     async def select_llm_model(task: QueueTask) -> None:
         """Pick LLM model(s) based on msg_diff_level."""
-        logger.info(_("Task %s: select_llm_model"), task.id)
+        logger.debug(_("Task %s: select_llm_model"), task.id)
         try:
             if task.agent is None:
-                raise ValueError("Agent not initialised — run collect_db_data first")
+                raise ValueError(_("Agent not initialised — run collect_db_data first"))
 
             from db.dao.llm_level_endpoint_dao import LLMLevelEndpointDAO
             from uuid import UUID
@@ -136,12 +141,12 @@ class MsgQueueHandler:
     @staticmethod
     async def send_llm_msg(task: QueueTask) -> None:
         """Stream the LLM response and push chunks to the task queue."""
-        logger.info(_("Task %s: send_llm_msg"), task.id)
+        logger.debug(_("Task %s: send_llm_msg"), task.id)
         try:
             if task.agent is None:
-                raise ValueError("Agent not initialised — run collect_db_data first")
+                raise ValueError(_("Agent not initialised — run collect_db_data first"))
             if task.packed_message is None:
-                raise ValueError("Message not packed — run pack_message first")
+                raise ValueError(_("Message not packed — run pack_message first"))
 
             task.update_state(QueueTaskState.SENDING_TO_LLM)
 

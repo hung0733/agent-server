@@ -92,7 +92,7 @@ class WhatsAppChannel(AbstractChannel):
         """
         url = f"{self._api_url}/chat/markMessageAsRead/{instance_id}"
         payload = {
-            "readMessages": [{"id": msg_id, "fromMe": False, "remoteJid": remote_jid}]
+            "read_messages": [{"id": msg_id, "fromMe": False, "remoteJid": remote_jid}]
         }
         headers = {
             "apikey": api_key or self._api_key,
@@ -241,18 +241,46 @@ class WhatsAppWSClient:
         sender_phone_no: str = msg.sender_id
         receiver_phone_no: str = msg.receiver_id
 
+        logger.info(
+            _("DEBUG: Parsed message - sender_phone=%s, receiver_phone=%s, msg_id=%s"),
+            sender_phone_no,
+            receiver_phone_no,
+            msg.id,
+        )
+
         from db.dao.agent_instance_dao import AgentInstanceDAO
+
+        logger.info(
+            _("DEBUG: Looking up agent instance - sender=%s, receiver=%s"),
+            sender_phone_no,
+            receiver_phone_no,
+        )
 
         agent_instance = await AgentInstanceDAO.get_by_phones(
             sender_phone_no, receiver_phone_no
         )
+
         if agent_instance is None or agent_instance.agent_id is None:
             logger.warning(
                 _("No agent instance found for phone %s — dropping message %s"),
                 receiver_phone_no,
                 msg.id,
             )
+            logger.warning(
+                _("DEBUG: Lookup failed - sender_phone=%s, receiver_phone=%s, agent_instance=%s"),
+                sender_phone_no,
+                receiver_phone_no,
+                agent_instance,
+            )
             return
+
+        logger.info(
+            _("DEBUG: Agent instance found - id=%s, agent_id=%s, phone_no=%s, whatsapp_key=%s"),
+            agent_instance.id,
+            agent_instance.agent_id,
+            agent_instance.phone_no,
+            agent_instance.whatsapp_key[:10] + "..." if agent_instance.whatsapp_key else None,
+        )
 
         whatsapp_key: str = agent_instance.whatsapp_key  # type: ignore[assignment]
         remote_jid = f"{msg.sender_id}@s.whatsapp.net"
@@ -289,12 +317,57 @@ class WhatsAppWSClient:
     ) -> None:
         """Drain *gen*, accumulate content chunks, then reply via msg.callback."""
         reply_parts: list[str] = []
+        tools_used: list[str] = []
+        sentence_buffer: str = ""  # Buffer for accumulating sentence fragments
+
         try:
             async for chunk in gen:
                 if chunk.chunk_type == "content" and chunk.content:
+                    # Accumulate content
+                    sentence_buffer += chunk.content
                     reply_parts.append(chunk.content)
+
+                    # Check if we hit a sentence boundary
+                    # Chinese/English sentence endings: 。！？\n or .!?\n
+                    if any(sentence_buffer.rstrip().endswith(end) for end in ["。", "！", "？", ".", "!", "?", "\n"]):
+                        # Print complete sentence
+                        logger.info(_("💬 [回覆]: %s"), sentence_buffer.strip())
+                        sentence_buffer = ""  # Reset buffer
+
+                elif chunk.chunk_type == "tool" and chunk.content:
+                    # Flush any pending sentence before tool log
+                    if sentence_buffer.strip():
+                        logger.info(_("💬 [回覆]: %s"), sentence_buffer.strip())
+                        sentence_buffer = ""
+
+                    # Log tool usage
+                    tool_name = chunk.content
+                    if tool_name not in tools_used:
+                        tools_used.append(tool_name)
+                    logger.info(_("🔧 [Tool]: %s"), tool_name)
+
+                elif chunk.chunk_type == "tool_result" and chunk.content:
+                    # Log tool result
+                    result_preview = chunk.content[:200] + ("..." if len(chunk.content) > 200 else "")
+                    logger.info(_("✅ [Tool Result]: %s"), result_preview)
+
+                elif chunk.chunk_type == "think" and chunk.content:
+                    # Flush any pending sentence before thinking log
+                    if sentence_buffer.strip():
+                        logger.info(_("💬 [回覆]: %s"), sentence_buffer.strip())
+                        sentence_buffer = ""
+
+                    # Log thinking/reasoning
+                    think_preview = chunk.content[:200] + ("..." if len(chunk.content) > 200 else "")
+                    logger.info(_("🧠 [Thinking]: %s"), think_preview)
+
                 elif chunk.chunk_type == "done":
+                    # Flush any remaining content
+                    if sentence_buffer.strip():
+                        logger.info(_("💬 [回覆]: %s"), sentence_buffer.strip())
+                        sentence_buffer = ""
                     break
+
         except Exception:
             logger.exception(
                 _("Stream error for message %s from %s"),
@@ -304,6 +377,11 @@ class WhatsAppWSClient:
             return
 
         reply = "".join(reply_parts).strip()
+
+        # Summary log
+        if tools_used:
+            logger.info(_("📊 [Summary] Tools used: %s"), ", ".join(tools_used))
+
         if not reply:
             logger.warning(
                 _("Empty reply for message %s — skipping send"),
@@ -320,6 +398,35 @@ class WhatsAppWSClient:
 
         Returns None for outbound messages, group messages, or non-text events.
         """
+        import json
+        logger.info(
+            _("DEBUG: _parse_message - event=%s, instance_id=%s, data_keys=%s"),
+            event,
+            instance_id,
+            list(data.keys()),
+        )
+
+        # Safe JSON serialization - convert bytes to base64 string
+        def _safe_serialize(obj):
+            if isinstance(obj, bytes):
+                import base64
+                return f"<bytes:{base64.b64encode(obj).decode()[:50]}...>"
+            elif isinstance(obj, dict):
+                return {k: _safe_serialize(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [_safe_serialize(item) for item in obj]
+            else:
+                return obj
+
+        try:
+            safe_data = _safe_serialize(data)
+            logger.info(
+                _("DEBUG: Full data payload: %s"),
+                json.dumps(safe_data, indent=2, ensure_ascii=False),
+            )
+        except Exception as e:
+            logger.warning(_("DEBUG: Failed to serialize data payload: %s"), e)
+
         key = data.get("key", {})
 
         if key.get("fromMe"):
@@ -348,7 +455,20 @@ class WhatsAppWSClient:
         sender_number = WhatsAppChannel._clean_number(remote_jid)
         # Evolution API includes the bot's own JID as "owner" in global events
         owner_jid: str = data.get("owner", "")
-        receiver_number = WhatsAppChannel._clean_number(owner_jid) if owner_jid else ""
+        # Fallback: if owner is not provided, use instance_id as receiver phone
+        # (Evolution API instance names are often the phone number itself)
+        receiver_number = (
+            WhatsAppChannel._clean_number(owner_jid) if owner_jid else instance_id
+        )
+
+        logger.info(
+            _("DEBUG: Parsed phone numbers - remote_jid=%s -> sender=%s, owner_jid=%s, instance_id=%s -> receiver=%s"),
+            remote_jid,
+            sender_number,
+            owner_jid,
+            instance_id,
+            receiver_number,
+        )
 
         # Capture for closure — use instance_id from payload, not a fixed value
         _instance = instance_id

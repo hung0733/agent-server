@@ -9,6 +9,7 @@ Import path: db.dao.llm_level_endpoint_dao
 """
 from __future__ import annotations
 
+import logging
 from typing import List, Optional
 from uuid import UUID
 
@@ -24,6 +25,9 @@ from db.dto.llm_endpoint_dto import (
 from db.entity.llm_endpoint_entity import LLMEndpoint as LLMEndpointEntity
 from db.entity.llm_endpoint_entity import LLMLevelEndpoint as LLMLevelEndpointEntity
 from db.entity.agent_entity import AgentInstance as AgentInstanceEntity
+from i18n import _
+
+logger = logging.getLogger(__name__)
 
 
 class LLMLevelEndpointDAO:
@@ -391,7 +395,8 @@ class LLMLevelEndpointDAO:
             priority descending.
         """
         async def _query(s: AsyncSession) -> List[LLMEndpointWithLevel]:
-            rows = await s.execute(
+            # First, query without API key filter to see what's available
+            all_rows = await s.execute(
                 select(
                     LLMEndpointEntity,
                     LLMLevelEndpointEntity.difficulty_level,
@@ -417,8 +422,13 @@ class LLMLevelEndpointDAO:
                 )
             )
 
+            total_count = 0
+            filtered_count = 0
             result: List[LLMEndpointWithLevel] = []
-            for ep_entity, difficulty_level, involves_secrets, priority in rows:
+
+            for ep_entity, difficulty_level, involves_secrets, priority in all_rows:
+                total_count += 1
+
                 data = {
                     **{
                         c.key: getattr(ep_entity, c.key)
@@ -428,7 +438,37 @@ class LLMLevelEndpointDAO:
                     "involves_secrets": involves_secrets,
                     "priority": priority,
                 }
-                result.append(LLMEndpointWithLevel.model_validate(data))
+
+                # Allow empty API keys for local models - set to empty string if None
+                if data.get("api_key_encrypted") is None:
+                    data["api_key_encrypted"] = ""
+
+                try:
+                    result.append(LLMEndpointWithLevel.model_validate(data))
+                except Exception as e:
+                    filtered_count += 1
+                    logger.warning(
+                        _("跳過端點 '%s' (難度 %d): 驗證失敗 - %s"),
+                        ep_entity.name,
+                        difficulty_level,
+                        str(e),
+                    )
+                    continue
+
+            if total_count > 0:
+                logger.info(
+                    _("代理 %s: 找到 %d 個端點，過濾掉 %d 個（API key 為空），保留 %d 個"),
+                    agent_instance_id,
+                    total_count,
+                    filtered_count,
+                    len(result),
+                )
+            else:
+                logger.warning(
+                    _("代理 %s: 沒有找到任何啟用的端點配置"),
+                    agent_instance_id,
+                )
+
             return result
 
         if session is not None:

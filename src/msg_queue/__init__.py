@@ -1,6 +1,5 @@
 from msg_queue.manager import QueueManager, get_queue_manager, set_queue_manager
 from msg_queue.models import (
-    MsgDiffLevel,
     QueueStats,
     QueueTaskPriority,
     QueueTaskState,
@@ -19,5 +18,4 @@ __all__ = [
     "QueueTaskState",
     "QueueStats",
     "StreamChunk",
-    "MsgDiffLevel",
 ]

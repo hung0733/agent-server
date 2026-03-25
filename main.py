@@ -21,21 +21,21 @@ load_dotenv()
 
 
 sys.path.insert(0, "src")
-from src.logging_setup import setup_logging
+from logging_setup import setup_logging
 
 _log_level = logging.DEBUG if os.getenv("DEBUG", "").lower() == "true" else logging.INFO
 setup_logging(level=_log_level)
-from src.i18n import _
+from i18n import _
 
 logger = logging.getLogger(__name__)
 
 
 async def main() -> None:
-    from src.utils.db_pool import configure_pool, close_pool
-    from src.msg_queue.manager import get_queue_manager
-    from src.msg_queue.handler import register_all_handlers
-    from src.msg_queue.dedup import MessageDeduplicator
-    from src.channels.whatsapp import WhatsAppChannel, WhatsAppWSClient
+    from utils.db_pool import configure_pool, close_pool
+    from msg_queue.manager import get_queue_manager
+    from msg_queue.handler import register_all_handlers
+    from msg_queue.dedup import MessageDeduplicator
+    from channels.whatsapp import WhatsAppChannel, WhatsAppWSClient
 
     # Init asyncpg pool (used by DAOs / SQLAlchemy layer)
     await configure_pool()

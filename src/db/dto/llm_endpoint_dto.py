@@ -190,11 +190,10 @@ class LLMEndpointBase(BaseModel):
     """Base URL for the API (e.g., 'https://api.openai.com/v1')."""
     
     api_key_encrypted: str = Field(
-        ...,
-        min_length=1,
-        description="Encrypted API key for storage",
+        default="",
+        description="Encrypted API key for storage (empty string for local models)",
     )
-    """Encrypted API key for storage."""
+    """Encrypted API key for storage (empty for local models without authentication)."""
     
     model_name: str = Field(
         ...,
@@ -274,10 +273,9 @@ class LLMEndpointUpdate(BaseModel):
     
     api_key_encrypted: Optional[str] = Field(
         default=None,
-        min_length=1,
-        description="Encrypted API key for storage",
+        description="Encrypted API key for storage (empty string for local models)",
     )
-    """Encrypted API key."""
+    """Encrypted API key (empty for local models)."""
     
     model_name: Optional[str] = Field(
         default=None,
