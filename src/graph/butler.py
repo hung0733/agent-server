@@ -113,12 +113,22 @@ CRITICAL: Your entire response must be ONLY the JSON object. Nothing else.
 
     model: BaseChatModel = models.rte_model
     temperature = 0.0
-    model = model.bind(
-        temperature=temperature,
-        top_p=top_p,
-        presence_penalty=presence_penalty,
-        extra_body=extra_body,
-    )  # type: ignore
+
+    # Try to enable JSON mode if supported
+    bind_params = {
+        "temperature": temperature,
+        "top_p": top_p,
+        "presence_penalty": presence_penalty,
+        "extra_body": extra_body,
+    }
+
+    # Add JSON mode for supported models
+    try:
+        bind_params["response_format"] = {"type": "json_object"}
+    except Exception:
+        pass  # Model doesn't support response_format
+
+    model = model.bind(**bind_params)  # type: ignore
 
     # 呼叫模型 (用 ainvoke 獲取完整回應)
     response = await model.ainvoke(messages_to_send)
@@ -141,16 +151,40 @@ CRITICAL: Your entire response must be ONLY the JSON object. Nothing else.
         )
 
     except (json.JSONDecodeError, ValueError) as e:
-        # Fallback (補底機制)：如果 4B 發神經出唔到 JSON，預設交俾 9B 處理
-        preview = raw_content[:100] + ("..." if len(raw_content) > 100 else "")
-        logger.warning(_("⚠️ [Router 返回非 JSON]: %s"), preview)
-        routing_level = 1
-        think_mode = False
-        logger.info(
-            _("-> [Router 補底]: Level=%d, Think=%s"),
-            routing_level,
-            think_mode,
-        )
+        # Fallback: Try to extract JSON from text
+        json_match = re.search(r'\{[^}]*"level"\s*:\s*\d[^}]*\}', raw_content)
+        if json_match:
+            try:
+                parsed_data = json.loads(json_match.group(0))
+                routing_level = int(parsed_data.get("level", 1))
+                think_mode = bool(parsed_data.get("think", False))
+                logger.info(
+                    _("-> [Router 決定 (抽取)]: Level=%d, Think=%s"),
+                    routing_level,
+                    think_mode
+                )
+            except Exception:
+                # Final fallback: default to Level 1
+                preview = raw_content[:100] + ("..." if len(raw_content) > 100 else "")
+                logger.warning(_("⚠️ [Router 返回非 JSON]: %s"), preview)
+                routing_level = 1
+                think_mode = False
+                logger.info(
+                    _("-> [Router 補底]: Level=%d, Think=%s"),
+                    routing_level,
+                    think_mode,
+                )
+        else:
+            # Final fallback: default to Level 1
+            preview = raw_content[:100] + ("..." if len(raw_content) > 100 else "")
+            logger.warning(_("⚠️ [Router 返回非 JSON]: %s"), preview)
+            routing_level = 1
+            think_mode = False
+            logger.info(
+                _("-> [Router 補底]: Level=%d, Think=%s"),
+                routing_level,
+                think_mode,
+            )
 
     # 注意：我哋唔 return "messages"，避免 JSON 污染對話 Context
     return {"routing_level": routing_level, "think_mode": think_mode}
