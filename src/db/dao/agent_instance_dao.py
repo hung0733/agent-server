@@ -418,8 +418,8 @@ class AgentInstanceDAO:
             )
             entity = result.scalar_one_or_none()
 
-            logger.info(
-                _("DEBUG: SQL query result - sender=%s, receiver=%s, found=%s"),
+            logger.debug(
+                _("SQL query result - sender=%s, receiver=%s, found=%s"),
                 sender_phone_no,
                 receiver_phone_no,
                 entity is not None,
@@ -430,12 +430,12 @@ class AgentInstanceDAO:
                 # Check all users
                 users_result = await s.execute(select(UserEntity))
                 all_users = users_result.scalars().all()
-                logger.warning(
-                    _("DEBUG: All users in DB (total=%d):"),
+                logger.debug(
+                    _("All users in DB (total=%d):"),
                     len(all_users),
                 )
                 for user in all_users:
-                    logger.warning(
+                    logger.debug(
                         _("  User: id=%s, username=%s, phone_no=%s"),
                         user.id,
                         user.username,
@@ -445,12 +445,12 @@ class AgentInstanceDAO:
                 # Check all agent instances
                 instances_result = await s.execute(select(AgentInstanceEntity))
                 all_instances = instances_result.scalars().all()
-                logger.warning(
-                    _("DEBUG: All agent instances in DB (total=%d):"),
+                logger.debug(
+                    _("All agent instances in DB (total=%d):"),
                     len(all_instances),
                 )
                 for inst in all_instances:
-                    logger.warning(
+                    logger.debug(
                         _("  AgentInstance: id=%s, user_id=%s, phone_no=%s, whatsapp_key=%s"),
                         inst.id,
                         inst.user_id,

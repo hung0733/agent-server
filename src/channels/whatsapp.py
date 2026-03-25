@@ -92,7 +92,7 @@ class WhatsAppChannel(AbstractChannel):
         """
         url = f"{self._api_url}/chat/markMessageAsRead/{instance_id}"
         payload = {
-            "read_messages": [{"id": msg_id, "fromMe": False, "remoteJid": remote_jid}]
+            "readMessages": [{"id": msg_id, "fromMe": False, "remoteJid": remote_jid}]
         }
         headers = {
             "apikey": api_key or self._api_key,
@@ -241,8 +241,8 @@ class WhatsAppWSClient:
         sender_phone_no: str = msg.sender_id
         receiver_phone_no: str = msg.receiver_id
 
-        logger.info(
-            _("DEBUG: Parsed message - sender_phone=%s, receiver_phone=%s, msg_id=%s"),
+        logger.debug(
+            _("Parsed message - sender_phone=%s, receiver_phone=%s, msg_id=%s"),
             sender_phone_no,
             receiver_phone_no,
             msg.id,
@@ -250,8 +250,8 @@ class WhatsAppWSClient:
 
         from db.dao.agent_instance_dao import AgentInstanceDAO
 
-        logger.info(
-            _("DEBUG: Looking up agent instance - sender=%s, receiver=%s"),
+        logger.debug(
+            _("Looking up agent instance - sender=%s, receiver=%s"),
             sender_phone_no,
             receiver_phone_no,
         )
@@ -266,16 +266,16 @@ class WhatsAppWSClient:
                 receiver_phone_no,
                 msg.id,
             )
-            logger.warning(
-                _("DEBUG: Lookup failed - sender_phone=%s, receiver_phone=%s, agent_instance=%s"),
+            logger.debug(
+                _("Lookup failed - sender_phone=%s, receiver_phone=%s, agent_instance=%s"),
                 sender_phone_no,
                 receiver_phone_no,
                 agent_instance,
             )
             return
 
-        logger.info(
-            _("DEBUG: Agent instance found - id=%s, agent_id=%s, phone_no=%s, whatsapp_key=%s"),
+        logger.debug(
+            _("Agent instance found - id=%s, agent_id=%s, phone_no=%s, whatsapp_key=%s"),
             agent_instance.id,
             agent_instance.agent_id,
             agent_instance.phone_no,
@@ -399,8 +399,8 @@ class WhatsAppWSClient:
         Returns None for outbound messages, group messages, or non-text events.
         """
         import json
-        logger.info(
-            _("DEBUG: _parse_message - event=%s, instance_id=%s, data_keys=%s"),
+        logger.debug(
+            _("_parse_message - event=%s, instance_id=%s, data_keys=%s"),
             event,
             instance_id,
             list(data.keys()),
@@ -420,12 +420,12 @@ class WhatsAppWSClient:
 
         try:
             safe_data = _safe_serialize(data)
-            logger.info(
-                _("DEBUG: Full data payload: %s"),
+            logger.debug(
+                _("Full data payload: %s"),
                 json.dumps(safe_data, indent=2, ensure_ascii=False),
             )
         except Exception as e:
-            logger.warning(_("DEBUG: Failed to serialize data payload: %s"), e)
+            logger.debug(_("Failed to serialize data payload: %s"), e)
 
         key = data.get("key", {})
 
@@ -461,8 +461,8 @@ class WhatsAppWSClient:
             WhatsAppChannel._clean_number(owner_jid) if owner_jid else instance_id
         )
 
-        logger.info(
-            _("DEBUG: Parsed phone numbers - remote_jid=%s -> sender=%s, owner_jid=%s, instance_id=%s -> receiver=%s"),
+        logger.debug(
+            _("Parsed phone numbers - remote_jid=%s -> sender=%s, owner_jid=%s, instance_id=%s -> receiver=%s"),
             remote_jid,
             sender_number,
             owner_jid,
