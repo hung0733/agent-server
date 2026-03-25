@@ -19,8 +19,13 @@ from __future__ import annotations
 from datetime import datetime
 import logging
 from typing import Any, AsyncGenerator, Dict, Optional
+from uuid import UUID, uuid4
 
 from agent.bulter import Bulter
+from db.dao.agent_message_dao import AgentMessageDAO
+from db.dao.collaboration_session_dao import CollaborationSessionDAO
+from db.dto.collaboration_dto import AgentMessageCreate
+from db.types import MessageType
 from i18n import _
 from models.llm import LLMSet
 from msg_queue.manager import QueueManager, get_queue_manager
@@ -30,6 +35,7 @@ from msg_queue.models import (
     StreamChunk,
 )
 from msg_queue.task import QueueTask
+from utils.tools import Tools
 
 logger = logging.getLogger(__name__)
 
@@ -92,8 +98,8 @@ class MsgQueueHandler:
         """Attach long-term memory context to the message."""
         logger.debug(_("Task %s: pack_memory"), task.id)
         try:
-            task.packed_prompt = await task.agent.get_memory_prompt() # type: ignore
-            task.packed_prompt += "現在時間: " + datetime.now().strftime("%Y-%m-%d %H:%M") + "\n\n" # type: ignore
+            task.packed_prompt = await task.agent.get_memory_prompt()  # type: ignore
+            task.packed_prompt += "現在時間: " + datetime.now().strftime("%Y-%m-%d %H:%M") + "\n\n"  # type: ignore
 
             task.update_state(QueueTaskState.PACKED_MEMORY)
         except Exception as exc:
@@ -127,6 +133,7 @@ class MsgQueueHandler:
 
             from db.dao.llm_level_endpoint_dao import LLMLevelEndpointDAO
             from uuid import UUID
+
             endpoints = await LLMLevelEndpointDAO.get_by_agent_instance_id(
                 UUID(task.agent.agent_db_id)
             )
@@ -137,6 +144,95 @@ class MsgQueueHandler:
             task.update_state(QueueTaskState.ERROR)
             task.error = str(exc)
             raise
+
+    @staticmethod
+    async def _save_messages_to_db(
+        task_id: str,
+        session_db_id: str,
+        sender_db_id: Optional[str],
+        receiver_db_id: str,
+        llm_response_content: list,
+    ) -> None:
+        """Background task to save messages to database.
+
+        This runs in a separate async task to avoid blocking the streaming.
+        """
+        try:
+            # Generate step_id for this conversation turn
+            step_id = f"step-{uuid4()}"
+            logger.debug(_("Task %s: generated step_id=%s"), task_id, step_id)
+
+            # Map streaming chunk types to MessageType enum
+            # "user" -> request (user asking)
+            # "content", "think" -> response (LLM answering)
+            # "tool" -> tool_call
+            # "tool_result" -> tool_result
+            type_mapping = {
+                "user": MessageType.request,
+                "content": MessageType.response,
+                "think": MessageType.response,
+                "tool": MessageType.tool_call,
+                "tool_result": MessageType.tool_result,
+            }
+
+            # Convert to UUID, handle str/UUID/None
+            # collaboration_id is required (cannot be None)
+            if isinstance(session_db_id, UUID):
+                collab_id = session_db_id
+            elif isinstance(session_db_id, str) and session_db_id:
+                collab_id = UUID(session_db_id)
+            else:
+                raise ValueError(
+                    _("session_db_id is required and cannot be None or empty")
+                )
+
+            # sender_agent_id is optional (can be None)
+            if isinstance(sender_db_id, UUID):
+                sender_id = sender_db_id
+            elif isinstance(sender_db_id, str) and sender_db_id:
+                sender_id = UUID(sender_db_id)
+            else:
+                sender_id = None
+
+            # receiver_agent_id is optional (can be None)
+            if isinstance(receiver_db_id, UUID):
+                receiver_id = receiver_db_id
+            elif isinstance(receiver_db_id, str) and receiver_db_id:
+                receiver_id = UUID(receiver_db_id)
+            else:
+                receiver_id = None
+
+            for m in llm_response_content:
+                msg_type_str = m.get("msg_type", "content")
+                # Convert string to MessageType enum, default to response if unknown
+                message_type = type_mapping.get(msg_type_str, MessageType.response)
+
+                msg = await AgentMessageDAO.create(
+                    AgentMessageCreate(
+                        collaboration_id=collab_id,
+                        step_id=step_id,
+                        sender_agent_id=sender_id,
+                        receiver_agent_id=receiver_id,
+                        message_type=message_type,
+                        content_json={
+                            "content": m.get("content", ""),
+                            "tool_args": m.get("tool_args", ""),
+                        },
+                    )
+                )
+
+                logger.debug(
+                    _("Task %s: logged message id=%s, type=%s"),
+                    task_id,
+                    msg.id,
+                    message_type.value,
+                )
+
+            logger.debug(_("Task %s: all messages saved to database"), task_id)
+        except Exception as exc:
+            logger.error(
+                _("Task %s: failed to save messages to database: %s"), task_id, exc
+            )
 
     @staticmethod
     async def send_llm_msg(task: QueueTask) -> None:
@@ -150,11 +246,86 @@ class MsgQueueHandler:
 
             task.update_state(QueueTaskState.SENDING_TO_LLM)
 
-            gen = task.agent.send(models=task.model_set, sys_prompt=task.packed_prompt, message=task.packed_message, think_mode=task.think_mode, metadata=task.metadata)
+            # Collect LLM response for logging
+            llm_response_content = []
+            llm_response_content.append(
+                {
+                    "msg_type": "user",
+                    "content": task.packed_message,
+                    "tool_args": "",
+                }
+            )
+
+            gen = task.agent.send(
+                models=task.model_set,
+                sys_prompt=task.packed_prompt,
+                message=task.packed_message,
+                think_mode=task.think_mode,
+                metadata=task.metadata,
+            )
             task.update_state(QueueTaskState.RECEIVING_STREAM)
             task.update_state(QueueTaskState.STREAMING_TO_CLIENT)
+
+            content: str = ""
+            tool_args: str = ""
+            chunk_type = ""
+
             async for chunk in gen:
                 await task.stream_callback(chunk)
+                if not chunk_type and chunk_type != chunk.chunk_type:
+                    if len(content) > 0:
+                        llm_response_content.append(
+                            {
+                                "msg_type": chunk_type,
+                                "content": content,
+                                "tool_args": tool_args,
+                            }
+                        )
+                        # Log message content for debugging
+                        logger.info(
+                            _(
+                                "Task %s: message chunk - type=%s, content_length=%d, has_tool_args=%s"
+                            ),
+                            task.id,
+                            chunk_type,
+                            len(content),
+                            bool(tool_args),
+                        )
+
+                    content = ""
+                    tool_args = ""
+                    chunk_type = chunk.chunk_type
+                content += "" if chunk.content is None else chunk.content
+                if chunk_type == "tool":
+                    tool_args += (
+                        ""
+                        if chunk.data is None
+                        or not chunk.data.get("tool_call", {}).get("args")
+                        else chunk.data["tool_call"]["args"]
+                    )
+
+            if len(content) > 0 and len(chunk_type) > 0:
+                llm_response_content.append(
+                    {
+                        "msg_type": chunk_type,
+                        "content": content,
+                        "tool_args": tool_args,
+                    }
+                )
+                # Log message content for debugging
+                logger.info(_("Task %s: %s, %s"), task.id, content, tool_args)
+
+            # Create background task to save messages using Tools utility
+            Tools.start_async_task(
+                MsgQueueHandler._save_messages_to_db(
+                    task_id=task.id,
+                    session_db_id=task.agent.session_db_id,
+                    sender_db_id=None,
+                    receiver_db_id=task.agent.agent_db_id,
+                    llm_response_content=llm_response_content,
+                )
+            )
+            logger.debug(_("Task %s: background message save task created"), task.id)
 
             await task.stream_callback(StreamChunk(chunk_type="done"))
             task.update_state(QueueTaskState.COMPLETED)
