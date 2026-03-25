@@ -66,7 +66,7 @@ class QueueManager:
         # optional per-state concurrency cap
         self._state_semaphores: Dict[QueueTaskState, asyncio.Semaphore] = {}
 
-        logger.info(
+        logger.debug(
             _("QueueManager initialised (max_concurrent=%d, max_queue=%d, max_workers=%d)"),
             max_concurrent_tasks,
             max_queue_size,
@@ -86,18 +86,18 @@ class QueueManager:
         self._state_handlers[state] = handler
         if max_connections is not None:
             self._state_semaphores[state] = asyncio.Semaphore(max_connections)
-            logger.info(
+            logger.debug(
                 _("Registered handler for state=%s (max_connections=%d)"),
                 state.value,
                 max_connections,
             )
         else:
-            logger.info(_("Registered handler for state=%s"), state.value)
+            logger.debug(_("Registered handler for state=%s"), state.value)
 
     def unregister_state_handler(self, state: QueueTaskState) -> None:
         self._state_handlers.pop(state, None)
         self._state_semaphores.pop(state, None)
-        logger.info(_("Unregistered handler for state=%s"), state.value)
+        logger.debug(_("Unregistered handler for state=%s"), state.value)
 
     # ------------------------------------------------------------------
     # Public API
@@ -265,8 +265,8 @@ class QueueManager:
                 task.id,
             )
             return
-        logger.info(
-            _("DEBUG: Dispatching task %s to handler for state=%s"),
+        logger.debug(
+            _("Dispatching task %s to handler for state=%s"),
             task.id,
             task.state.value,
         )
@@ -282,7 +282,7 @@ class QueueManager:
         task.started_at = time.time()
         self._processing[task.id] = task
 
-        logger.info(_("Processing task %s (agent=%s)"), task.id, task.agent_id)
+        logger.debug(_("Processing task %s (agent=%s)"), task.id, task.agent_id)
         try:
             # Drive the task through its state chain until no handler matches
             await self._dispatch_state(task)
@@ -293,7 +293,7 @@ class QueueManager:
                 await self._dispatch_state(task)
 
             task.status = QueueTaskStatus.COMPLETED
-            logger.info(_("Task %s completed"), task.id)
+            logger.debug(_("Task %s completed"), task.id)
 
         except Exception as exc:
             logger.error(_("Task %s failed: %s"), task.id, exc)
@@ -312,14 +312,14 @@ class QueueManager:
             await self._process_task(task)
 
     async def _queue_processor(self) -> None:
-        logger.info(_("Queue processor loop started"))
+        logger.debug(_("Queue processor loop started"))
         while self._running:
             try:
                 async with self._lock:
                     task = await self._get_next_task()
                 if task:
-                    logger.info(
-                        _("DEBUG: Got task %s from queue, creating process task"),
+                    logger.debug(
+                        _("Got task %s from queue, creating process task"),
                         task.id,
                     )
                     asyncio.create_task(self._process_task_with_semaphore(task))
@@ -332,7 +332,7 @@ class QueueManager:
             except Exception as exc:
                 logger.error(_("Queue processor error: %s"), exc)
                 await asyncio.sleep(1)
-        logger.info(_("Queue processor loop stopped"))
+        logger.debug(_("Queue processor loop stopped"))
 
 
 # ------------------------------------------------------------------
@@ -349,7 +349,7 @@ def get_queue_manager() -> QueueManager:
         logger = logging.getLogger(__name__)
         from i18n import _
         _manager = QueueManager()
-        logger.info(_("DEBUG: Created new QueueManager instance (id=%s)"), id(_manager))
+        logger.debug(_("Created new QueueManager instance (id=%s)"), id(_manager))
     return _manager
 
 
