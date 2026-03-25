@@ -72,41 +72,30 @@ async def router_node(
     messages_to_send: list[BaseMessage] = []
     messages_to_send.append(
         SystemMessage(
-            content="""
-# System Prompt
-You are the central routing core of the J.A.R.V.I.S. system. Your ONLY job is to analyze the user's query and decide which level of AI agent should handle it, and whether deep thinking is required.
+            content="""You are a routing classifier. Output ONLY a single line of JSON. No explanations, no markdown, no extra text.
 
-You must output STRICTLY IN JSON format. Do not include any explanations, markdown formatting like ```json, or conversational text.
+Format: {"level": 1, "think": false}
 
-Output Schema:
-{"level": <integer 1, 2, or 3>, "think": <boolean>}
+Rules:
+- level 1: Simple questions, basic tasks, web search (1-3 steps)
+- level 2: Complex multi-step workflows, multiple tools, project-level code
+- level 3: Advanced math, quantum physics, deep system design
+- think: true only for math/logic/algorithms, otherwise false
 
-Routing Rules (level):
-- Level 1 (General & Basic Agent): Handled by a fast 9B model. Covers general conversation, factual questions, standard coding tasks (e.g., writing single scripts, UI components, debugging snippets), and basic agentic workflows using tools (e.g., 1-3 steps of web searching, checking databases).
-- Level 2 (Master Agent): Handled by a 27B model. Covers complex, multi-step agentic workflows (e.g., iterative research, deep data analysis), complex project-level coding (e.g., generating multiple connected files, database schema design), and orchestrating multiple tools simultaneously.
-- Level 3 (Professor Agent): Handled by a 112B model. Reserved ONLY for extremely complex logical problems, advanced mathematics (e.g., Quantum mechanics), deep system architecture design, or solving intractable bugs.
-
-Thinking Mode (think):
-- Set to true ONLY IF the problem requires step-by-step logical deduction, algorithm design, or math. Otherwise, set to false.
-
-# Few-Shot Examples (For context):
+Examples:
 User: "幫我上網查下 Apple 最新發佈會講咗咩，然後總結三個重點。"
-Output: {"level": 1, "think": false}
-
-User: "幫我寫個 Python script，用 BeautifulSoup 爬取呢個網頁嘅所有圖片並 save 落 local。"
-Output: {"level": 1, "think": false}
+{"level": 1, "think": false}
 
 User: "我段 JavaScript code 有個 TypeError，幫我 debug 吓：[code snippet]"
-Output: {"level": 1, "think": true}
+{"level": 1, "think": true}
 
 User: "幫我爬取對手網站最新嘅產品價格，然後連去我哋個 PostgreSQL DB 做對比，最後 gen 份 Markdown 報告並 send email 俾老細。"
-Output: {"level": 2, "think": false}
-
-User: "請幫我用 Rust 寫一個高效能嘅非同步 Web Server，包含 Connection Pool、JWT Authentication 同埋 Rate Limiting Middleware。"
-Output: {"level": 2, "think": true}
+{"level": 2, "think": false}
 
 User: "推導一下黑洞事件視界邊緣嘅霍金輻射方程式。"
-Output: {"level": 3, "think": true}
+{"level": 3, "think": true}
+
+CRITICAL: Your entire response must be ONLY the JSON object. Nothing else.
 """
         )
     )
@@ -153,11 +142,12 @@ Output: {"level": 3, "think": true}
 
     except (json.JSONDecodeError, ValueError) as e:
         # Fallback (補底機制)：如果 4B 發神經出唔到 JSON，預設交俾 9B 處理
-        logger.warning(_("⚠️ [Router JSON 解析失敗]: %s | Error: %s"), raw_content, e)
+        preview = raw_content[:100] + ("..." if len(raw_content) > 100 else "")
+        logger.warning(_("⚠️ [Router 返回非 JSON]: %s"), preview)
         routing_level = 1
         think_mode = False
         logger.info(
-            _("-> [Router 補底啟動]: 強制派去 Level=%d, Think=%s"),
+            _("-> [Router 補底]: Level=%d, Think=%s"),
             routing_level,
             think_mode,
         )
