@@ -227,7 +227,7 @@ class Agent:
                             base_url=model_dto.base_url,
                             api_key=SecretStr(api_key),
                             model=model_dto.model_name,
-                            streaming=False,
+                            streaming=True,
                         )
 
                         model = model.bind(
