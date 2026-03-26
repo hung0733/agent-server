@@ -1,3 +1,4 @@
+from datetime import datetime
 import json
 import logging
 import operator
@@ -169,7 +170,7 @@ CRITICAL: Your entire response must be ONLY the JSON object. Nothing else.
                 logger.info(
                     _("-> [Router 決定 (抽取)]: Level=%d, Think=%s"),
                     routing_level,
-                    think_mode
+                    think_mode,
                 )
             except Exception:
                 # Final fallback: default to Level 1
@@ -260,17 +261,22 @@ async def level_1_node(
             )  # type: ignore
 
             # 5. Invoke 模型
-            response = await model.ainvoke(messages_to_send)
+            response: AIMessage = await model.ainvoke(messages_to_send)
 
             Tools.start_async_task(
                 LLMEndpointDAO.record_feedback(model_dto.id, success=True)
             )
 
+            response.additional_kwargs["datetime"] = datetime.now()
+
             return {"messages": [response]}
         except Exception as exc:
             # Handle Fail Model
             logger.error(
-                _("[Level 1] 模型 %s 呼叫失敗: %s"), model_dto.model_name, exc, exc_info=True
+                _("[Level 1] 模型 %s 呼叫失敗: %s"),
+                model_dto.model_name,
+                exc,
+                exc_info=True,
             )
             Tools.start_async_task(
                 LLMEndpointDAO.record_feedback(model_dto.id, success=False)
@@ -350,11 +356,16 @@ async def level_2_node(
                 LLMEndpointDAO.record_feedback(model_dto.id, success=True)
             )
 
+            response.additional_kwargs["datetime"] = datetime.now()
+
             return {"messages": [response]}
         except Exception as exc:
             # Handle Fail Model
             logger.error(
-                _("[Level 2] 模型 %s 呼叫失敗: %s"), model_dto.model_name, exc, exc_info=True
+                _("[Level 2] 模型 %s 呼叫失敗: %s"),
+                model_dto.model_name,
+                exc,
+                exc_info=True,
             )
             Tools.start_async_task(
                 LLMEndpointDAO.record_feedback(model_dto.id, success=False)
@@ -434,11 +445,16 @@ async def level_3_node(
                 LLMEndpointDAO.record_feedback(model_dto.id, success=True)
             )
 
+            response.additional_kwargs["datetime"] = datetime.now()
+
             return {"messages": [response]}
         except Exception as exc:
             # Handle Fail Model
             logger.error(
-                _("[Level 3] 模型 %s 呼叫失敗: %s"), model_dto.model_name, exc, exc_info=True
+                _("[Level 3] 模型 %s 呼叫失敗: %s"),
+                model_dto.model_name,
+                exc,
+                exc_info=True,
             )
             Tools.start_async_task(
                 LLMEndpointDAO.record_feedback(model_dto.id, success=False)

@@ -160,9 +160,9 @@ class Agent:
                 timestamp = ""
                 if (
                     hasattr(m, "additional_kwargs")
-                    and "timestamp" in m.additional_kwargs
+                    and "datetime" in m.additional_kwargs
                 ):
-                    timestamp = f"[{m.additional_kwargs['timestamp']}] "
+                    timestamp = f"[{m.additional_kwargs['datetime']}] "
                 elif hasattr(m, "created_at") and m.created_at:
                     timestamp = f"[{m.created_at}] "
 

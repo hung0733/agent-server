@@ -1,3 +1,4 @@
+from datetime import datetime
 import logging
 import time
 from typing import Any, AsyncGenerator, Dict, Optional
@@ -81,7 +82,7 @@ class Bulter(Agent):
         metadata: Dict[str, Any],
     ) -> AsyncGenerator[StreamChunk, None]:
         logger.debug(
-            _("🚀 正在發送消息到 LLM，agent: %s, session: %s"), # type: ignore  # noqa: F823
+            _("🚀 正在發送消息到 LLM，agent: %s, session: %s"),  # type: ignore  # noqa: F823
             self.agent_id,
             self.session_id,
         )
@@ -100,7 +101,14 @@ class Bulter(Agent):
             config["configurable"]["agent_db_id"] = self.agent_db_id  # type: ignore
 
             async for msg, metadata in Bulter._graph.astream(
-                {"messages": [HumanMessage(content=message)]},
+                {
+                    "messages": [
+                        HumanMessage(
+                            content=message,
+                            additional_kwargs={"datetime": datetime.now()},
+                        )
+                    ]
+                },
                 config=config,
                 stream_mode="messages",
             ):
@@ -148,14 +156,17 @@ class Bulter(Agent):
 
                         # Skip router JSON output (e.g., {"level": 1, "think": false})
                         content_stripped = content.strip()
-                        if content_stripped.startswith("{") and content_stripped.endswith("}"):
+                        if content_stripped.startswith(
+                            "{"
+                        ) and content_stripped.endswith("}"):
                             try:
                                 import json
+
                                 parsed = json.loads(content_stripped)
                                 # Check if it's router output
                                 if "level" in parsed and "think" in parsed:
                                     continue  # Skip this chunk
-                            except (json.JSONDecodeError, ValueError): # type: ignore
+                            except (json.JSONDecodeError, ValueError):  # type: ignore
                                 pass  # Not JSON, continue normally
 
                         # logger.debug(f"💬 收到內容，長度：{len(content)}")
@@ -186,6 +197,6 @@ class Bulter(Agent):
             raise
 
         logger.debug(_("✅ LLM 串流處理完成，agent: %s"), self.agent_id)  # type: ignore
-        
+
     async def review_stm(self, model_set: LLMSet):
         await self._proc_review_stm(Bulter._graph, model_set)
