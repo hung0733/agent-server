@@ -4,7 +4,8 @@ import logging
 import operator
 import re
 from typing import Annotated, Sequence, TypedDict
-from langchain_core.messages import BaseMessage, AIMessage, SystemMessage
+from langchain_core.messages import BaseMessage, AIMessage, SystemMessage, RemoveMessage
+from langgraph.graph.message import add_messages
 from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph, START, END
 from langchain_core.runnables import RunnableConfig
@@ -45,8 +46,8 @@ SUBMIT_TOOL = {
 # ==========================================
 class AgentState(TypedDict):
     summary: str
-    # 儲存對話歷史，用 operator.add 確保新 message 會 append 喺尾
-    messages: Annotated[Sequence[BaseMessage], operator.add]
+    # 儲存對話歷史，用 add_messages 確保新 message 會 append 喺尾，並支援 RemoveMessage
+    messages: Annotated[Sequence[BaseMessage], add_messages]
 
     # Routing 與控制參數
     routing_level: int  # 1, 2, or 3
@@ -110,7 +111,7 @@ CRITICAL: Your entire response must be ONLY the JSON object. Nothing else.
             )
         )
 
-    messages_to_send += state["messages"]
+    messages_to_send += [m for m in state["messages"] if not isinstance(m, RemoveMessage)]
 
     # Add assistant message prefix to force JSON format
     # This is a powerful technique called "prefill" to make LLM follow format
@@ -231,7 +232,7 @@ async def level_1_node(
             )
         )
 
-    messages_to_send += state["messages"]
+    messages_to_send += [m for m in state["messages"] if not isinstance(m, RemoveMessage)]
 
     models = model_set.level[1]
     logger.debug(_("[Level 1] 找到 %d 個可用模型"), len(models))
@@ -262,6 +263,17 @@ async def level_1_node(
 
             # 5. Invoke 模型
             response: AIMessage = await model.ainvoke(messages_to_send)
+
+            # 驗證 response content 唔好係空（但 tool calls 係有效嘅）
+            has_content = response.content and str(response.content).strip()
+            has_tool_calls = hasattr(response, "tool_calls") and len(response.tool_calls) > 0  # type: ignore
+
+            if not has_content and not has_tool_calls:
+                logger.warning(
+                    _("[Level 1] 模型 %s 返回空 content 且無 tool calls，跳過呢個回應"),
+                    model_dto.model_name,
+                )
+                continue
 
             Tools.start_async_task(
                 LLMEndpointDAO.record_feedback(model_dto.id, success=True)
@@ -320,7 +332,7 @@ async def level_2_node(
             )
         )
 
-    messages_to_send += state["messages"]
+    messages_to_send += [m for m in state["messages"] if not isinstance(m, RemoveMessage)]
 
     models = model_set.level[2]
     logger.debug(_("[Level 2] 找到 %d 個可用模型"), len(models))
@@ -351,6 +363,17 @@ async def level_2_node(
 
             # 5. Invoke 模型
             response = await model.ainvoke(messages_to_send)
+
+            # 驗證 response content 唔好係空（但 tool calls 係有效嘅）
+            has_content = response.content and str(response.content).strip()
+            has_tool_calls = hasattr(response, "tool_calls") and len(response.tool_calls) > 0  # type: ignore
+
+            if not has_content and not has_tool_calls:
+                logger.warning(
+                    _("[Level 2] 模型 %s 返回空 content 且無 tool calls，跳過呢個回應"),
+                    model_dto.model_name,
+                )
+                continue
 
             Tools.start_async_task(
                 LLMEndpointDAO.record_feedback(model_dto.id, success=True)
@@ -409,7 +432,7 @@ async def level_3_node(
             )
         )
 
-    messages_to_send += state["messages"]
+    messages_to_send += [m for m in state["messages"] if not isinstance(m, RemoveMessage)]
 
     models = model_set.level[3]
     logger.debug(_("[Level 3] 找到 %d 個可用模型"), len(models))
@@ -440,6 +463,17 @@ async def level_3_node(
 
             # 5. Invoke 模型
             response = await model.ainvoke(messages_to_send)
+
+            # 驗證 response content 唔好係空（但 tool calls 係有效嘅）
+            has_content = response.content and str(response.content).strip()
+            has_tool_calls = hasattr(response, "tool_calls") and len(response.tool_calls) > 0  # type: ignore
+
+            if not has_content and not has_tool_calls:
+                logger.warning(
+                    _("[Level 3] 模型 %s 返回空 content 且無 tool calls，跳過呢個回應"),
+                    model_dto.model_name,
+                )
+                continue
 
             Tools.start_async_task(
                 LLMEndpointDAO.record_feedback(model_dto.id, success=True)
