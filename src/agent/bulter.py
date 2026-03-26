@@ -155,7 +155,7 @@ class Bulter(Agent):
                                 # Check if it's router output
                                 if "level" in parsed and "think" in parsed:
                                     continue  # Skip this chunk
-                            except (json.JSONDecodeError, ValueError):
+                            except (json.JSONDecodeError, ValueError): # type: ignore
                                 pass  # Not JSON, continue normally
 
                         # logger.debug(f"💬 收到內容，長度：{len(content)}")

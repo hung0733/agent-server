@@ -1,22 +1,25 @@
 import asyncio
 import logging
 import os
-from typing import Set
+from typing import Any, Set
+
+import tiktoken
 
 from i18n import _
 
 logger = logging.getLogger(__name__)
 
+
 class Tools:
     _pending_tasks: Set[asyncio.Task] = set()
-    
+
     @staticmethod
     def require_env(name: str) -> str:
         value = os.getenv(name)
         if value is None:
             raise RuntimeError(_("Required environment variable '%s' is not set"), name)
         return value
-    
+
     @classmethod
     async def wait_task_comp(cls) -> None:
         """
@@ -44,3 +47,11 @@ class Tools:
         Tools._pending_tasks.add(task)
         task.add_done_callback(Tools._pending_tasks.discard)
         return task
+
+    @staticmethod
+    def get_token_count(text: Any) -> int:
+        """計吓段文字有幾多 Token"""
+        try:
+            return len(tiktoken.get_encoding("cl100k_base").encode(str(text)))
+        except Exception:
+            return len(str(text))

@@ -21,6 +21,7 @@ import logging
 from typing import Any, AsyncGenerator, Dict, Optional
 from uuid import UUID, uuid4
 
+from agent.agent import Agent
 from agent.bulter import Bulter
 from db.dao.agent_message_dao import AgentMessageDAO
 from db.dao.collaboration_session_dao import CollaborationSessionDAO
@@ -229,6 +230,7 @@ class MsgQueueHandler:
                 )
 
             logger.debug(_("Task %s: all messages saved to database"), task_id)
+
         except Exception as exc:
             logger.error(
                 _("Task %s: failed to save messages to database: %s"), task_id, exc
@@ -315,7 +317,7 @@ class MsgQueueHandler:
                 # Log message content for debugging
                 logger.info(_("Task %s: %s, %s"), task.id, content, tool_args)
 
-            # Create background task to save messages using Tools utility
+            # Create background tasks to save messages (DB + long-term memory)
             Tools.start_async_task(
                 MsgQueueHandler._save_messages_to_db(
                     task_id=task.id,
@@ -325,7 +327,12 @@ class MsgQueueHandler:
                     llm_response_content=llm_response_content,
                 )
             )
-            logger.debug(_("Task %s: background message save task created"), task.id)
+
+            Tools.start_async_task(task.agent.review_stm())
+
+            logger.debug(
+                _("Task %s: background save tasks created (DB + memory)"), task.id
+            )
 
             await task.stream_callback(StreamChunk(chunk_type="done"))
             task.update_state(QueueTaskState.COMPLETED)

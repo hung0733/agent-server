@@ -212,6 +212,11 @@ async def level_1_node(
 
     # 2. 用你寫好嘅 DB Loader 攞 Tools
     db_tools = await get_tools(agent_db_id)
+    logger.info(
+        _("載入了 %d 個工具: %s"),
+        len(db_tools),
+        [t.name for t in db_tools] if db_tools else "無",
+    )
 
     messages_to_send: list[BaseMessage] = []
     messages_to_send.append(SystemMessage(content=sys_prompt))
@@ -291,6 +296,11 @@ async def level_2_node(
 
     # 2. 用你寫好嘅 DB Loader 攞 Tools
     db_tools = await get_tools(agent_db_id)
+    logger.info(
+        _("載入了 %d 個工具: %s"),
+        len(db_tools),
+        [t.name for t in db_tools] if db_tools else "無",
+    )
 
     messages_to_send: list[BaseMessage] = []
     messages_to_send.append(SystemMessage(content=sys_prompt))
@@ -370,6 +380,11 @@ async def level_3_node(
 
     # 2. 用你寫好嘅 DB Loader 攞 Tools
     db_tools = await get_tools(agent_db_id)
+    logger.info(
+        _("載入了 %d 個工具: %s"),
+        len(db_tools),
+        [t.name for t in db_tools] if db_tools else "無",
+    )
 
     messages_to_send: list[BaseMessage] = []
     messages_to_send.append(SystemMessage(content=sys_prompt))

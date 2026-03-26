@@ -317,57 +317,12 @@ class WhatsAppWSClient:
     ) -> None:
         """Drain *gen*, accumulate content chunks, then reply via msg.callback."""
         reply_parts: list[str] = []
-        tools_used: list[str] = []
-        sentence_buffer: str = ""  # Buffer for accumulating sentence fragments
 
         try:
             async for chunk in gen:
                 if chunk.chunk_type == "content" and chunk.content:
-                    # Accumulate content
-                    sentence_buffer += chunk.content
                     reply_parts.append(chunk.content)
-
-                    # Check if we hit a sentence boundary
-                    # Chinese/English sentence endings: 。！？\n or .!?\n
-                    if any(sentence_buffer.rstrip().endswith(end) for end in ["。", "！", "？", ".", "!", "?", "\n"]):
-                        # Print complete sentence
-                        logger.info(_("💬 [回覆]: %s"), sentence_buffer.strip())
-                        sentence_buffer = ""  # Reset buffer
-
-                elif chunk.chunk_type == "tool" and chunk.content:
-                    # Flush any pending sentence before tool log
-                    if sentence_buffer.strip():
-                        logger.info(_("💬 [回覆]: %s"), sentence_buffer.strip())
-                        sentence_buffer = ""
-
-                    # Log tool usage
-                    tool_name = chunk.content
-                    if tool_name not in tools_used:
-                        tools_used.append(tool_name)
-                    logger.info(_("🔧 [Tool]: %s"), tool_name)
-
-                elif chunk.chunk_type == "tool_result" and chunk.content:
-                    # Log tool result
-                    result_preview = chunk.content[:200] + ("..." if len(chunk.content) > 200 else "")
-                    logger.info(_("✅ [Tool Result]: %s"), result_preview)
-
-                elif chunk.chunk_type == "think" and chunk.content:
-                    # Flush any pending sentence before thinking log
-                    if sentence_buffer.strip():
-                        logger.info(_("💬 [回覆]: %s"), sentence_buffer.strip())
-                        sentence_buffer = ""
-
-                    # Log thinking/reasoning
-                    think_preview = chunk.content[:200] + ("..." if len(chunk.content) > 200 else "")
-                    logger.info(_("🧠 [Thinking]: %s"), think_preview)
-
-                elif chunk.chunk_type == "done":
-                    # Flush any remaining content
-                    if sentence_buffer.strip():
-                        logger.info(_("💬 [回覆]: %s"), sentence_buffer.strip())
-                        sentence_buffer = ""
-                    break
-
+                    
         except Exception:
             logger.exception(
                 _("Stream error for message %s from %s"),
@@ -377,10 +332,6 @@ class WhatsAppWSClient:
             return
 
         reply = "".join(reply_parts).strip()
-
-        # Summary log
-        if tools_used:
-            logger.info(_("📊 [Summary] Tools used: %s"), ", ".join(tools_used))
 
         if not reply:
             logger.warning(

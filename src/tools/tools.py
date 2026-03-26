@@ -152,7 +152,20 @@ async def get_tools(agent_db_id: str) -> List[StructuredTool]:
             args_schema=args_schema,
         )
         tools.append(structured_tool)
-        logger.debug(_("✅ 已載入工具: %s (v%s)"), tool_dto.name, version.version)
+        logger.info(
+            _("✅ 已載入工具: %s (v%s) - %s"),
+            tool_dto.name,
+            version.version,
+            tool_dto.description[:80] if tool_dto.description else "無描述",
+        )
 
     logger.info(_("🔧 共載入 %s 個工具，agent_db_id: %s"), len(tools), agent_db_id)
+
+    # Log tool names for debugging
+    if tools:
+        tool_names = [t.name for t in tools]
+        logger.info(_("📋 可用工具列表: %s"), ", ".join(tool_names))
+    else:
+        logger.warning(_("⚠️ 沒有載入任何工具！"))
+
     return tools

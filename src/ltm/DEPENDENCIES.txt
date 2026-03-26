@@ -1,0 +1,30 @@
+# SimpleMem Multi-Agent LTM Dependencies
+#
+# These packages are required for the ltm module to work.
+# Install them in your project:
+#
+#   pip install -r ltm/DEPENDENCIES.txt
+#
+# Or add them to your project's requirements.txt
+
+# Core Dependencies
+qdrant-client>=1.7.0          # Vector database client
+asyncpg>=0.29.0               # PostgreSQL async driver
+psycopg2-binary>=2.9.0        # PostgreSQL sync driver (optional)
+
+# LLM Client
+openai>=1.0.0                 # OpenAI API client (for LLM calls)
+
+# Embedding Model
+sentence-transformers>=3.0.0  # For local embeddings
+transformers>=4.30.0          # HuggingFace transformers
+torch>=2.0.0                  # PyTorch for embeddings
+
+# Utilities
+pydantic>=2.0.0               # Data validation
+python-dotenv>=1.0.0          # Environment variable support
+dateparser>=1.2.0             # Date parsing for retrieval
+rank-bm25>=0.2.2              # BM25 for lexical search
+
+# Optional (for better performance)
+accelerate>=0.20.0            # Faster model loading

@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 class AgentStatus(StrEnum):
     """
     Lifecycle status for an agent instance.
-    
+
     Used to track the operational state of agents in the system.
     String values ensure proper JSON serialization.
     """
@@ -39,7 +39,7 @@ class AgentStatus(StrEnum):
 class TaskStatus(StrEnum):
     """
     Execution status for a task.
-    
+
     Tracks the progress of tasks through their lifecycle.
     String values ensure proper JSON serialization.
     """
@@ -63,7 +63,7 @@ class TaskStatus(StrEnum):
 class Priority(StrEnum):
     """
     Task priority levels.
-    
+
     Determines the order in which tasks are scheduled for execution.
     String values ensure proper JSON serialization.
     """
@@ -84,7 +84,7 @@ class Priority(StrEnum):
 class DependencyType(StrEnum):
     """
     Types of task dependencies.
-    
+
     Defines how tasks relate to each other in a workflow.
     String values ensure proper JSON serialization.
     """
@@ -102,7 +102,7 @@ class DependencyType(StrEnum):
 class ScheduleType(StrEnum):
     """
     Types of task schedules.
-    
+
     Defines the format and validation rules for schedule expressions.
     String values ensure proper JSON serialization.
     """
@@ -120,7 +120,7 @@ class ScheduleType(StrEnum):
 class ActorType(StrEnum):
     """
     Type of actor performing an action in audit logs.
-    
+
     Identifies whether an action was performed by a user, agent, or system.
     String values ensure proper JSON serialization.
     """
@@ -138,7 +138,7 @@ class ActorType(StrEnum):
 class CollaborationStatus(StrEnum):
     """
     Status of a collaboration session.
-    
+
     Tracks the lifecycle state of collaborative agent sessions.
     String values ensure proper JSON serialization.
     """
@@ -159,7 +159,7 @@ class CollaborationStatus(StrEnum):
 class MessageRedactionLevel(StrEnum):
     """
     Redaction level for agent messages.
-    
+
     Defines how much content is visible/redacted in messages.
     String values ensure proper JSON serialization.
     """
@@ -177,13 +177,16 @@ class MessageRedactionLevel(StrEnum):
 class MessageType(StrEnum):
     """
     Type of agent message.
-    
+
     Defines the nature of messages exchanged between agents.
     String values ensure proper JSON serialization.
     """
 
     request = "request"
     """Request for action or information."""
+
+    think = "think"
+    """think for a request."""
 
     response = "response"
     """Response to a request."""
@@ -204,10 +207,10 @@ class MessageType(StrEnum):
 def gen_random_uuid() -> UUID:
     """
     Generate a random UUID v4.
-    
+
     This function is designed to be used as a field default factory
     for Pydantic models that need UUID fields.
-    
+
     Returns:
         A UUID v4 object.
     """

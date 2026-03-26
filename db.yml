@@ -29,7 +29,7 @@ services:
           cpus: '0.5'
 
   qdrant:
-    user: 1000:1000
+    user: root
     image: qdrant/qdrant:latest
     container_name: agent-qdrant
     restart: on-failure

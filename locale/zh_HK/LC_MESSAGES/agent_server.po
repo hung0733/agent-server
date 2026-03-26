@@ -236,3 +236,94 @@ msgstr "設定實例 %s 上線狀態（%s）失敗 [%s]：%s"
 
 msgid "setPresence(%s) error for %s: %s"
 msgstr "設定實例 %s 上線狀態（%s）時發生錯誤：%s"
+
+# msg_queue/handler.py — agent message logging
+msgid "Task %s: generated step_id=%s"
+msgstr "任務 %s：已生成 step_id=%s"
+
+msgid "Task %s: collaboration session not found for session_id=%s"
+msgstr "任務 %s：找不到 session_id=%s 的協作會話"
+
+msgid "Task %s: found collaboration_id=%s"
+msgstr "任務 %s：找到 collaboration_id=%s"
+
+msgid "Task %s: logged user message id=%s"
+msgstr "任務 %s：已記錄用戶消息 id=%s"
+
+msgid "Task %s: failed to log user message: %s"
+msgstr "任務 %s：記錄用戶消息失敗：%s"
+
+msgid "Task %s: logged LLM response id=%s"
+msgstr "任務 %s：已記錄 LLM 回應 id=%s"
+
+msgid "Task %s: failed to log LLM response: %s"
+msgstr "任務 %s：記錄 LLM 回應失敗：%s"
+
+msgid "Task %s: all messages saved to database"
+msgstr "任務 %s：所有消息已保存到數據庫"
+
+msgid "Task %s: failed to save messages to database: %s"
+msgstr "任務 %s：保存消息到數據庫失敗：%s"
+
+msgid "Task %s: background message save task created"
+msgstr "任務 %s：後台消息保存任務已創建"
+
+# tools/web_search.py — web search tool
+msgid "🔍 執行網絡搜索: query='%s', num_results=%d, engine=%s"
+msgstr "🔍 執行網絡搜索: query='%s', num_results=%d, engine=%s"
+
+msgid "⚠️ 不支援的搜索引擎: %s，使用 DuckDuckGo 替代"
+msgstr "⚠️ 不支援的搜索引擎: %s，使用 DuckDuckGo 替代"
+
+msgid "❌ 網絡搜索失敗: %s"
+msgstr "❌ 網絡搜索失敗: %s"
+
+msgid "搜索失敗：%s"
+msgstr "搜索失敗：%s"
+
+msgid "❌ 缺少依賴：duckduckgo-search。請執行：pip install duckduckgo-search"
+msgstr "❌ 缺少依賴：duckduckgo-search。請執行：pip install duckduckgo-search"
+
+msgid "錯誤：缺少 duckduckgo-search 庫。請聯繫管理員安裝依賴。\n安裝命令：pip install duckduckgo-search"
+msgstr "錯誤：缺少 duckduckgo-search 庫。請聯繫管理員安裝依賴。\n安裝命令：pip install duckduckgo-search"
+
+msgid "沒有找到相關結果：%s"
+msgstr "沒有找到相關結果：%s"
+
+msgid "🔍 搜索結果：%s\n"
+msgstr "🔍 搜索結果：%s\n"
+
+msgid "無標題"
+msgstr "無標題"
+
+msgid "無描述"
+msgstr "無描述"
+
+msgid "無連結"
+msgstr "無連結"
+
+msgid "✅ 搜索成功，返回 %d 個結果"
+msgstr "✅ 搜索成功，返回 %d 個結果"
+
+msgid "❌ DuckDuckGo 搜索失敗: %s"
+msgstr "❌ DuckDuckGo 搜索失敗: %s"
+
+msgid "Task %s: message chunk - type=%s, content_length=%d, has_tool_args=%s"
+msgstr "任務 %s：消息片段 - 類型=%s, 內容長度=%d, 有工具參數=%s"
+
+# tools/tools.py — tool loading diagnostics
+msgid "✅ 已載入工具: %s (v%s) - %s"
+msgstr "✅ 已載入工具: %s (v%s) - %s"
+
+msgid "📋 可用工具列表: %s"
+msgstr "📋 可用工具列表: %s"
+
+msgid "⚠️ 沒有載入任何工具！"
+msgstr "⚠️ 沒有載入任何工具！"
+
+# graph/butler.py — tool binding logs
+msgid "載入了 %d 個工具: %s"
+msgstr "載入了 %d 個工具: %s"
+
+msgid "Task %s: logged message id=%s, type=%s"
+msgstr "任務 %s：已記錄消息 id=%s, 類型=%s"
