@@ -186,3 +186,6 @@ class Bulter(Agent):
             raise
 
         logger.debug(_("✅ LLM 串流處理完成，agent: %s"), self.agent_id)  # type: ignore
+        
+    async def review_stm(self, model_set: LLMSet):
+        await self._proc_review_stm(Bulter._graph, model_set)

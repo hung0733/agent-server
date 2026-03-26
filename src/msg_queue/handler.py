@@ -328,7 +328,7 @@ class MsgQueueHandler:
                 )
             )
 
-            Tools.start_async_task(task.agent.review_stm())
+            Tools.start_async_task(task.agent.review_stm(task.model_set))
 
             logger.debug(
                 _("Task %s: background save tasks created (DB + memory)"), task.id
