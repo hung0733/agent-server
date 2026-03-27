@@ -312,7 +312,6 @@ Your task is to extract all valuable information from the following dialogues an
    - persons: All person names mentioned
    - entities: Companies, products, organizations, etc.
    - topic: The topic of this information
-5. **Language Matching**: You MUST generate the `lossless_restatement`, `topic`, and `keywords` in the EXACT SAME LANGUAGE as the provided dialogues (e.g., if the dialogue is in Hong Kong Cantonese / Traditional Chinese, your extracted text MUST be in Traditional Chinese).
 
 [Output Format]
 Return a JSON array, each element is a memory entry:
