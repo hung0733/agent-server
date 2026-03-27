@@ -27,7 +27,7 @@ from db.dao.task_dependency_dao import TaskDependencyDAO
 from db.dto.task_schedule_dto import TaskScheduleUpdate
 from db.dto.task_dto import TaskUpdate
 from db.dto.task_queue_dto import TaskQueueCreate, TaskQueueUpdate
-from db.types import TaskStatus, ScheduleType, TaskExecutionType
+from db.types import TaskStatus, ScheduleType, TaskExecutionType, Priority
 from i18n import _
 from scheduler.task_executor import TaskExecutor
 
@@ -37,6 +37,34 @@ logger = logging.getLogger(__name__)
 def now_utc() -> datetime:
     """Get current UTC datetime."""
     return datetime.now(timezone.utc)
+
+
+def priority_to_int(priority: Priority | None) -> int:
+    """
+    Convert Priority enum to integer value for task queue.
+
+    Args:
+        priority: Priority enum value or None
+
+    Returns:
+        Integer priority (higher = more urgent)
+        - critical: 30
+        - high: 20
+        - normal: 10
+        - low: 0
+        - None: 10 (default to normal)
+    """
+    if priority is None:
+        return 10
+
+    priority_map = {
+        Priority.low: 0,
+        Priority.normal: 10,
+        Priority.high: 20,
+        Priority.critical: 30,
+    }
+
+    return priority_map.get(priority, 10)
 
 
 def calculate_next_run(
@@ -330,7 +358,7 @@ class TaskScheduler:
                 TaskQueueCreate(
                     task_id=execution_task.id,
                     status=TaskStatus.pending,
-                    priority=template_task.priority or 0,
+                    priority=priority_to_int(template_task.priority),
                     scheduled_at=current_time,
                 )
             )
