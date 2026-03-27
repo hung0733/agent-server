@@ -27,7 +27,8 @@ from db.dto.task_dto import (
     TaskDependencyCreate,
     TaskDependencyUpdate,
 )
-from db.entity.task_entity import Task as TaskEntity, TaskDependency as TaskDependencyEntity
+from db.entity.task_entity import Task as TaskEntity
+from db.entity.task_dependency_entity import TaskDependency as TaskDependencyEntity
 from db.types import TaskStatus
 
 

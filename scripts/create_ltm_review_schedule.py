@@ -76,7 +76,7 @@ async def create_ltm_review_schedule(
         )
 
         # 1. Find agent instance
-        agent_instance = await AgentInstanceDAO.get_by_agent_id(agent_id_str)
+        agent_instance = await AgentInstanceDAO.get_by_agent_id(agent_id_str) # type: ignore
         if not agent_instance:
             logger.error(
                 _("[create_ltm_review_schedule] Agent 不存在: %s"),

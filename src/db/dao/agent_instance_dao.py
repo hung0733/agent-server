@@ -383,6 +383,40 @@ class AgentInstanceDAO:
             return count
 
     @staticmethod
+    async def get_by_agent_id(
+        agent_id: str,
+        session: Optional[AsyncSession] = None,
+    ) -> Optional[AgentInstance]:
+        """Retrieve an agent instance by its unique agent_id string.
+
+        Args:
+            agent_id: String identifier of the agent (e.g., 'butler-001').
+            session: Optional async session for transaction control.
+
+        Returns:
+            AgentInstance DTO if found, None otherwise.
+        """
+        async def _query(s: AsyncSession) -> Optional[AgentInstanceEntity]:
+            result = await s.execute(
+                select(AgentInstanceEntity).where(AgentInstanceEntity.agent_id == agent_id)
+            )
+            return result.scalar_one_or_none()
+
+        if session is not None:
+            entity = await _query(session)
+        else:
+            from db import create_engine, AsyncSession, async_sessionmaker
+            engine = create_engine()
+            async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+            async with async_session() as s:
+                entity = await _query(s)
+            await engine.dispose()
+
+        if entity is None:
+            return None
+        return AgentInstance.model_validate(entity)
+
+    @staticmethod
     async def get_by_phones(
         sender_phone_no: str,
         receiver_phone_no: str,
