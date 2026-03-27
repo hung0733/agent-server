@@ -2,9 +2,7 @@
 import importlib
 import importlib.util
 import sys
-import os
 import numpy as np
-import pytest
 from unittest.mock import MagicMock, patch
 
 
@@ -88,6 +86,7 @@ class TestEmbeddingModelAPIMode:
         assert isinstance(result, np.ndarray)
         assert result.shape == (2, 4)
         np.testing.assert_array_almost_equal(result[0], [0.1, 0.2, 0.3, 0.4])
+        mock_response.raise_for_status.assert_called_once()
         model._requests.post.assert_called_once_with(
             "http://localhost:8605/v1/embeddings",
             headers={"Authorization": "Bearer key", "Content-Type": "application/json"},
@@ -169,5 +168,6 @@ class TestEmbeddingModelLocalFallback:
              patch.dict(sys.modules, {"sentence_transformers": mock_st_module}):
             model = EmbeddingModel()
 
+        mock_st_class.assert_called_once_with("sentence-transformers/all-MiniLM-L6-v2")
         assert model.model_type == "sentence_transformer"
         assert model.dimension == 384
