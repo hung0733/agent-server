@@ -159,6 +159,43 @@ async def get_tools(agent_db_id: str) -> List[StructuredTool]:
             tool_dto.description[:80] if tool_dto.description else "無描述",
         )
 
+    # 2. Add built-in scheduled task management tools
+    from tools.task_schedule_tools import (
+        create_scheduled_task_for_agent,
+        list_my_scheduled_tasks_for_agent,
+        update_my_scheduled_task_for_agent,
+        delete_my_scheduled_task_for_agent,
+    )
+
+    task_tool_factories = [
+        (create_scheduled_task_for_agent, "create_scheduled_task", _("建立新排程任務")),
+        (list_my_scheduled_tasks_for_agent, "list_my_scheduled_tasks", _("列出此 Agent 的排程任務")),
+        (update_my_scheduled_task_for_agent, "update_my_scheduled_task", _("更新排程任務")),
+        (delete_my_scheduled_task_for_agent, "delete_my_scheduled_task", _("刪除排程任務")),
+    ]
+
+    for factory_func, tool_name, description in task_tool_factories:
+        try:
+            # Use factory to create a function with agent_db_id already bound
+            # This function has the correct signature for Pydantic to inspect
+            task_func = factory_func(agent_db_id)
+
+            # Create StructuredTool from the generated function
+            task_structured_tool = StructuredTool.from_function(
+                coroutine=task_func,
+                name=tool_name,
+                description=description,
+            )
+            tools.append(task_structured_tool)
+            logger.info(_("✅ 已載入排程工具: %s"), tool_name)
+        except Exception as e:
+            logger.error(
+                _("⚠️ 載入排程工具 %s 失敗: %s"),
+                tool_name,
+                str(e),
+                exc_info=True,
+            )
+
     logger.info(_("🔧 共載入 %s 個工具，agent_db_id: %s"), len(tools), agent_db_id)
 
     # Log tool names for debugging

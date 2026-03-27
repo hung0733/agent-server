@@ -204,6 +204,21 @@ class MessageType(StrEnum):
     """Result from a tool/capability execution."""
 
 
+class TaskExecutionType(StrEnum):
+    """
+    Type of task execution for scheduled tasks.
+
+    Determines how a scheduled task is executed when triggered.
+    String values ensure proper JSON serialization.
+    """
+
+    message = "message"
+    """Execute by simulating user message to agent (prompt-based)."""
+
+    method = "method"
+    """Execute by calling a static method directly (method-based)."""
+
+
 def gen_random_uuid() -> UUID:
     """
     Generate a random UUID v4.

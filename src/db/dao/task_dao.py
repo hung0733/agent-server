@@ -236,7 +236,45 @@ class TaskDAO:
             await engine.dispose()
         
         return [Task.model_validate(e) for e in entities]
-    
+
+    @staticmethod
+    async def get_by_agent_id(
+        agent_id: UUID,
+        limit: int = 100,
+        offset: int = 0,
+        session: Optional[AsyncSession] = None,
+    ) -> List[Task]:
+        """Retrieve tasks by agent instance ID.
+
+        Args:
+            agent_id: UUID of the agent instance.
+            limit: Maximum number of records to return.
+            offset: Number of records to skip.
+            session: Optional async session for transaction control.
+
+        Returns:
+            List of Task DTOs.
+        """
+        async def _query(s: AsyncSession) -> List[TaskEntity]:
+            result = await s.execute(
+                select(TaskEntity)
+                .where(TaskEntity.agent_id == agent_id)
+                .limit(limit)
+                .offset(offset)
+            )
+            return list(result.scalars().all())
+
+        if session is not None:
+            entities = await _query(session)
+        else:
+            engine = create_engine()
+            async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+            async with async_session() as s:
+                entities = await _query(s)
+            await engine.dispose()
+
+        return [Task.model_validate(e) for e in entities]
+
     @staticmethod
     async def update(
         dto: TaskUpdate,

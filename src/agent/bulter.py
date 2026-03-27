@@ -192,7 +192,7 @@ class Bulter(Agent):
                 self.agent_id,
                 self.session_id,
                 self.name,
-                e,
+                e, exc_info= True
             )
             raise
 
@@ -200,3 +200,7 @@ class Bulter(Agent):
 
     async def review_stm(self, model_set: LLMSet):
         await self._proc_review_stm(Bulter._graph, model_set)
+        
+    @staticmethod
+    async def review_ltm(agent_id : str):
+        pass

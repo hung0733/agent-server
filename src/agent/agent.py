@@ -1,9 +1,8 @@
 import logging
 from typing import Any, List
 
-from langchain.messages import RemoveMessage
+from langchain_core.messages import RemoveMessage, HumanMessage
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
 from db.crypto import CryptoManager
@@ -243,11 +242,13 @@ class Agent:
                         )
 
                         # 💡 神奇魔法：使用 aupdate_state 直接由外部改寫 DB！
-                        delete_msgs = [RemoveMessage(id=m.id) for m in old_messages]
+                        # 只刪除有 ID 嘅 messages（add_messages reducer 會自動生成 ID）
+                        delete_msgs = [RemoveMessage(id=m.id) for m in old_messages if m.id is not None]
 
                         logger.debug(
-                            _("🗑️ 背景任務：正在從 Checkpoint 刪除 %d 條舊訊息..."),
+                            _("🗑️ 背景任務：正在從 Checkpoint 刪除 %d 條舊訊息（總共 %d 條）..."),
                             len(delete_msgs),
+                            len(old_messages),
                         )
 
                         if not summary.endswith("\n"):

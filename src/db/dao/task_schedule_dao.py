@@ -353,10 +353,10 @@ class TaskScheduleDAO:
         session: Optional[AsyncSession] = None,
     ) -> int:
         """Count total number of task schedules.
-        
+
         Args:
             session: Optional async session for transaction control.
-            
+
         Returns:
             Total count of task schedules in table.
         """
@@ -365,7 +365,7 @@ class TaskScheduleDAO:
                 select(func.count()).select_from(TaskScheduleEntity)
             )
             return result.scalar() or 0
-        
+
         if session is not None:
             return await _query(session)
         else:
@@ -375,3 +375,41 @@ class TaskScheduleDAO:
                 count = await _query(s)
             await engine.dispose()
             return count
+
+    @staticmethod
+    async def get_due_schedules(
+        current_time,
+        session: Optional[AsyncSession] = None,
+    ) -> List[TaskSchedule]:
+        """Retrieve all due schedules ready for execution.
+
+        Returns active schedules where next_run_at <= current_time.
+        Used by the scheduler service to find tasks to execute.
+
+        Args:
+            current_time: Current datetime to compare against next_run_at.
+            session: Optional async session for transaction control.
+
+        Returns:
+            List of due TaskSchedule DTOs.
+        """
+        async def _query(s: AsyncSession) -> List[TaskScheduleEntity]:
+            result = await s.execute(
+                select(TaskScheduleEntity).where(
+                    TaskScheduleEntity.is_active == True,
+                    TaskScheduleEntity.next_run_at.isnot(None),
+                    TaskScheduleEntity.next_run_at <= current_time,
+                )
+            )
+            return list(result.scalars().all())
+
+        if session is not None:
+            entities = await _query(session)
+        else:
+            engine = create_engine()
+            async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+            async with async_session() as s:
+                entities = await _query(s)
+            await engine.dispose()
+
+        return [TaskSchedule.model_validate(e) for e in entities]

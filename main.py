@@ -36,6 +36,7 @@ async def main() -> None:
     from msg_queue.handler import register_all_handlers
     from msg_queue.dedup import MessageDeduplicator
     from channels.whatsapp import WhatsAppChannel, WhatsAppWSClient
+    from scheduler.task_scheduler import TaskScheduler
 
     # Init asyncpg pool (used by DAOs / SQLAlchemy layer)
     await configure_pool()
@@ -48,6 +49,15 @@ async def main() -> None:
     qm = get_queue_manager()
     register_all_handlers(qm)
     qm.start()
+
+    # Init Task Scheduler (background service for scheduled tasks)
+    scheduler = TaskScheduler()
+    scheduler_task = None
+    if os.getenv("SCHEDULER_ENABLED", "true").lower() == "true":
+        scheduler_task = asyncio.create_task(scheduler.start())
+        logger.info(_("Task scheduler started"))
+    else:
+        logger.info(_("Task scheduler is disabled"))
 
     # Init WhatsApp listener (global mode — receives all instances)
     wa_channel = WhatsAppChannel()
@@ -79,7 +89,17 @@ async def main() -> None:
             t.uncancel()
 
     logger.info(_("Shutdown signal received — draining queue"))
-    # Stop accepting new inbound messages first
+
+    # Stop scheduler first
+    if scheduler_task is not None:
+        await scheduler.stop()
+        try:
+            await asyncio.wait_for(scheduler_task, timeout=5)
+        except asyncio.TimeoutError:
+            logger.warning(_("Task scheduler did not stop within 5s"))
+            scheduler_task.cancel()
+
+    # Stop accepting new inbound messages
     await wa_client.stop()
 
     # Wait for in-flight tasks to finish (max 30 s)
