@@ -5,6 +5,7 @@ Multi-Agent Memory System 的對話存儲層
 import asyncpg
 from typing import List, Dict, Optional
 from datetime import datetime
+from .. import config
 
 
 class PostgreSQLStore:
@@ -17,11 +18,12 @@ class PostgreSQLStore:
     def __init__(self, pool: asyncpg.Pool):
         """
         初始化 PostgreSQL Store
-        
+
         Args:
             pool: asyncpg connection pool
         """
         self.pool = pool
+        self.schema = config.SIMPLEMEM_SCHEMA
     
     async def add_dialogue(
         self,
@@ -44,16 +46,21 @@ class PostgreSQLStore:
         Returns:
             dialogue_id: 插入的記錄 ID
         """
-        # 轉換 timestamp
+        # 轉換 timestamp - 確保是 timezone-aware datetime (UTC)
         ts = None
         if timestamp:
             try:
+                # Parse ISO 8601 string to timezone-aware datetime
                 ts = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                # Ensure it's timezone-aware (has UTC info)
+                if ts.tzinfo is None:
+                    from datetime import timezone as tz
+                    ts = ts.replace(tzinfo=tz.utc)
             except Exception as e:
                 print(f"Warning: Failed to parse timestamp '{timestamp}': {e}")
         
-        query = """
-            INSERT INTO dialogues (agent_id, session_id, speaker, content, timestamp)
+        query = f"""
+            INSERT INTO {self.schema}.dialogues (agent_id, session_id, speaker, content, timestamp)
             VALUES ($1, $2, $3, $4, $5)
             RETURNING dialogue_id
         """
@@ -83,17 +90,17 @@ class PostgreSQLStore:
             List of dialogue dicts
         """
         if session_id:
-            query = """
+            query = f"""
                 SELECT dialogue_id, speaker, content, timestamp, created_at
-                FROM dialogues
+                FROM {self.schema}.dialogues
                 WHERE agent_id = $1 AND session_id = $2
                 ORDER BY created_at ASC
             """
             args = [agent_id, session_id]
         else:
-            query = """
+            query = f"""
                 SELECT dialogue_id, session_id, speaker, content, timestamp, created_at
-                FROM dialogues
+                FROM {self.schema}.dialogues
                 WHERE agent_id = $1
                 ORDER BY created_at ASC
             """
@@ -117,9 +124,9 @@ class PostgreSQLStore:
         Returns:
             List of session_id UUIDs (按創建時間倒序)
         """
-        query = """
+        query = f"""
             SELECT DISTINCT session_id
-            FROM dialogues
+            FROM {self.schema}.dialogues
             WHERE agent_id = $1
             GROUP BY session_id
             ORDER BY MIN(created_at) DESC
@@ -146,16 +153,16 @@ class PostgreSQLStore:
             對話數量
         """
         if session_id:
-            query = """
+            query = f"""
                 SELECT COUNT(*) as count
-                FROM dialogues
+                FROM {self.schema}.dialogues
                 WHERE agent_id = $1 AND session_id = $2
             """
             args = [agent_id, session_id]
         else:
-            query = """
+            query = f"""
                 SELECT COUNT(*) as count
-                FROM dialogues
+                FROM {self.schema}.dialogues
                 WHERE agent_id = $1
             """
             args = [agent_id]

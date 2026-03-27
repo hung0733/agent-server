@@ -8,11 +8,14 @@ Architecture:
 - Agent 完全隔離 (agent_id filtering)
 - 同一 agent 所有 sessions 共享記憶
 """
+
 from typing import List, Optional, Dict
 import uuid
 import asyncio
 import asyncpg
 from qdrant_client import QdrantClient
+
+from models.llm import LLMSet
 
 from .models.memory_entry import Dialogue, MemoryEntry
 from .utils.llm_client import LLMClient
@@ -43,9 +46,7 @@ class MultiAgentMemorySystem:
     def __init__(
         self,
         agent_id: str,
-        api_key: Optional[str] = None,
-        model: Optional[str] = None,
-        base_url: Optional[str] = None,
+        model_set: Optional[LLMSet] = None,
         # Database configuration
         qdrant_url: Optional[str] = None,
         qdrant_api_key: Optional[str] = None,
@@ -61,7 +62,7 @@ class MultiAgentMemorySystem:
         enable_parallel_processing: Optional[bool] = None,
         max_parallel_workers: Optional[int] = None,
         enable_parallel_retrieval: Optional[bool] = None,
-        max_retrieval_workers: Optional[int] = None
+        max_retrieval_workers: Optional[int] = None,
     ):
         """
         初始化 Multi-Agent Memory System
@@ -77,9 +78,7 @@ class MultiAgentMemorySystem:
         self._initialized = False
 
         # Store initialization parameters
-        self.api_key = api_key
-        self.model = model
-        self.base_url = base_url
+        self.model_set = model_set
         self.qdrant_url = qdrant_url
         self.qdrant_api_key = qdrant_api_key
         self.postgres_url = postgres_url
@@ -109,8 +108,7 @@ class MultiAgentMemorySystem:
 
         print(f"\n📊 Connecting to Qdrant: {qdrant_url}")
         self.qdrant_client = QdrantClient(
-            url=qdrant_url,
-            api_key=self.qdrant_api_key or config.QDRANT_API_KEY
+            url=qdrant_url, api_key=self.qdrant_api_key or config.QDRANT_API_KEY
         )
 
         print(f"📊 Connecting to PostgreSQL...")
@@ -120,11 +118,9 @@ class MultiAgentMemorySystem:
         print(f"\n🔧 Initializing core components...")
 
         self.llm_client = LLMClient(
-            api_key=self.api_key,
-            model=self.model,
-            base_url=self.base_url,
+            model_set=self.model_set,
             enable_thinking=self.enable_thinking,
-            use_streaming=self.use_streaming
+            use_streaming=self.use_streaming,
         )
 
         self.embedding_model = EmbeddingModel()
@@ -132,7 +128,7 @@ class MultiAgentMemorySystem:
         self.vector_store = QdrantVectorStore(
             client=self.qdrant_client,
             agent_id=self.agent_id,
-            embedding_model=self.embedding_model
+            embedding_model=self.embedding_model,
         )
 
         self.pg_store = PostgreSQLStore(pool=self.pg_pool)
@@ -141,23 +137,21 @@ class MultiAgentMemorySystem:
         self.memory_builder = MemoryBuilder(
             llm_client=self.llm_client,
             vector_store=self.vector_store,
-            enable_parallel_processing=self.enable_parallel_processing,
-            max_parallel_workers=self.max_parallel_workers
+            enable_parallel_processing= self.enable_parallel_processing, # type: ignore
+            max_parallel_workers=self.max_parallel_workers, # type: ignore
         )
 
         self.hybrid_retriever = HybridRetriever(
             llm_client=self.llm_client,
             vector_store=self.vector_store,
-            enable_planning=self.enable_planning,
-            enable_reflection=self.enable_reflection,
-            max_reflection_rounds=self.max_reflection_rounds,
-            enable_parallel_retrieval=self.enable_parallel_retrieval,
-            max_retrieval_workers=self.max_retrieval_workers
+            enable_planning=self.enable_planning, # type: ignore
+            enable_reflection=self.enable_reflection, # type: ignore
+            max_reflection_rounds=self.max_reflection_rounds, # type: ignore
+            enable_parallel_retrieval=self.enable_parallel_retrieval, # type: ignore
+            max_retrieval_workers=self.max_retrieval_workers, # type: ignore
         )
 
-        self.answer_generator = AnswerGenerator(
-            llm_client=self.llm_client
-        )
+        self.answer_generator = AnswerGenerator(llm_client=self.llm_client)
 
         self._initialized = True
         print("\n✅ System initialization complete!")
@@ -168,7 +162,7 @@ class MultiAgentMemorySystem:
         session_id: str,
         speaker: str,
         content: str,
-        timestamp: Optional[str] = None
+        timestamp: Optional[str] = None,
     ):
         """
         Add a dialogue to a session
@@ -188,7 +182,7 @@ class MultiAgentMemorySystem:
             session_id=session_id,
             speaker=speaker,
             content=content,
-            timestamp=timestamp
+            timestamp=timestamp,
         )
 
         # Add to MemoryBuilder buffer
@@ -196,9 +190,11 @@ class MultiAgentMemorySystem:
             dialogue_id=dialogue_id,
             speaker=speaker,
             content=content,
-            timestamp=timestamp
+            timestamp=timestamp,
         )
-        self.memory_builder.add_dialogue(dialogue, session_id=session_id, auto_process=True)
+        self.memory_builder.add_dialogue(
+            dialogue, session_id=session_id, auto_process=True
+        )
 
     async def finalize(self, session_id: str):
         """
@@ -281,8 +277,7 @@ class MultiAgentMemorySystem:
             raise RuntimeError("System not initialized. Call initialize() first.")
 
         return await self.pg_store.get_dialogues(
-            agent_id=self.agent_id,
-            session_id=session_id
+            agent_id=self.agent_id, session_id=session_id
         )
 
     async def get_all_sessions(self) -> List[str]:
@@ -343,7 +338,7 @@ async def create_system(
     enable_parallel_processing: Optional[bool] = None,
     max_parallel_workers: Optional[int] = None,
     enable_parallel_retrieval: Optional[bool] = None,
-    max_retrieval_workers: Optional[int] = None
+    max_retrieval_workers: Optional[int] = None,
 ) -> MultiAgentMemorySystem:
     """
     Create and initialize Multi-Agent Memory System instance
@@ -363,7 +358,7 @@ async def create_system(
         enable_parallel_processing=enable_parallel_processing,
         max_parallel_workers=max_parallel_workers,
         enable_parallel_retrieval=enable_parallel_retrieval,
-        max_retrieval_workers=max_retrieval_workers
+        max_retrieval_workers=max_retrieval_workers,
     )
     await system.initialize()
     return system

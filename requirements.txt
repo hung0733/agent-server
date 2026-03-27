@@ -72,6 +72,7 @@ duckduckgo-search>=6.3.0
 python-multipart>=0.0.20
 croniter>=2.0.0
 isodate>=0.6.1
+dateparser>=1.2.0
 
 # ----------------------------------------------------------------------------
 # Testing

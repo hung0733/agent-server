@@ -79,9 +79,9 @@ async def router_node(
 Format: {"level": 1, "think": false}
 
 Rules:
-- level 1: Simple questions, basic tasks, web search (1-3 steps)
-- level 2: Complex multi-step workflows, multiple tools, project-level code
-- level 3: Advanced math, quantum physics, deep system design
+- Level 1 (General & Fast Agent): Handled by a 35B MoE model. Covers general conversation, factual questions, standard coding tasks, analyzing structured data (e.g., Excel, CSV, schedules, itineraries), and basic agentic workflows using tools.
+- Level 2 (Master Agent): Handled by a 27B Dense model. Covers complex, multi-step agentic workflows (e.g., iterative research, deep data analysis), complex project-level coding, and orchestrating multiple tools simultaneously.
+- Level 3 (Professor Agent): Handled by a 112B model. Reserved ONLY for extremely complex logical problems, advanced mathematics, or deep system architecture design.
 - think: true only for math/logic/algorithms, otherwise false
 
 Examples:

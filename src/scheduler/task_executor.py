@@ -347,11 +347,27 @@ class MethodTaskExecutor:
                     _("類 %s 中不存在方法: %s (%s)") % (class_name, method_name, str(e))
                 )
 
-            # 6. Invoke method with agent_id
-            agent_id_str = str(task.agent_id)
+            # 6. Get the actual agent_id string from agent_instance
+            from db.dao.agent_instance_dao import AgentInstanceDAO
+            from uuid import UUID
+
+            agent_instance_id = task.agent_id
+            if not agent_instance_id:
+                raise ValueError(_("任務缺少 agent_id"))
+
+            # Look up agent instance to get the agent_id string
+            agent_instance = await AgentInstanceDAO.get_by_id(UUID(str(agent_instance_id)))
+            if not agent_instance or not agent_instance.agent_id:
+                raise ValueError(
+                    _("Agent instance 不存在或缺少 agent_id: %s")
+                    % str(agent_instance_id)
+                )
+
+            agent_id_str = agent_instance.agent_id
             logger.debug(
-                _("[MethodTaskExecutor] 正在調用方法，agent_id=%s"),
+                _("[MethodTaskExecutor] 正在調用方法，agent_id=%s (instance_id=%s)"),
                 agent_id_str,
+                agent_instance_id,
             )
 
             try:

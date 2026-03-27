@@ -266,7 +266,19 @@ class AgentMessageBase(BaseModel):
         description="Redaction level for message content",
     )
     """Content redaction level."""
-    
+
+    is_summarized: bool = Field(
+        default=False,
+        description="Whether this message has been summarized for long-term memory",
+    )
+    """LTM summarization flag."""
+
+    is_analyzed: bool = Field(
+        default=False,
+        description="Whether this message has been analyzed for long-term memory",
+    )
+    """LTM analysis flag."""
+
     model_config = ConfigDict(
         extra="ignore",
         json_schema_extra={
@@ -275,6 +287,8 @@ class AgentMessageBase(BaseModel):
                 "message_type": "request",
                 "content_json": {"action": "search", "query": "example"},
                 "redaction_level": "none",
+                "is_summarized": False,
+                "is_analyzed": False,
             }
         }
     )
@@ -356,7 +370,19 @@ class AgentMessageUpdate(BaseModel):
         description="Redaction level for message content",
     )
     """Content redaction level."""
-    
+
+    is_summarized: Optional[bool] = Field(
+        default=None,
+        description="Whether this message has been summarized for long-term memory",
+    )
+    """LTM summarization flag."""
+
+    is_analyzed: Optional[bool] = Field(
+        default=None,
+        description="Whether this message has been analyzed for long-term memory",
+    )
+    """LTM analysis flag."""
+
     model_config = ConfigDict(
         extra="ignore",
         json_schema_extra={
@@ -364,6 +390,7 @@ class AgentMessageUpdate(BaseModel):
                 "id": "770g0600-g40d-62f6-c938-668877660002",
                 "content_json": {"action": "updated_search", "query": "new query"},
                 "redaction_level": "partial",
+                "is_summarized": True,
             }
         }
     )

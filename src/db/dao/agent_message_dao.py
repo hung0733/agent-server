@@ -11,10 +11,11 @@ Import path: db.dao.agent_message_dao
 """
 from __future__ import annotations
 
-from typing import List, Optional
+from datetime import datetime, timezone
+from typing import Dict, List, Optional
 from uuid import UUID
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, and_, or_, cast, Date
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db import AsyncSession, async_sessionmaker, create_engine
@@ -24,7 +25,10 @@ from db.dto.collaboration_dto import (
     AgentMessageUpdate,
 )
 from db.entity.collaboration_entity import AgentMessage as AgentMessageEntity
+from db.entity.collaboration_entity import CollaborationSession as CollaborationSessionEntity
+from db.entity.agent_entity import AgentInstance as AgentInstanceEntity
 from db.types import MessageType
+from utils.timezone import to_server_tz
 
 
 class AgentMessageDAO:
@@ -297,7 +301,51 @@ class AgentMessageDAO:
         if entity is None:
             return None
         return AgentMessage.model_validate(entity)
-    
+
+    @staticmethod
+    async def batch_update_is_summarized(
+        message_ids: List[UUID],
+        is_summarized: bool = True,
+        session: Optional[AsyncSession] = None,
+    ) -> int:
+        """Batch update is_summarized flag for multiple messages.
+
+        More efficient than updating messages one by one.
+        Uses a single UPDATE query with WHERE id IN (...).
+
+        Args:
+            message_ids: List of message UUIDs to update.
+            is_summarized: Value to set (default True).
+            session: Optional async session for transaction control.
+
+        Returns:
+            Number of messages updated.
+        """
+        if not message_ids:
+            return 0
+
+        from sqlalchemy import update
+
+        async def _batch_update(s: AsyncSession) -> int:
+            stmt = (
+                update(AgentMessageEntity)
+                .where(AgentMessageEntity.id.in_(message_ids))
+                .values(is_summarized=is_summarized)
+            )
+            result = await s.execute(stmt)
+            await s.commit()
+            return result.rowcount
+
+        if session is not None:
+            return await _batch_update(session)
+        else:
+            engine = create_engine()
+            async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+            async with async_session() as s:
+                count = await _batch_update(s)
+            await engine.dispose()
+            return count
+
     @staticmethod
     async def delete(
         message_id: UUID,
@@ -363,10 +411,10 @@ class AgentMessageDAO:
         session: Optional[AsyncSession] = None,
     ) -> int:
         """Count total number of agent messages.
-        
+
         Args:
             session: Optional async session for transaction control.
-            
+
         Returns:
             Total count of agent messages in table.
         """
@@ -375,7 +423,7 @@ class AgentMessageDAO:
                 select(func.count()).select_from(AgentMessageEntity)
             )
             return result.scalar() or 0
-        
+
         if session is not None:
             return await _query(session)
         else:
@@ -385,3 +433,97 @@ class AgentMessageDAO:
                 count = await _query(s)
             await engine.dispose()
             return count
+
+    @staticmethod
+    async def get_unsummarized_messages_grouped(
+        agent_id: str,
+        before_date: datetime,
+        session: Optional[AsyncSession] = None,
+    ) -> Dict[str, Dict[str, List[AgentMessage]]]:
+        """Retrieve unsummarized messages grouped by date and session_id.
+
+        This method finds all agent messages that:
+        - Belong to the specified agent (by agent_id string)
+        - Have is_summarized = False
+        - Were created before the specified date
+        - Belong to sessions starting with 'agent-' or 'session-'
+
+        Results are grouped by date (YYYY-MM-DD) and session_id, sorted by
+        date ASC and session_id ASC.
+
+        Args:
+            agent_id: String identifier of the agent (e.g., 'agent-001').
+            before_date: Only include messages created before this datetime.
+            session: Optional async session for transaction control.
+
+        Returns:
+            Nested dict: {date_str: {session_id: [AgentMessage, ...]}}
+            Example: {"2026-03-26": {"session-001": [msg1, msg2], "agent-002": [msg3]}}
+        """
+        async def _query(s: AsyncSession) -> Dict[str, Dict[str, List[AgentMessage]]]:
+            # Build query with joins
+            query = (
+                select(AgentMessageEntity, CollaborationSessionEntity.session_id)
+                .join(
+                    CollaborationSessionEntity,
+                    AgentMessageEntity.collaboration_id == CollaborationSessionEntity.id
+                )
+                .join(
+                    AgentInstanceEntity,
+                    CollaborationSessionEntity.main_agent_id == AgentInstanceEntity.id
+                )
+                .where(
+                    and_(
+                        AgentInstanceEntity.agent_id == agent_id,
+                        AgentMessageEntity.is_summarized == False,  # noqa: E712
+                        AgentMessageEntity.created_at < before_date,
+                        or_(
+                            CollaborationSessionEntity.session_id.like('session-%'),
+                            CollaborationSessionEntity.session_id.like('default-%'),
+                        )
+                    )
+                )
+                .order_by(
+                    AgentMessageEntity.created_at.asc(),
+                    CollaborationSessionEntity.session_id.asc()
+                )
+            )
+
+            result = await s.execute(query)
+            rows = result.all()
+
+            # Group by date and session_id
+            grouped: Dict[str, Dict[str, List[AgentMessage]]] = {}
+            for message_entity, session_id in rows:
+                # Extract date from created_at in server timezone
+                created_at_server = to_server_tz(message_entity.created_at)
+                date_str = created_at_server.date().isoformat()
+
+                # Initialize nested dicts if needed
+                if date_str not in grouped:
+                    grouped[date_str] = {}
+                if session_id not in grouped[date_str]:
+                    grouped[date_str][session_id] = []
+
+                # Convert entity to DTO and append
+                message_dto = AgentMessage.model_validate(message_entity)
+                grouped[date_str][session_id].append(message_dto)
+
+            # Sort the outer dict by date
+            sorted_grouped = dict(sorted(grouped.items()))
+
+            # Sort inner dicts by session_id
+            for date_str in sorted_grouped:
+                sorted_grouped[date_str] = dict(sorted(sorted_grouped[date_str].items()))
+
+            return sorted_grouped
+
+        if session is not None:
+            return await _query(session)
+        else:
+            engine = create_engine()
+            async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+            async with async_session() as s:
+                result = await _query(s)
+            await engine.dispose()
+            return result

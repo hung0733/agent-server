@@ -220,7 +220,23 @@ class AgentMessage(Base):
         server_default=MessageRedactionLevel.none.value,
     )
     """Redaction level for message content."""
-    
+
+    is_summarized: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
+    )
+    """Whether this message has been summarized for long-term memory."""
+
+    is_analyzed: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
+    )
+    """Whether this message has been analyzed for long-term memory."""
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -240,6 +256,7 @@ class AgentMessage(Base):
         ),
         Index("idx_messages_collab", "collaboration_id", "created_at"),
         Index("idx_messages_step", "step_id"),
+        Index("idx_agent_messages_is_summarized", "is_summarized", "created_at"),
         {"extend_existing": True},
     )
     
