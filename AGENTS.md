@@ -6,6 +6,10 @@
 - **Dependency Management**: Standard Python practices using `requirements.txt`, `pyproject.toml` or `setup.py` (to be created as needed)
 - **Standard Library**: Use whenever possible; follow Python Enhancement Proposals (PEPs) where relevant
 
+## Assistant Communication Language
+- Respond to the user in Hong Kong Traditional Chinese (`zh-HK`) by default.
+- Switch to another language only when the user explicitly requests it.
+
 ## Local Development Setup
 - **Environment**: Python 3.12 environment located at `./.venv`
 - **Dependencies**: Use `pip` within activated environment to manage packages
