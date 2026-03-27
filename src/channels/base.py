@@ -4,9 +4,14 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Awaitable, Callable, Optional
+
+
+def now_utc() -> datetime:
+    """Get current UTC datetime with timezone info."""
+    return datetime.now(timezone.utc)
 
 
 class ChannelType(StrEnum):
@@ -38,7 +43,7 @@ class IncomingMessage:
     text: str
     media_url: Optional[str] = None
     priority: int = 0
-    received_at: datetime = field(default_factory=datetime.utcnow)
+    received_at: datetime = field(default_factory=now_utc)
     callback: Callable[[str], Awaitable[None]] = field(repr=False, default=None)  # type: ignore[assignment]
 
     def __lt__(self, other: object) -> bool:

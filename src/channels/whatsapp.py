@@ -435,6 +435,6 @@ class WhatsAppWSClient:
             sender_id=sender_number,
             receiver_id=receiver_number,
             text=text,
-            received_at=datetime.now(timezone.utc).replace(tzinfo=None),
+            received_at=datetime.now(timezone.utc),
             callback=_callback,
         )
