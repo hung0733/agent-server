@@ -32,6 +32,7 @@ class QueueTask(BaseModel):
 
     # Input
     message: str
+    system_prompt: Optional[str] = None
     think_mode: Optional[bool] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
 

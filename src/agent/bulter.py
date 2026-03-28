@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 class Bulter(Agent):
     _graph: Any = None
+    _REVIEW_MEMORY_TYPES: Tuple[str, str, str] = ("SOUL", "IDENTITY", "USER_PROFILE")
 
     def __init__(
         self,
@@ -96,9 +97,15 @@ class Bulter(Agent):
         )
         logger.debug(_("📝 消息長度：%s, think_mode: %s"), len(message), think_mode)  # type: ignore
         try:
+            thread_id = self.session_id
+            if metadata and isinstance(metadata, dict):
+                thread_id_override = metadata.get("thread_id_override")
+                if isinstance(thread_id_override, str) and thread_id_override.strip():
+                    thread_id = thread_id_override
+
             # 準備 config
             config = GraphNode.prepare_chat_node_config(
-                self.session_id,
+                thread_id,
                 models,
                 sys_prompt,
                 self.involves_secrets,
@@ -351,6 +358,261 @@ class Bulter(Agent):
             "total_chunks": total_chunks,
             "dates_processed": list(grouped_messages.keys()),
         }
+
+    @staticmethod
+    def _normalize_text(text: Optional[str]) -> str:
+        return "" if text is None else text.strip()
+
+    @staticmethod
+    def _strip_json_code_fence(raw_text: str) -> str:
+        content = raw_text.strip()
+        if content.startswith("```") and content.endswith("```"):
+            content = content.strip("`").strip()
+            if content.lower().startswith("json"):
+                content = content[4:].strip()
+        return content
+
+    @staticmethod
+    def _build_review_msg_system_prompt() -> str:
+        return """
+你係記憶整理助手。你會收到：
+1) 現有 memory blocks（SOUL / IDENTITY / USER_PROFILE）
+2) 新訊息對話內容
+
+任務：
+- 根據新訊息，生成更新後嘅 SOUL、IDENTITY、USER_PROFILE 三段 Markdown 內容。
+- 保持事實一致、避免猜測、避免重複。
+- 用香港繁體中文（zh-HK）書寫。
+- 只輸出一個 JSON object，格式必須完全符合指定 schema。
+- 禁止輸出 markdown code fence、解釋、額外文字。
+
+規則：
+- SOUL：人格、價值觀、語氣偏好、行為準則
+- IDENTITY：身份、角色、能力範圍、限制
+- USER_PROFILE：使用者偏好、背景、習慣、長期需求
+- 若資料不足，保留原有內容，只做必要最小改動。
+
+輸出 Schema（必須嚴格符合）：
+{
+  "SOUL": {"updated_data": "string"},
+  "IDENTITY": {"updated_data": "string"},
+  "USER_PROFILE": {"updated_data": "string"}
+}
+""".strip()
+
+    @staticmethod
+    def _build_review_msg_user_message(
+        messages: List[AgentMessage],
+        current_memory: Dict[str, Optional[str]],
+    ) -> str:
+        memory_context = "\n\n".join(
+            [
+                f"[{memory_type}]\n{current_memory.get(memory_type) or '(empty)'}"
+                for memory_type in Bulter._REVIEW_MEMORY_TYPES
+            ]
+        )
+
+        dialogue_lines: List[str] = []
+        for msg in messages:
+            sender = "User" if msg.message_type == MessageType.request else "Assistant"
+            content = msg.content_json.get("content", "") if msg.content_json else ""
+            content_text = content if isinstance(content, str) else str(content)
+            if not content_text.strip():
+                continue
+            dialogue_lines.append(f"[{msg.created_at.isoformat()}] {sender}: {content_text}")
+
+        dialogue_text = "\n".join(dialogue_lines)
+
+        return (
+            "請根據以下資料更新三個記憶區塊。\n\n"
+            "# Current Memory Blocks\n"
+            f"{memory_context}\n\n"
+            "# New Dialogue\n"
+            f"{dialogue_text}\n"
+        )
+
+    @staticmethod
+    def _parse_review_msg_output(raw_output: str) -> Dict[str, str]:
+        import json
+
+        cleaned = Bulter._strip_json_code_fence(raw_output)
+        parsed = json.loads(cleaned)
+
+        result: Dict[str, str] = {}
+        for memory_type in Bulter._REVIEW_MEMORY_TYPES:
+            if memory_type not in parsed:
+                raise ValueError(_("分析結果缺少欄位: %s") % memory_type)
+            block = parsed[memory_type]
+            if not isinstance(block, dict):
+                raise ValueError(_("分析結果欄位格式錯誤: %s") % memory_type)
+            updated_data = block.get("updated_data")
+            if not isinstance(updated_data, str):
+                raise ValueError(_("updated_data 無效: %s") % memory_type)
+            result[memory_type] = updated_data
+
+        return result
+
+    @staticmethod
+    async def review_msg(agent_id: str) -> Dict[str, Any]:
+        """Analyze unanalyzed messages and update SOUL/IDENTITY/USER_PROFILE."""
+        from db.dao.agent_instance_dao import AgentInstanceDAO
+        from db.dao.memory_block_dao import MemoryBlockDAO
+        from db.dto.memory_block_dto import MemoryBlockCreate, MemoryBlockUpdate
+        from msg_queue.handler import MsgQueueHandler
+        from msg_queue.models import QueueTaskPriority
+
+        logger.info(_("🔍 開始分析訊息記憶，agent_id: %s"), agent_id)
+
+        now_server_tz = now_server()
+        start_of_today_server = now_server_tz.replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        start_of_today_utc = start_of_today_server.astimezone(timezone.utc)
+
+        grouped_messages = await AgentMessageDAO.get_unanalyzed_messages_grouped(
+            agent_id=agent_id,
+            before_date=start_of_today_utc,
+        )
+
+        stats: Dict[str, Any] = {
+            "total_groups": 0,
+            "processed_groups": 0,
+            "failed_groups": 0,
+            "messages_marked_analyzed": 0,
+            "changed_blocks": [],
+        }
+
+        if not grouped_messages:
+            logger.info(_("✅ 冇搵到未分析訊息"))
+            return stats
+
+        agent_instance = await AgentInstanceDAO.get_by_agent_id(agent_id)
+        if agent_instance is None:
+            raise ValueError(_("Agent not found: %s") % agent_id)
+
+        existing_blocks = await MemoryBlockDAO.get_by_agent_instance_id(agent_instance.id)
+        memory_by_type = {
+            block.memory_type: block
+            for block in existing_blocks
+            if block.memory_type in Bulter._REVIEW_MEMORY_TYPES
+        }
+
+        analysis_prompt = Bulter._build_review_msg_system_prompt()
+
+        for date_str, session_groups in grouped_messages.items():
+            for session_id, messages in session_groups.items():
+                stats["total_groups"] += 1
+
+                try:
+                    current_memory = {
+                        memory_type: (
+                            memory_by_type.get(memory_type).content
+                            if memory_by_type.get(memory_type)
+                            else None
+                        )
+                        for memory_type in Bulter._REVIEW_MEMORY_TYPES
+                    }
+
+                    user_message = Bulter._build_review_msg_user_message(
+                        messages=messages,
+                        current_memory=current_memory,
+                    )
+
+                    content_parts: List[str] = []
+                    analysis_session_id = f"review-msg-{session_id}"
+                    async for chunk in MsgQueueHandler.create_msg_queue(
+                        agent_id=agent_id,
+                        session_id=session_id,
+                        message=user_message,
+                        system_prompt=analysis_prompt,
+                        think_mode=False,
+                        priority=QueueTaskPriority.NORMAL,
+                        metadata={
+                            "source": "review_msg",
+                            "review_type": "memory_analysis",
+                            "thread_id_override": analysis_session_id,
+                        },
+                    ):
+                        if chunk.chunk_type == "content" and chunk.content:
+                            content_parts.append(chunk.content)
+
+                    parsed_result = Bulter._parse_review_msg_output("".join(content_parts))
+
+                    group_changed: List[Dict[str, Any]] = []
+
+                    for memory_type in Bulter._REVIEW_MEMORY_TYPES:
+                        updated_data = parsed_result[memory_type]
+                        existing = memory_by_type.get(memory_type)
+                        orig_data = existing.content if existing else None
+
+                        if (
+                            Bulter._normalize_text(orig_data)
+                            == Bulter._normalize_text(updated_data)
+                        ):
+                            continue
+
+                        if existing is not None:
+                            updated = await MemoryBlockDAO.update(
+                                MemoryBlockUpdate(
+                                    id=existing.id,
+                                    content=updated_data,
+                                    version=existing.version + 1,
+                                )
+                            )
+                            if updated is None:
+                                raise RuntimeError(
+                                    _("更新 memory block 失敗: %s") % memory_type
+                                )
+                            memory_by_type[memory_type] = updated
+                        else:
+                            created = await MemoryBlockDAO.create(
+                                MemoryBlockCreate(
+                                    agent_instance_id=agent_instance.id,
+                                    memory_type=memory_type,
+                                    content=updated_data,
+                                    version=1,
+                                    is_active=True,
+                                )
+                            )
+                            memory_by_type[memory_type] = created
+
+                        group_changed.append(
+                            {
+                                "memory_type": memory_type,
+                                "orig_data": orig_data,
+                                "updated_data": updated_data,
+                            }
+                        )
+
+                    message_ids = [msg.id for msg in messages]
+                    marked_count = await AgentMessageDAO.batch_update_is_analyzed(
+                        message_ids=message_ids,
+                        is_analyzed=True,
+                    )
+
+                    stats["messages_marked_analyzed"] += marked_count
+                    stats["processed_groups"] += 1
+                    stats["changed_blocks"].extend(group_changed)
+
+                    logger.info(
+                        _("✅ review_msg 完成，日期=%s session=%s changed=%d marked=%d"),
+                        date_str,
+                        session_id,
+                        len(group_changed),
+                        marked_count,
+                    )
+
+                except Exception as exc:
+                    stats["failed_groups"] += 1
+                    logger.error(
+                        _("❌ review_msg 失敗，日期=%s session=%s error=%s"),
+                        date_str,
+                        session_id,
+                        str(exc),
+                        exc_info=True,
+                    )
+
+        return stats
 
     @staticmethod
     def _split_messages_by_tokens(

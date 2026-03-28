@@ -48,6 +48,7 @@ class MsgQueueHandler:
         agent_id: str,
         session_id: str,
         message: str,
+        system_prompt: Optional[str] = None,
         think_mode: Optional[bool] = None,
         priority: QueueTaskPriority = QueueTaskPriority.NORMAL,
         metadata: Optional[Dict[str, Any]] = None,
@@ -67,6 +68,7 @@ class MsgQueueHandler:
             agent_id=agent_id,
             session_id=session_id,
             message=message,
+            system_prompt=system_prompt,
             priority=priority,
             metadata=metadata,
             think_mode=think_mode,
@@ -99,8 +101,11 @@ class MsgQueueHandler:
         """Attach long-term memory context to the message."""
         logger.debug(_("Task %s: pack_memory"), task.id)
         try:
-            task.packed_prompt = await task.agent.get_memory_prompt()  # type: ignore
-            task.packed_prompt += "現在時間: " + datetime.now().strftime("%Y-%m-%d %H:%M") + "\n\n"  # type: ignore
+            if task.system_prompt is not None:
+                task.packed_prompt = task.system_prompt
+            else:
+                task.packed_prompt = await task.agent.get_memory_prompt()  # type: ignore
+                task.packed_prompt += "現在時間: " + datetime.now().strftime("%Y-%m-%d %H:%M") + "\n\n"  # type: ignore
 
             task.update_state(QueueTaskState.PACKED_MEMORY)
         except Exception as exc:
@@ -317,22 +322,30 @@ class MsgQueueHandler:
                 # Log message content for debugging
                 logger.info(_("Task %s: %s, %s"), task.id, content, tool_args)
 
-            # Create background tasks to save messages (DB + long-term memory)
-            Tools.start_async_task(
-                MsgQueueHandler._save_messages_to_db(
-                    task_id=task.id,
-                    session_db_id=task.agent.session_db_id,
-                    sender_db_id=None,
-                    receiver_db_id=task.agent.agent_db_id,
-                    llm_response_content=llm_response_content,
+            should_persist = task.metadata.get("source") != "review_msg"
+
+            if should_persist:
+                # Create background tasks to save messages (DB + long-term memory)
+                Tools.start_async_task(
+                    MsgQueueHandler._save_messages_to_db(
+                        task_id=task.id,
+                        session_db_id=task.agent.session_db_id,
+                        sender_db_id=None,
+                        receiver_db_id=task.agent.agent_db_id,
+                        llm_response_content=llm_response_content,
+                    )
                 )
-            )
 
-            Tools.start_async_task(task.agent.review_stm(task.model_set))
+                Tools.start_async_task(task.agent.review_stm(task.model_set))
 
-            logger.debug(
-                _("Task %s: background save tasks created (DB + memory)"), task.id
-            )
+                logger.debug(
+                    _("Task %s: background save tasks created (DB + memory)"), task.id
+                )
+            else:
+                logger.debug(
+                    _("Task %s: skip persistence for internal review_msg analysis"),
+                    task.id,
+                )
 
             await task.stream_callback(StreamChunk(chunk_type="done"))
             task.update_state(QueueTaskState.COMPLETED)

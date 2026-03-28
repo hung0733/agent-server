@@ -347,6 +347,38 @@ class AgentMessageDAO:
             return count
 
     @staticmethod
+    async def batch_update_is_analyzed(
+        message_ids: List[UUID],
+        is_analyzed: bool = True,
+        session: Optional[AsyncSession] = None,
+    ) -> int:
+        """Batch update is_analyzed flag for multiple messages."""
+        if not message_ids:
+            return 0
+
+        from sqlalchemy import update
+
+        async def _batch_update(s: AsyncSession) -> int:
+            stmt = (
+                update(AgentMessageEntity)
+                .where(AgentMessageEntity.id.in_(message_ids))
+                .values(is_analyzed=is_analyzed)
+            )
+            result = await s.execute(stmt)
+            await s.commit()
+            return result.rowcount
+
+        if session is not None:
+            return await _batch_update(session)
+        else:
+            engine = create_engine()
+            async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+            async with async_session() as s:
+                count = await _batch_update(s)
+            await engine.dispose()
+            return count
+
+    @staticmethod
     async def delete(
         message_id: UUID,
         session: Optional[AsyncSession] = None,
@@ -515,6 +547,74 @@ class AgentMessageDAO:
             # Sort inner dicts by session_id
             for date_str in sorted_grouped:
                 sorted_grouped[date_str] = dict(sorted(sorted_grouped[date_str].items()))
+
+            return sorted_grouped
+
+        if session is not None:
+            return await _query(session)
+        else:
+            engine = create_engine()
+            async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+            async with async_session() as s:
+                result = await _query(s)
+            await engine.dispose()
+            return result
+
+    @staticmethod
+    async def get_unanalyzed_messages_grouped(
+        agent_id: str,
+        before_date: datetime,
+        session: Optional[AsyncSession] = None,
+    ) -> Dict[str, Dict[str, List[AgentMessage]]]:
+        """Retrieve unanalyzed messages grouped by date and session_id."""
+
+        async def _query(s: AsyncSession) -> Dict[str, Dict[str, List[AgentMessage]]]:
+            query = (
+                select(AgentMessageEntity, CollaborationSessionEntity.session_id)
+                .join(
+                    CollaborationSessionEntity,
+                    AgentMessageEntity.collaboration_id == CollaborationSessionEntity.id,
+                )
+                .join(
+                    AgentInstanceEntity,
+                    CollaborationSessionEntity.main_agent_id == AgentInstanceEntity.id,
+                )
+                .where(
+                    and_(
+                        AgentInstanceEntity.agent_id == agent_id,
+                        AgentMessageEntity.is_analyzed == False,  # noqa: E712
+                        AgentMessageEntity.created_at < before_date,
+                        or_(
+                            CollaborationSessionEntity.session_id.like("session-%"),
+                            CollaborationSessionEntity.session_id.like("default-%"),
+                        ),
+                    )
+                )
+                .order_by(
+                    AgentMessageEntity.created_at.asc(),
+                    CollaborationSessionEntity.session_id.asc(),
+                )
+            )
+
+            result = await s.execute(query)
+            rows = result.all()
+
+            grouped: Dict[str, Dict[str, List[AgentMessage]]] = {}
+            for message_entity, session_id in rows:
+                created_at_server = to_server_tz(message_entity.created_at)
+                date_str = created_at_server.date().isoformat()
+
+                if date_str not in grouped:
+                    grouped[date_str] = {}
+                if session_id not in grouped[date_str]:
+                    grouped[date_str][session_id] = []
+
+                message_dto = AgentMessage.model_validate(message_entity)
+                grouped[date_str][session_id].append(message_dto)
+
+            sorted_grouped = dict(sorted(grouped.items()))
+            for grouped_date in sorted_grouped:
+                sorted_grouped[grouped_date] = dict(sorted(sorted_grouped[grouped_date].items()))
 
             return sorted_grouped
 
