@@ -6,9 +6,14 @@ import asyncio
 import os
 import sys
 from datetime import datetime
+from pathlib import Path
 
-# Add src to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
+from dotenv import load_dotenv
+
+# Add project src to path
+project_root = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(project_root / "src"))
+load_dotenv(project_root / ".env")
 
 from graph.graph_store import GraphStore
 

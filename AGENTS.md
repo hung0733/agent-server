@@ -21,12 +21,19 @@
 - **Install Dependencies**: `pip install -e .[dev]` (when setup.py/pyproject.toml includes dev extras)
 
 ## Test Commands
+- **Schema Guard First**: `python -m pytest tests/test_schema_guard.py -v`
 - **Single Test File**: `python -m pytest path/to/test_file.py -v`
 - **Specific Test Method**: `python -m pytest path/to/test_file.py::TestClass::test_method -v`
 - **Directory Tests**: `python -m pytest tests/ -v`
 - **Unit Tests Only**: `python -m pytest tests/unit/ -v`
 - **Integration Tests Only**: `python -m pytest tests/integration/ -v`
 - **Coverage Report**: `python -m pytest --cov=src/ tests/ --cov-report=html` (ad-hoc coverage when tools are configured)
+
+## Test Schema Isolation (Mandatory)
+- All tests MUST run only against test schemas, never production schemas.
+- Required test schemas: `test_public`, `test_langgraph`, `test_audit`, `test_simpleme`.
+- Any SQL using `public`, `langgraph`, `audit`, or `simpleme` must be rewritten to the corresponding `test_*` schema during test execution.
+- Test scripts must live under `tests/` (for manual scripts, place them under `tests/manual/`).
 
 ## Code Quality / Linting Commands
 - **Linting**: `flake8 src/ --show-source` (when flake8 is configured)

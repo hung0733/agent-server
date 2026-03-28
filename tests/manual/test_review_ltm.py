@@ -3,14 +3,14 @@
 Directly test the review_ltm method with updated code.
 
 Usage:
-    python scripts/test_review_ltm.py
+    python tests/manual/test_review_ltm.py
 """
 import asyncio
 import sys
 from pathlib import Path
 
 # Add project root to Python path
-project_root = Path(__file__).parent.parent
+project_root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(project_root / "src"))
 
 # Load environment variables from .env

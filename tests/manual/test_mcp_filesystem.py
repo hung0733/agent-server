@@ -8,7 +8,7 @@ This script demonstrates how to:
 3. Save MCP client and tools to database
 
 Usage:
-    python scripts/test_mcp_filesystem.py
+    python tests/manual/test_mcp_filesystem.py
 
 Prerequisites:
     - Filesystem MCP server running (e.g., on http://localhost:3000)
@@ -25,8 +25,8 @@ import sys
 from pathlib import Path
 from uuid import UUID
 
-# Add parent directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# Add project root to path
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from mcp.mcp_connector import MCPConnector
 from db.dao.user_dao import UserDAO
