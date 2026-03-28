@@ -199,6 +199,14 @@ class AgentInstance(Base):
     )
     """WhatsApp authentication key for this agent instance."""
 
+    is_sub_agent: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
+    )
+    """Whether this instance is marked as a sub-agent."""
+
     # Relationship to llm_endpoint_group
     endpoint_group: Mapped[Optional["LLMEndpointGroup"]] = relationship(  # type: ignore[name-defined]
         "LLMEndpointGroup",

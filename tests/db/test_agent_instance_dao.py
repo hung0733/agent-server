@@ -136,6 +136,7 @@ class TestAgentInstanceDAOCreate:
         assert created.user_id == sample_user.id
         assert created.name is None
         assert created.status == "idle"  # Default value
+        assert created.is_sub_agent is False
         assert created.config is None
         assert created.last_heartbeat_at is None
         assert created.created_at is not None
@@ -160,6 +161,7 @@ class TestAgentInstanceDAOCreate:
             status="busy",
             config={"timeout": 30, "retries": 3},
             last_heartbeat_at=now,
+            is_sub_agent=True,
         )
         
         created = await AgentInstanceDAO.create(agent_instance_create, session=db_session)
@@ -169,6 +171,7 @@ class TestAgentInstanceDAOCreate:
         assert created.user_id == sample_user.id
         assert created.name == "TestInstance"
         assert created.status == "busy"
+        assert created.is_sub_agent is True
         assert created.config == {"timeout": 30, "retries": 3}
         assert created.last_heartbeat_at is not None
     
@@ -518,6 +521,30 @@ class TestAgentInstanceDAOUpdate:
         
         assert updated is not None
         assert updated.status == "busy"
+
+    async def test_update_agent_instance_is_sub_agent(
+        self,
+        db_session: AsyncSession,
+        sample_user: UserEntity,
+        sample_agent_type: AgentTypeEntity,
+        clean_agent_instances_table: None,
+    ):
+        """Test updating an agent instance's is_sub_agent flag."""
+        agent_instance_create = AgentInstanceCreate(
+            agent_type_id=sample_agent_type.id,
+            user_id=sample_user.id,
+            is_sub_agent=False,
+        )
+        created = await AgentInstanceDAO.create(agent_instance_create, session=db_session)
+
+        agent_instance_update = AgentInstanceUpdate(
+            id=created.id,
+            is_sub_agent=True,
+        )
+        updated = await AgentInstanceDAO.update(agent_instance_update, session=db_session)
+
+        assert updated is not None
+        assert updated.is_sub_agent is True
     
     async def test_update_agent_instance_config(
         self,
