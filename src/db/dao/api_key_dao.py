@@ -152,6 +152,34 @@ class APIKeyDAO:
             await engine.dispose()
         
         return [APIKey.model_validate(e) for e in entities]
+
+    @staticmethod
+    async def get_by_key_hash(
+        key_hash: str,
+        session: Optional[AsyncSession] = None,
+    ) -> Optional[APIKey]:
+        """Retrieve an API key by hashed key value."""
+
+        async def _query(s: AsyncSession) -> Optional[APIKeyEntity]:
+            result = await s.execute(
+                select(APIKeyEntity).where(APIKeyEntity.key_hash == key_hash)
+            )
+            return result.scalar_one_or_none()
+
+        if session is not None:
+            entity = await _query(session)
+        else:
+            from db import create_engine, AsyncSession, async_sessionmaker
+
+            engine = create_engine()
+            async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+            async with async_session() as s:
+                entity = await _query(s)
+            await engine.dispose()
+
+        if entity is None:
+            return None
+        return APIKey.model_validate(entity)
     
     @staticmethod
     async def get_all(

@@ -7,7 +7,13 @@ import { agentsPayload } from "../mock/dashboard";
 
 export default function AgentsPage() {
   const { t } = useTranslation();
-  const payload = useDashboardResource(fetchAgents, agentsPayload);
+  const { isLoading, resource: payload } = useDashboardResource(fetchAgents, agentsPayload, {
+    blockOnFirstLoad: true,
+  });
+
+  if (isLoading) {
+    return <section className="card dashboard-loading">正在載入控制台...</section>;
+  }
 
   return (
     <section>

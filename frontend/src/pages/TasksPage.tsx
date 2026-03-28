@@ -7,7 +7,13 @@ import { tasksPayload } from "../mock/dashboard";
 
 export default function TasksPage() {
   const { t } = useTranslation();
-  const payload = useDashboardResource(fetchTasks, tasksPayload);
+  const { isLoading, resource: payload } = useDashboardResource(fetchTasks, tasksPayload, {
+    blockOnFirstLoad: true,
+  });
+
+  if (isLoading) {
+    return <section className="card dashboard-loading">正在載入控制台...</section>;
+  }
 
   return (
     <section>

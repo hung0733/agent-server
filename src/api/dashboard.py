@@ -48,11 +48,11 @@ class DashboardDataProvider:
     queue: Any
     dedup: Any
 
-    async def get_overview(self) -> dict[str, Any]:
+    async def get_overview(self, user_id=None) -> dict[str, Any]:
         queue_pending = await self._get_pending_queue_count()
         active_schedule_count = await self._get_active_schedule_count()
-        agents = await self._get_agents(limit=3)
-        usage = await self._get_usage_totals()
+        agents = await self._get_agents(limit=3, user_id=user_id)
+        usage = await self._get_usage_totals(user_id=user_id)
 
         anomalies = 0
         stalled = 0
@@ -124,8 +124,8 @@ class DashboardDataProvider:
             "source": "mixed",
         }
 
-    async def get_usage(self) -> dict[str, Any]:
-        totals = await self._get_usage_totals()
+    async def get_usage(self, user_id=None) -> dict[str, Any]:
+        totals = await self._get_usage_totals(user_id=user_id)
         return {
             "total": totals["todayTokens"] or 573681,
             "items": [
@@ -139,10 +139,10 @@ class DashboardDataProvider:
             "source": "mixed",
         }
 
-    async def get_agents(self) -> dict[str, Any]:
-        return {"agents": await self._get_agents(limit=8), "source": "mixed"}
+    async def get_agents(self, user_id=None) -> dict[str, Any]:
+        return {"agents": await self._get_agents(limit=8, user_id=user_id), "source": "mixed"}
 
-    async def get_tasks(self) -> dict[str, Any]:
+    async def get_tasks(self, user_id=None) -> dict[str, Any]:
         task_rows = await self._get_task_rows(limit=8)
         items = []
         for index, task in enumerate(task_rows[:4]):
@@ -176,23 +176,23 @@ class DashboardDataProvider:
             ]
         return {"items": items, "source": "mixed"}
 
-    async def get_memory(self) -> dict[str, Any]:
+    async def get_memory(self, user_id=None) -> dict[str, Any]:
         return {
             "title": "最近記憶寫入穩定",
             "body": "今日未見記憶堆積，摘要與整理節奏正常。",
             "source": "mock",
         }
 
-    async def get_settings(self) -> dict[str, Any]:
+    async def get_settings(self, user_id=None) -> dict[str, Any]:
         return {
             "locales": ["zh-HK", "en"],
             "featureFlags": {"dashboardApi": True},
             "source": "mock",
         }
 
-    async def _get_agents(self, limit: int) -> list[dict[str, Any]]:
+    async def _get_agents(self, limit: int, user_id=None) -> list[dict[str, Any]]:
         try:
-            rows = await AgentInstanceDAO.get_all(limit=limit)
+            rows = await AgentInstanceDAO.get_by_user_id(user_id, limit=limit) if user_id else await AgentInstanceDAO.get_all(limit=limit)
         except Exception:
             rows = []
 
@@ -234,11 +234,11 @@ class DashboardDataProvider:
             },
         ]
 
-    async def _get_usage_totals(self) -> dict[str, Any]:
+    async def _get_usage_totals(self, user_id=None) -> dict[str, Any]:
         today_tokens = 0
         today_cost = Decimal("0")
         try:
-            records = await TokenUsageDAO.get_all(limit=500)
+            records = await TokenUsageDAO.get_by_user_id(user_id, limit=500) if user_id else await TokenUsageDAO.get_all(limit=500)
         except Exception:
             records = []
 

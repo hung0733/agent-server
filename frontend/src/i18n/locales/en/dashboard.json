@@ -64,5 +64,9 @@
   "common.badge.stable": "Stable",
   "common.badge.watch": "Watch",
   "common.badge.error": "Error",
-  "common.badge.working": "Working"
+  "common.badge.working": "Working",
+  "auth.loginTitle": "Sign in with API key",
+  "auth.loginBody": "Enter your API key. The dashboard only shows agents and usage that belong to your user.",
+  "auth.apiKeyLabel": "API Key",
+  "auth.loginButton": "Sign in"
 }

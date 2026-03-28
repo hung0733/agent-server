@@ -1,8 +1,12 @@
+import { useEffect, useState } from "react";
 import { Route, Routes } from "react-router-dom";
 
 import AppShell from "./components/layout/AppShell";
+import { DASHBOARD_AUTH_EXPIRED_EVENT } from "./api/dashboard";
+import { getStoredApiKey, setStoredApiKey } from "./lib/auth";
 import OverviewPage from "./pages/OverviewPage";
 import AgentsPage from "./pages/AgentsPage";
+import LoginPage from "./pages/LoginPage";
 import MemoryPage from "./pages/MemoryPage";
 import SettingsPage from "./pages/SettingsPage";
 import TasksPage from "./pages/TasksPage";
@@ -13,6 +17,26 @@ function PagePlaceholder() {
 }
 
 export default function App() {
+  const [apiKey, setApiKey] = useState(() => getStoredApiKey());
+
+  useEffect(() => {
+    const handleAuthExpired = () => {
+      setApiKey("");
+    };
+
+    window.addEventListener(DASHBOARD_AUTH_EXPIRED_EVENT, handleAuthExpired);
+    return () => {
+      window.removeEventListener(DASHBOARD_AUTH_EXPIRED_EVENT, handleAuthExpired);
+    };
+  }, []);
+
+  if (!apiKey) {
+    return <LoginPage onLogin={(value) => {
+      setStoredApiKey(value);
+      setApiKey(value);
+    }} />;
+  }
+
   return (
     <AppShell>
       <Routes>

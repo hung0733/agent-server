@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from aiohttp import web
 
+from api.auth import DashboardAuthService
 from api.dashboard import DashboardDataProvider
 
 if TYPE_CHECKING:
@@ -18,6 +19,28 @@ QUEUE_KEY = web.AppKey("queue", object)
 DEDUP_KEY = web.AppKey("dedup", object)
 DASHBOARD_PROVIDER_KEY = web.AppKey("dashboard_provider", DashboardDataProvider)
 FRONTEND_DIST_KEY = web.AppKey("frontend_dist", Path)
+AUTH_SERVICE_KEY = web.AppKey("auth_service", DashboardAuthService)
+AUTH_CONTEXT_KEY = web.AppKey("auth_context", dict)
+
+
+async def _require_auth(request: web.Request) -> dict:
+    raw_key = request.headers.get("X-API-Key")
+    if not raw_key:
+        raise web.HTTPUnauthorized(
+            text=json.dumps({"error": "unauthorized"}),
+            content_type="application/json",
+        )
+
+    auth_service = request.app[AUTH_SERVICE_KEY]
+    auth_context = await auth_service.authenticate(raw_key)
+    if auth_context is None:
+        raise web.HTTPUnauthorized(
+            text=json.dumps({"error": "unauthorized"}),
+            content_type="application/json",
+        )
+
+    request[AUTH_CONTEXT_KEY] = auth_context
+    return auth_context
 
 
 async def _health(request: web.Request) -> web.Response:
@@ -41,32 +64,38 @@ async def _health(request: web.Request) -> web.Response:
 
 async def _dashboard_overview(request: web.Request) -> web.Response:
     provider = request.app[DASHBOARD_PROVIDER_KEY]
-    return web.json_response(await provider.get_overview())
+    auth_context = await _require_auth(request)
+    return web.json_response(await provider.get_overview(user_id=auth_context["user_id"]))
 
 
 async def _dashboard_usage(request: web.Request) -> web.Response:
     provider = request.app[DASHBOARD_PROVIDER_KEY]
-    return web.json_response(await provider.get_usage())
+    auth_context = await _require_auth(request)
+    return web.json_response(await provider.get_usage(user_id=auth_context["user_id"]))
 
 
 async def _dashboard_agents(request: web.Request) -> web.Response:
     provider = request.app[DASHBOARD_PROVIDER_KEY]
-    return web.json_response(await provider.get_agents())
+    auth_context = await _require_auth(request)
+    return web.json_response(await provider.get_agents(user_id=auth_context["user_id"]))
 
 
 async def _dashboard_tasks(request: web.Request) -> web.Response:
     provider = request.app[DASHBOARD_PROVIDER_KEY]
-    return web.json_response(await provider.get_tasks())
+    auth_context = await _require_auth(request)
+    return web.json_response(await provider.get_tasks(user_id=auth_context["user_id"]))
 
 
 async def _dashboard_memory(request: web.Request) -> web.Response:
     provider = request.app[DASHBOARD_PROVIDER_KEY]
-    return web.json_response(await provider.get_memory())
+    auth_context = await _require_auth(request)
+    return web.json_response(await provider.get_memory(user_id=auth_context["user_id"]))
 
 
 async def _dashboard_settings(request: web.Request) -> web.Response:
     provider = request.app[DASHBOARD_PROVIDER_KEY]
-    return web.json_response(await provider.get_settings())
+    auth_context = await _require_auth(request)
+    return web.json_response(await provider.get_settings(user_id=auth_context["user_id"]))
 
 
 def _default_frontend_dist() -> Path:
@@ -85,6 +114,7 @@ def create_app(
     dedup,
     dashboard_data_provider: DashboardDataProvider | None = None,
     frontend_dist: Path | None = None,
+    auth_service: DashboardAuthService | None = None,
 ) -> web.Application:
     """Create and configure the aiohttp Application.
 
@@ -101,6 +131,7 @@ def create_app(
     app[QUEUE_KEY] = queue
     app[DEDUP_KEY] = dedup
     app[DASHBOARD_PROVIDER_KEY] = dashboard_data_provider or DashboardDataProvider(queue, dedup)
+    app[AUTH_SERVICE_KEY] = auth_service or DashboardAuthService()
     app.router.add_get("/health", _health)
 
     app.router.add_get("/api/dashboard/overview", _dashboard_overview)

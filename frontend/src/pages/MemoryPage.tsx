@@ -7,7 +7,13 @@ import { memoryPayload } from "../mock/dashboard";
 
 export default function MemoryPage() {
   const { t } = useTranslation();
-  const payload = useDashboardResource(fetchMemory, memoryPayload);
+  const { isLoading, resource: payload } = useDashboardResource(fetchMemory, memoryPayload, {
+    blockOnFirstLoad: true,
+  });
+
+  if (isLoading) {
+    return <section className="card dashboard-loading">正在載入控制台...</section>;
+  }
 
   return (
     <section>

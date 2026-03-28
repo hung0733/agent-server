@@ -3,12 +3,16 @@ import { fetchOverview } from "../api/dashboard";
 import InterventionPanel from "../components/overview/InterventionPanel";
 import OverviewHero from "../components/overview/OverviewHero";
 import StatCard from "../components/ui/StatCard";
+import { useDashboardOverview } from "../context/dashboard-overview";
 import { useDashboardResource } from "../hooks/useDashboardResource";
 import { overviewPayload } from "../mock/dashboard";
 
 export default function OverviewPage() {
   const { t } = useTranslation();
-  const overview = useDashboardResource(fetchOverview, overviewPayload);
+  const initialOverview = useDashboardOverview();
+  const { resource: overview } = useDashboardResource(fetchOverview, overviewPayload, {
+    initialData: initialOverview ?? undefined,
+  });
   const statLabelMap = {
     "待審批": t("stats.pendingReview"),
     "運行異常": t("stats.anomalies"),

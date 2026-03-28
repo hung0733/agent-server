@@ -64,5 +64,9 @@
   "common.badge.stable": "穩定",
   "common.badge.watch": "留意",
   "common.badge.error": "異常",
-  "common.badge.working": "工作中"
+  "common.badge.working": "工作中",
+  "auth.loginTitle": "使用 API Key 登入控制台",
+  "auth.loginBody": "請輸入屬於你的 API key。系統只會顯示你所屬 user 的 agents 與用量資料。",
+  "auth.apiKeyLabel": "API Key",
+  "auth.loginButton": "登入"
 }

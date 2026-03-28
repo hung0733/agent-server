@@ -46,6 +46,186 @@ textarea {
   padding: 16px;
 }
 
+.login-shell {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  padding: 48px 28px;
+  background:
+    radial-gradient(circle at 18% 20%, rgba(128, 169, 255, 0.16), transparent 24%),
+    radial-gradient(circle at 82% 18%, rgba(73, 198, 168, 0.1), transparent 22%),
+    linear-gradient(180deg, rgba(9, 17, 29, 0.92), rgba(11, 20, 34, 1));
+}
+
+.login-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 420px;
+  gap: 28px;
+  width: min(100%, 1240px);
+  align-items: center;
+}
+
+.login-info {
+  display: grid;
+  gap: 32px;
+  min-height: 560px;
+  padding: 48px;
+  border-radius: 32px;
+  background:
+    radial-gradient(circle at top right, rgba(128, 169, 255, 0.16), transparent 34%),
+    linear-gradient(180deg, rgba(18, 28, 46, 0.98), rgba(13, 21, 34, 0.94));
+}
+
+.login-info__copy {
+  display: grid;
+  gap: 18px;
+}
+
+.login-info__copy h1 {
+  margin: 0;
+  max-width: 11ch;
+  font-size: clamp(3.2rem, 5vw, 5.4rem);
+  line-height: 1.02;
+}
+
+.login-info__copy p {
+  margin: 0;
+  max-width: 32rem;
+  color: var(--text-2);
+  font-size: 1.15rem;
+  line-height: 1.8;
+}
+
+.login-info__meta {
+  display: grid;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.login-info__meta-item {
+  display: grid;
+  gap: 10px;
+  padding: 18px 20px 20px;
+  border-radius: 20px;
+  border: 1px solid rgba(170, 185, 208, 0.12);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.login-info__meta-item strong {
+  font-size: 0.95rem;
+}
+
+.login-info__meta-item span {
+  color: var(--text-2);
+  line-height: 1.6;
+}
+
+.login-card {
+  width: 100%;
+  display: grid;
+  align-content: start;
+  gap: 24px;
+  padding: 32px;
+  border-radius: 32px;
+  min-height: 420px;
+  background: linear-gradient(180deg, rgba(20, 31, 48, 0.96), rgba(14, 22, 35, 0.94));
+}
+
+.login-card__intro {
+  display: grid;
+  gap: 8px;
+}
+
+.login-card__intro h2,
+.login-card__intro p {
+  margin: 0;
+}
+
+.login-card__intro h2 {
+  font-size: 1.75rem;
+}
+
+.login-card__intro p {
+  color: var(--text-2);
+  line-height: 1.6;
+}
+
+.login-card__eyebrow {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 0.45rem 0.8rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: rgba(128, 169, 255, 0.08);
+  color: var(--primary);
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.login-card__header h1 {
+  margin: 0;
+}
+
+.login-card p,
+.login-card__label {
+  color: var(--text-2);
+}
+
+.login-card__form {
+  display: grid;
+  gap: 18px;
+  padding-top: 8px;
+}
+
+.login-card__label {
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.login-card input {
+  width: 100%;
+  min-height: 58px;
+  padding: 1rem 1.1rem;
+  border-radius: 18px;
+  border: 1px solid rgba(170, 185, 208, 0.18);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-1);
+  font-size: 1.05rem;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.login-card input::placeholder {
+  color: var(--text-3);
+}
+
+.login-card__actions {
+  display: flex;
+  justify-content: flex-start;
+  padding-top: 10px;
+}
+
+.login-card button {
+  min-width: 144px;
+  min-height: 54px;
+  padding: 0.95rem 1.4rem;
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(135deg, var(--primary), #a7c1ff);
+  color: #08111d;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 16px 34px rgba(128, 169, 255, 0.22);
+}
+
+.login-card button:hover {
+  transform: translateY(-1px);
+}
+
 .app-main {
   min-width: 0;
   padding: 20px 0 32px;
@@ -58,6 +238,14 @@ textarea {
   margin-bottom: 20px;
   color: var(--text-2);
   font-size: 0.95rem;
+}
+
+.dashboard-loading {
+  display: grid;
+  place-items: center;
+  min-height: 360px;
+  color: var(--text-2);
+  font-size: 1.1rem;
 }
 
 .panel,
@@ -474,6 +662,52 @@ textarea {
 @media (max-width: 767px) {
   .app-shell {
     grid-template-columns: 1fr;
+  }
+
+  .login-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .login-shell {
+    padding: 20px;
+  }
+
+  .login-info {
+    padding: 28px 22px;
+    gap: 22px;
+    min-height: auto;
+  }
+
+  .login-info__copy {
+    gap: 14px;
+  }
+
+  .login-info__copy h1 {
+    max-width: none;
+  }
+
+  .login-info__copy p {
+    font-size: 1rem;
+    line-height: 1.65;
+  }
+
+  .login-info__meta {
+    gap: 12px;
+  }
+
+  .login-card {
+    width: 100%;
+    padding: 28px 22px;
+    gap: 20px;
+    min-height: auto;
+  }
+
+  .login-card__actions {
+    justify-content: stretch;
+  }
+
+  .login-card button {
+    width: 100%;
   }
 
   .sidebar,

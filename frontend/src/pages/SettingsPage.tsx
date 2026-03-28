@@ -7,7 +7,13 @@ import { settingsPayload } from "../mock/dashboard";
 
 export default function SettingsPage() {
   const { t } = useTranslation();
-  const payload = useDashboardResource(fetchSettings, settingsPayload);
+  const { isLoading, resource: payload } = useDashboardResource(fetchSettings, settingsPayload, {
+    blockOnFirstLoad: true,
+  });
+
+  if (isLoading) {
+    return <section className="card dashboard-loading">正在載入控制台...</section>;
+  }
 
   return (
     <section>
