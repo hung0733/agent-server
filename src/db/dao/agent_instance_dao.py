@@ -75,6 +75,7 @@ class AgentInstanceDAO:
             status=dto.status,
             config=dto.config,
             last_heartbeat_at=dto.last_heartbeat_at,
+            is_sub_agent=dto.is_sub_agent,
         )
         
         if session is not None:

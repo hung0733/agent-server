@@ -236,6 +236,12 @@ class AgentInstanceBase(BaseModel):
     )
     """WhatsApp key."""
 
+    is_sub_agent: bool = Field(
+        default=False,
+        description="Whether this agent instance is a sub-agent",
+    )
+    """Sub-agent marker flag."""
+
     model_config = ConfigDict(
         extra="ignore",
         json_schema_extra={
@@ -248,6 +254,7 @@ class AgentInstanceBase(BaseModel):
                 "endpoint_group_id": None,
                 "phone_no": None,
                 "whatsapp_key": None,
+                "is_sub_agent": False,
             }
         }
     )
@@ -333,6 +340,12 @@ class AgentInstanceUpdate(BaseModel):
     )
     """New WhatsApp key (optional)."""
 
+    is_sub_agent: Optional[bool] = Field(
+        default=None,
+        description="New sub-agent flag",
+    )
+    """New sub-agent marker (optional)."""
+
     model_config = ConfigDict(
         extra="ignore",
     )
@@ -387,6 +400,7 @@ class AgentInstance(AgentInstanceBase):
                 "status": "idle",
                 "config": {"max_results": 20},
                 "last_heartbeat_at": "2026-03-22T12:00:00Z",
+                "is_sub_agent": False,
                 "created_at": "2026-03-22T12:00:00Z",
                 "updated_at": "2026-03-22T12:00:00Z",
             }
