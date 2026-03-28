@@ -534,3 +534,139 @@ class AgentInstanceDAO:
             await engine.dispose()
 
         return [AgentInstance.model_validate(e) for e in entities]
+
+    @staticmethod
+    async def get_idle_agents(
+        session: Optional[AsyncSession] = None,
+    ) -> List[AgentInstance]:
+        """
+        Retrieve all agent instances with status 'idle'.
+
+        Args:
+            session: Optional async session for transaction control.
+
+        Returns:
+            List of AgentInstance DTOs that are currently idle.
+        """
+        async def _query(s: AsyncSession) -> List[AgentInstanceEntity]:
+            result = await s.execute(
+                select(AgentInstanceEntity).where(
+                    AgentInstanceEntity.status == "idle"
+                )
+            )
+            return list(result.scalars().all())
+
+        if session is not None:
+            entities = await _query(session)
+        else:
+            from db import create_engine, AsyncSession, async_sessionmaker
+            engine = create_engine()
+            async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+            async with async_session() as s:
+                entities = await _query(s)
+            await engine.dispose()
+
+        return [AgentInstance.model_validate(e) for e in entities]
+
+    @staticmethod
+    async def claim_agent_for_task(
+        agent_instance_id: UUID,
+        session: Optional[AsyncSession] = None,
+    ) -> bool:
+        """
+        Atomically claim an agent for task execution if it is idle.
+
+        This method uses optimistic locking to ensure only idle agents
+        are claimed, preventing race conditions in concurrent environments.
+
+        Args:
+            agent_instance_id: UUID of the agent instance to claim.
+            session: Optional async session for transaction control.
+
+        Returns:
+            True if agent was successfully claimed (idle -> busy), False otherwise.
+        """
+        from i18n import _
+        import logging
+        logger = logging.getLogger(__name__)
+
+        async def _claim(s: AsyncSession) -> bool:
+            # Use UPDATE with WHERE condition for atomic claim
+            from sqlalchemy import update as sql_update
+            stmt = (
+                sql_update(AgentInstanceEntity)
+                .where(
+                    AgentInstanceEntity.id == agent_instance_id,
+                    AgentInstanceEntity.status == "idle",
+                )
+                .values(status="busy")
+            )
+            result = await s.execute(stmt)
+            await s.commit()
+
+            claimed = result.rowcount > 0
+            logger.debug(
+                _("認領 agent 結果: agent_id=%s, claimed=%s"),
+                agent_instance_id,
+                claimed,
+            )
+            return claimed
+
+        if session is not None:
+            return await _claim(session)
+        else:
+            from db import create_engine, AsyncSession, async_sessionmaker
+            engine = create_engine()
+            async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+            async with async_session() as s:
+                claimed = await _claim(s)
+            await engine.dispose()
+            return claimed
+
+    @staticmethod
+    async def release_agent(
+        agent_instance_id: UUID,
+        session: Optional[AsyncSession] = None,
+    ) -> bool:
+        """
+        Release an agent back to idle status after task completion.
+
+        Args:
+            agent_instance_id: UUID of the agent instance to release.
+            session: Optional async session for transaction control.
+
+        Returns:
+            True if agent was successfully released, False if not found.
+        """
+        from i18n import _
+        import logging
+        logger = logging.getLogger(__name__)
+
+        async def _release(s: AsyncSession) -> bool:
+            from sqlalchemy import update as sql_update
+            stmt = (
+                sql_update(AgentInstanceEntity)
+                .where(AgentInstanceEntity.id == agent_instance_id)
+                .values(status="idle")
+            )
+            result = await s.execute(stmt)
+            await s.commit()
+
+            released = result.rowcount > 0
+            logger.debug(
+                _("釋放 agent 結果: agent_id=%s, released=%s"),
+                agent_instance_id,
+                released,
+            )
+            return released
+
+        if session is not None:
+            return await _release(session)
+        else:
+            from db import create_engine, AsyncSession, async_sessionmaker
+            engine = create_engine()
+            async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+            async with async_session() as s:
+                released = await _release(s)
+            await engine.dispose()
+            return released

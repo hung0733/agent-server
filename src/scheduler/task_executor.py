@@ -31,6 +31,11 @@ class TaskExecutor:
         """
         Execute a scheduled task based on its execution type.
 
+        This method manages agent status lifecycle:
+        1. Claims the agent (idle -> busy)
+        2. Executes the task
+        3. Releases the agent (busy -> idle)
+
         Args:
             task: The task to execute (must have payload with task_execution_type)
 
@@ -38,21 +43,59 @@ class TaskExecutor:
             dict with execution result: {"success": bool, "output": Any, "error": str?}
 
         Raises:
-            ValueError: If task_execution_type is unknown
+            ValueError: If task_execution_type is unknown or agent not available
             Exception: Various execution-specific exceptions
         """
+        from db.dao.agent_instance_dao import AgentInstanceDAO
+        from uuid import UUID
+
         execution_type = (
             task.payload.get("task_execution_type") if task.payload else None
         )
 
-        if execution_type == "message":
-            return await MessageTaskExecutor.execute(task)
-        elif execution_type == "method":
-            return await MethodTaskExecutor.execute(task)
-        else:
+        if not task.agent_id:
+            raise ValueError(_("任務缺少 agent_id"))
+
+        agent_instance_id = UUID(str(task.agent_id))
+
+        # 1. Claim the agent (atomic idle -> busy transition)
+        claimed = await AgentInstanceDAO.claim_agent_for_task(agent_instance_id)
+        if not claimed:
             raise ValueError(
-                _("未知的任務執行類型: %s (期望: message 或 method)") % execution_type
+                _("Agent 不是 idle 狀態，無法執行任務: %s") % agent_instance_id
             )
+
+        logger.info(
+            _("[TaskExecutor] ✅ 已認領 agent: %s"), agent_instance_id
+        )
+
+        try:
+            # 2. Execute the task
+            if execution_type == "message":
+                result = await MessageTaskExecutor.execute(task)
+            elif execution_type == "method":
+                result = await MethodTaskExecutor.execute(task)
+            else:
+                raise ValueError(
+                    _("未知的任務執行類型: %s (期望: message 或 method)") % execution_type
+                )
+
+            logger.info(
+                _("[TaskExecutor] ✅ 任務執行完成: task_id=%s"), task.id
+            )
+            return result
+
+        finally:
+            # 3. Always release the agent back to idle (even on error)
+            released = await AgentInstanceDAO.release_agent(agent_instance_id)
+            if released:
+                logger.info(
+                    _("[TaskExecutor] ✅ 已釋放 agent: %s"), agent_instance_id
+                )
+            else:
+                logger.warning(
+                    _("[TaskExecutor] ⚠️ 釋放 agent 失敗: %s"), agent_instance_id
+                )
 
 
 class MessageTaskExecutor:

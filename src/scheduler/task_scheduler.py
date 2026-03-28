@@ -165,8 +165,11 @@ class TaskScheduler:
     """
     Background service for executing scheduled tasks.
 
-    Periodically scans for due tasks and executes them,
+    Periodically scans for due tasks and executes them concurrently,
     then updates the next_run_at timestamp.
+
+    Each task is executed in a separate asyncio task to avoid blocking
+    the main scheduler loop.
     """
 
     def __init__(self):
@@ -174,6 +177,8 @@ class TaskScheduler:
         self.running = False
         # Get interval from env (default 60 seconds)
         self.interval = int(os.getenv("SCHEDULER_INTERVAL_SECONDS", "60"))
+        # Track active tasks for concurrent execution
+        self.active_tasks: set[asyncio.Task] = set()
         logger.info(
             _(
                 "[TaskScheduler] 初始化完成，掃描間隔: %d 秒"
@@ -226,18 +231,35 @@ class TaskScheduler:
 
         logger.info(_("[TaskScheduler] 正在關閉..."))
         self.running = False
-        # Give it a moment to finish current work
-        await asyncio.sleep(0.5)
+
+        # Wait for all active tasks to complete
+        if self.active_tasks:
+            logger.info(
+                _("[TaskScheduler] 等待 %d 個任務完成..."),
+                len(self.active_tasks),
+            )
+            await asyncio.gather(*self.active_tasks, return_exceptions=True)
+
         logger.info(_("[TaskScheduler] ✅ 排程服務已關閉"))
 
     async def tick(self) -> None:
         """
         Single execution cycle.
 
-        Scans for due tasks and executes them.
+        Scans for due tasks and executes them concurrently.
         """
         current_time = now_utc()
         logger.debug(_("[TaskScheduler.tick] 開始掃描，當前時間: %s"), current_time.isoformat())
+
+        # Clean up completed tasks from active_tasks set
+        done_tasks = {task for task in self.active_tasks if task.done()}
+        self.active_tasks -= done_tasks
+
+        logger.debug(
+            _("[TaskScheduler.tick] 活動任務數: %d (清理 %d 個已完成)"),
+            len(self.active_tasks),
+            len(done_tasks),
+        )
 
         try:
             # 1. Get all due schedules (next_run_at <= now)
@@ -253,14 +275,24 @@ class TaskScheduler:
                 logger.debug(_("[TaskScheduler.tick] 無待執行任務"))
                 return
 
-            # 2. Process each due schedule
+            # 2. Launch each due schedule in a separate asyncio task (non-blocking)
             for schedule in due_schedules:
                 try:
-                    await self._execute_schedule(schedule, current_time)
+                    # Create a background task for concurrent execution
+                    task = asyncio.create_task(
+                        self._execute_schedule_wrapper(schedule, current_time)
+                    )
+                    self.active_tasks.add(task)
+                    logger.debug(
+                        _(
+                            "[TaskScheduler.tick] 已啟動排程任務: schedule_id=%s"
+                        ),
+                        schedule.id,
+                    )
                 except Exception as e:
                     logger.error(
                         _(
-                            "[TaskScheduler.tick] 執行排程失敗 (schedule_id=%s): %s"
+                            "[TaskScheduler.tick] 啟動排程失敗 (schedule_id=%s): %s"
                         ),
                         schedule.id,
                         str(e),
@@ -271,6 +303,24 @@ class TaskScheduler:
         except Exception as e:
             logger.error(
                 _("[TaskScheduler.tick] 掃描失敗: %s"),
+                str(e),
+                exc_info=True,
+            )
+
+    async def _execute_schedule_wrapper(self, schedule, current_time: datetime) -> None:
+        """
+        Wrapper for _execute_schedule that catches all exceptions.
+
+        This prevents unhandled exceptions from crashing background tasks.
+        """
+        try:
+            await self._execute_schedule(schedule, current_time)
+        except Exception as e:
+            logger.error(
+                _(
+                    "[TaskScheduler._execute_schedule_wrapper] 執行排程失敗 (schedule_id=%s): %s"
+                ),
+                schedule.id,
                 str(e),
                 exc_info=True,
             )
@@ -400,7 +450,7 @@ class TaskScheduler:
                 )
             )
 
-            # Execute
+            # Execute (TaskExecutor will handle agent claim/release)
             result = await TaskExecutor.execute_task(execution_task)
 
             # Update task and queue to completed
@@ -426,6 +476,47 @@ class TaskScheduler:
                 ),
                 execution_task.id,
             )
+
+        except ValueError as e:
+            # Handle agent not available (busy) - reschedule for later
+            error_msg = str(e)
+            if "不是 idle 狀態" in error_msg or "Agent" in error_msg:
+                logger.warning(
+                    _(
+                        "[TaskScheduler._execute_schedule] Agent 忙碌，延遲重試: %s"
+                    ),
+                    error_msg,
+                )
+
+                # Update task to pending (not failed)
+                await TaskDAO.update(
+                    TaskUpdate(
+                        id=execution_task.id,
+                        status=TaskStatus.pending,
+                        error_message=error_msg[:500],
+                    )
+                )
+                await TaskQueueDAO.update(
+                    TaskQueueUpdate(
+                        id=queue_entry.id,
+                        status=TaskStatus.pending,
+                        error_message=error_msg[:500],
+                    )
+                )
+
+                # Reschedule for 1 minute later
+                from datetime import timedelta
+                await TaskScheduleDAO.update(
+                    TaskScheduleUpdate(
+                        id=schedule.id,
+                        next_run_at=current_time + timedelta(minutes=1),
+                    )
+                )
+                return  # Don't update last_run_at since we're rescheduling
+
+            else:
+                # Other ValueError - treat as failure
+                raise
 
         except Exception as e:
             logger.error(
