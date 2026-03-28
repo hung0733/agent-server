@@ -13,6 +13,7 @@ import os
 import signal
 
 from dotenv import load_dotenv
+from aiohttp import web
 
 from graph.graph_store import GraphStore
 from utils.tools import Tools
@@ -31,12 +32,14 @@ logger = logging.getLogger(__name__)
 
 
 async def main() -> None:
+    api_runner: web.AppRunner | None = None
     from utils.db_pool import configure_pool, close_pool
     from msg_queue.manager import get_queue_manager
     from msg_queue.handler import register_all_handlers
     from msg_queue.dedup import MessageDeduplicator
     from channels.whatsapp import WhatsAppChannel, WhatsAppWSClient
     from scheduler.task_scheduler import TaskScheduler
+    from api.app import create_app
 
     # Init asyncpg pool (used by DAOs / SQLAlchemy layer)
     await configure_pool()
@@ -69,6 +72,18 @@ async def main() -> None:
     )
     await wa_client.start()
     logger.info(_("WhatsApp listener started (global mode)"))
+
+    if os.getenv("HTTP_ENABLED", "true").lower() == "true":
+        api_app = create_app(qm, wa_dedup)
+        api_runner = web.AppRunner(api_app)
+        await api_runner.setup()
+        host = os.getenv("HTTP_HOST", "0.0.0.0")
+        port = int(os.getenv("HTTP_PORT", "8080"))
+        site = web.TCPSite(api_runner, host=host, port=port)
+        await site.start()
+        logger.info(_("HTTP server started on %s:%d"), host, port)
+    else:
+        logger.info(_("HTTP server is disabled"))
 
     # Use signal handlers so shutdown runs in a clean (non-cancelled) context.
     # loop.add_signal_handler() intercepts SIGINT/SIGTERM before Python can
@@ -113,6 +128,8 @@ async def main() -> None:
 
     qm.stop()
     Tools.wait_task_comp()
+    if api_runner is not None:
+        await api_runner.cleanup()
     await lg_pool.close()
     await close_pool()
     logger.info(_("Shutdown complete"))

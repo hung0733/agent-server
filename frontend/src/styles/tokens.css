@@ -1,0 +1,29 @@
+:root {
+  color-scheme: dark;
+  --bg: #09111d;
+  --bg-accent: rgba(128, 169, 255, 0.14);
+  --surface-1: rgba(17, 26, 42, 0.9);
+  --surface-2: rgba(23, 35, 55, 0.94);
+  --surface-3: rgba(31, 46, 70, 0.98);
+  --border-soft: rgba(170, 185, 208, 0.12);
+  --border-strong: rgba(128, 169, 255, 0.26);
+  --text-1: #f4f7fb;
+  --text-2: #aab9d0;
+  --text-3: #7d8ca5;
+  --primary: #80a9ff;
+  --primary-soft: rgba(128, 169, 255, 0.18);
+  --success: #49c6a8;
+  --success-soft: rgba(73, 198, 168, 0.18);
+  --warning: #f0b45a;
+  --warning-soft: rgba(240, 180, 90, 0.16);
+  --danger: #ff7b72;
+  --danger-soft: rgba(255, 123, 114, 0.18);
+  --shadow-lg: 0 28px 70px rgba(0, 0, 0, 0.28);
+  --radius-xl: 28px;
+  --radius-lg: 20px;
+  --radius-md: 16px;
+  --radius-sm: 12px;
+  --content-max: 1600px;
+  --sidebar-width: 248px;
+  --rail-width: 320px;
+}
