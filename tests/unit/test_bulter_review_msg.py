@@ -34,6 +34,9 @@ async def _stream_with_content(content: str):
 
 class TestBulterReviewMsg:
     async def test_send_emits_provider_usage_chunk_from_response_metadata(self, monkeypatch):
+        endpoint_id = "00000000-0000-0000-0000-000000000099"
+        task_id = "00000000-0000-0000-0000-000000000088"
+
         async def _fake_astream(*_args, **_kwargs):
             yield (
                 AIMessageChunk(
@@ -71,7 +74,7 @@ class TestBulterReviewMsg:
             sys_prompt="prompt",
             message="hello",
             think_mode=False,
-            metadata={},
+            metadata={"llm_endpoint_id": endpoint_id, "task_id": task_id},
         ):
             chunks.append(chunk)
 
@@ -84,6 +87,8 @@ class TestBulterReviewMsg:
                 "provider": None,
                 "model": "gpt-test",
                 "available": True,
+                "llm_endpoint_id": endpoint_id,
+                "task_id": task_id,
             }
         }
 
