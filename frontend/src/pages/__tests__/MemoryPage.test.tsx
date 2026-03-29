@@ -51,8 +51,10 @@ describe("MemoryPage", () => {
     expect(screen.getByText("2")).toBeInTheDocument();
     expect(screen.getAllByText("1")).toHaveLength(2);
     expect(screen.getByText(/Beta/)).toBeInTheDocument();
+    expect(screen.getByText("2026-03-29 10:00:00")).toBeInTheDocument();
     expect(screen.getByText("2 分鐘前完成摘要")).toBeInTheDocument();
     expect(screen.getByText(/Alpha/)).toBeInTheDocument();
+    expect(screen.getByText("2026-03-29 09:51:00")).toBeInTheDocument();
     expect(screen.getByText("11 分鐘前補寫長期記憶")).toBeInTheDocument();
   });
 

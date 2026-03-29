@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { formatServerTimestamp } from "../../utils/format";
 import { TimelineItem } from "../../types/dashboard";
 import EmptyState from "../ui/EmptyState";
 import Badge from "../ui/Badge";
@@ -28,7 +29,7 @@ export default function TaskTimeline({ items }: { items: TimelineItem[] }) {
               {item.group ? <p className="timeline-item__group">{item.group}</p> : null}
             </div>
             <div className="timeline-item__meta">
-              <Badge tone={toneMap[item.status]} label={item.timestamp} />
+              <Badge tone={toneMap[item.status]} label={formatServerTimestamp(item.timestamp)} />
             </div>
           </div>
           {item.messageSnippet ? (

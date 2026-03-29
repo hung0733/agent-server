@@ -5,6 +5,7 @@ import SectionHeader from "../components/ui/SectionHeader";
 import StatCard from "../components/ui/StatCard";
 import { useDashboardResource } from "../hooks/useDashboardResource";
 import { MemoryPayload } from "../types/dashboard";
+import { formatServerTimestamp } from "../utils/format";
 
 const emptyMemoryPayload: MemoryPayload = {
   stats: {
@@ -20,21 +21,8 @@ const emptyMemoryPayload: MemoryPayload = {
   source: "empty",
 };
 
-function formatDateTime(value: string, locale: string): string {
-  const timestamp = new Date(value);
-
-  if (Number.isNaN(timestamp.getTime())) {
-    return value;
-  }
-
-  return new Intl.DateTimeFormat(locale, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(timestamp);
-}
-
 export default function MemoryPage() {
-  const { i18n, t } = useTranslation();
+  const { t } = useTranslation();
   const { isLoading, resource: payload } = useDashboardResource(fetchMemory, emptyMemoryPayload, {
     blockOnFirstLoad: true,
   });
@@ -103,7 +91,7 @@ export default function MemoryPage() {
                 <h3>{entry.agent}</h3>
                 <p>{t(`memory.entry.${entry.kind}`)}</p>
               </div>
-              <p>{formatDateTime(entry.timestamp, i18n.language)}</p>
+              <p>{formatServerTimestamp(entry.timestamp)}</p>
             </div>
             <p className="timeline-item__summary">{entry.summary}</p>
           </article>
