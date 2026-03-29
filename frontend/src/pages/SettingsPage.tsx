@@ -135,23 +135,41 @@ export default function SettingsPage() {
             <h3>LLM Endpoint 管理</h3>
             <p>新增 / 編輯 / 刪除 endpoint，mapping 另外設定。</p>
           </div>
-          <button className="button" onClick={() => setForm(emptyForm)} type="button">
-            新增 Endpoint
-          </button>
         </div>
 
         <div className="settings-endpoint-form">
-          <input placeholder="名稱" value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} />
-          <input placeholder="Base URL" value={form.baseUrl} onChange={(event) => setForm((current) => ({ ...current, baseUrl: event.target.value }))} />
-          <input placeholder="Model name" value={form.modelName} onChange={(event) => setForm((current) => ({ ...current, modelName: event.target.value }))} />
-          <input placeholder="API key（留空代表本地或不更新）" value={form.apiKey} onChange={(event) => setForm((current) => ({ ...current, apiKey: event.target.value }))} />
-          <label className="settings-checkbox">
-            <input checked={form.isActive} type="checkbox" onChange={(event) => setForm((current) => ({ ...current, isActive: event.target.checked }))} />
-            啟用
+          <label className="settings-field">
+            <span>名稱</span>
+            <input placeholder="例如：Local Qwen" value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} />
           </label>
-          <button className="button button--primary" onClick={submitEndpoint} type="button">
-            {form.id ? "更新 Endpoint" : "建立 Endpoint"}
-          </button>
+          <label className="settings-field">
+            <span>Base URL</span>
+            <input placeholder="http://localhost:8601/v1" value={form.baseUrl} onChange={(event) => setForm((current) => ({ ...current, baseUrl: event.target.value }))} />
+          </label>
+          <label className="settings-field">
+            <span>Model name</span>
+            <input placeholder="qwen3.5-35b-a3b" value={form.modelName} onChange={(event) => setForm((current) => ({ ...current, modelName: event.target.value }))} />
+          </label>
+          <label className="settings-field">
+            <span>API key</span>
+            <input placeholder="留空代表本地或不更新" value={form.apiKey} onChange={(event) => setForm((current) => ({ ...current, apiKey: event.target.value }))} />
+          </label>
+          <div className="settings-form-footer">
+            <label className="settings-checkbox" htmlFor="endpoint-active">
+              <input id="endpoint-active" checked={form.isActive} type="checkbox" onChange={(event) => setForm((current) => ({ ...current, isActive: event.target.checked }))} />
+              <span>啟用</span>
+            </label>
+            <div className="settings-form-actions">
+              {form.id ? (
+                <button className="button" onClick={() => setForm(emptyForm)} type="button">
+                  取消編輯
+                </button>
+              ) : null}
+              <button className="button button--primary" onClick={submitEndpoint} type="button">
+                {form.id ? "更新 Endpoint" : "建立 Endpoint"}
+              </button>
+            </div>
+          </div>
         </div>
 
         <div className="settings-endpoint-list">
