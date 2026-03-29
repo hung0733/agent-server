@@ -630,6 +630,26 @@ textarea {
   gap: 24px;
 }
 
+.usage-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.usage-summary-card {
+  display: grid;
+  gap: 8px;
+}
+
+.usage-summary-card__label {
+  color: var(--text-2);
+}
+
+.usage-summary-card__value {
+  font-size: 1.8rem;
+}
+
 .usage-legend__donut {
   display: grid;
   place-items: center;
@@ -692,6 +712,10 @@ textarea {
 
   .agent-grid,
   .usage-legend {
+    grid-template-columns: 1fr;
+  }
+
+  .usage-summary-grid {
     grid-template-columns: 1fr;
   }
 }

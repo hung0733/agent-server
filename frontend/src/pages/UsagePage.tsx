@@ -18,6 +18,16 @@ export default function UsagePage() {
   return (
     <section>
       <SectionHeader title={t("usage.title")} subtitle={t("usage.subtitle")} />
+      <div className="usage-summary-grid">
+        <article className="card usage-summary-card">
+          <p className="usage-summary-card__label">{t("usage.todayTokens")}</p>
+          <strong className="usage-summary-card__value">{payload.todayTokens.toLocaleString("en-US")}</strong>
+        </article>
+        <article className="card usage-summary-card">
+          <p className="usage-summary-card__label">{t("usage.todayCost")}</p>
+          <strong className="usage-summary-card__value">US${payload.todayCostUsd}</strong>
+        </article>
+      </div>
       <UsageDonutLegend total={payload.total} items={payload.items} />
     </section>
   );

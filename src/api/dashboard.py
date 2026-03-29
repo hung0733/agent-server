@@ -163,13 +163,8 @@ class DashboardDataProvider:
     async def get_usage(self, user_id=None) -> dict[str, Any]:
         totals = await self._get_usage_totals(user_id=user_id)
         return {
-            "total": totals["todayTokens"] or 573681,
-            "items": [
-                {"label": "x-radar-collect", "value": 95081, "percentage": 16.58, "color": "#80a9ff"},
-                {"label": "daily-digest-daily", "value": 68841, "percentage": 12.0, "color": "#f0b45a"},
-                {"label": "Coq-每日新聞 08:00", "value": 49199, "percentage": 8.58, "color": "#ff7b72"},
-                {"label": "x-radar-finalize", "value": 48821, "percentage": 8.51, "color": "#49c6a8"},
-            ],
+            "total": totals["todayTokens"],
+            "items": totals["items"],
             "todayTokens": totals["todayTokens"],
             "todayCostUsd": str(totals["todayCostUsd"]),
             "source": "mixed",
@@ -386,8 +381,10 @@ class DashboardDataProvider:
         return rows[:limit]
 
     async def _get_usage_totals(self, user_id=None) -> dict[str, Any]:
+        palette = ["#80a9ff", "#f0b45a", "#ff7b72", "#49c6a8", "#9f86ff", "#7cc6a0"]
         today_tokens = 0
         today_cost = Decimal("0")
+        per_model: dict[str, int] = {}
         try:
             records = await TokenUsageDAO.get_by_user_id(user_id, limit=500) if user_id else await TokenUsageDAO.get_all(limit=500)
         except Exception:
@@ -401,12 +398,24 @@ class DashboardDataProvider:
             if created_at.astimezone(UTC).date() == today:
                 today_tokens += record.total_tokens
                 today_cost += record.estimated_cost_usd
+                label = record.model_name or "unknown"
+                per_model[label] = per_model.get(label, 0) + record.total_tokens
 
-        if today_tokens == 0:
-            today_tokens = 1509786
-            today_cost = Decimal("0.81")
+        items = []
+        if today_tokens > 0:
+            for index, (label, value) in enumerate(
+                sorted(per_model.items(), key=lambda item: item[1], reverse=True)
+            ):
+                items.append(
+                    {
+                        "label": label,
+                        "value": value,
+                        "percentage": round((value / today_tokens) * 100, 2),
+                        "color": palette[index % len(palette)],
+                    }
+                )
 
-        return {"todayTokens": today_tokens, "todayCostUsd": today_cost}
+        return {"todayTokens": today_tokens, "todayCostUsd": today_cost, "items": items}
 
     async def _get_pending_queue_count(self) -> int:
         try:

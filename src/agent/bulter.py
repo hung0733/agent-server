@@ -269,6 +269,8 @@ class Bulter(Agent):
             provider = metadata.get("ls_provider")
 
         model = response_metadata.get("model_name") if isinstance(response_metadata, dict) else None
+        if model is None and isinstance(metadata, dict):
+            model = metadata.get("model_name") or metadata.get("ls_model_name")
 
         return {
             "input_tokens": input_tokens,

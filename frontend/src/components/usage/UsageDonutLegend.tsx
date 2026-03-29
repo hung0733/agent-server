@@ -9,6 +9,7 @@ export default function UsageDonutLegend({
   items: UsageLegendItem[];
 }) {
   const { t } = useTranslation();
+  const totalPercentage = items.reduce((sum, item) => sum + item.percentage, 0);
   const segments = items
     .map((item, index) => {
       const start = items.slice(0, index).reduce((sum, current) => sum + current.percentage, 0);
@@ -23,7 +24,7 @@ export default function UsageDonutLegend({
         className="usage-legend__donut"
         role="img"
         aria-label={t("usage.chartLabel")}
-        style={{ background: `conic-gradient(${segments}, rgba(255, 255, 255, 0.08) ${items.reduce((sum, item) => sum + item.percentage, 0)}% 100%)` }}
+        style={{ background: items.length ? `conic-gradient(${segments}, rgba(255, 255, 255, 0.08) ${totalPercentage}% 100%)` : "rgba(255, 255, 255, 0.08)" }}
       >
         <div>
           <strong>{t("usage.totalLabel")}</strong>
@@ -40,6 +41,7 @@ export default function UsageDonutLegend({
             <span>{item.percentage.toFixed(2)}%</span>
           </li>
         ))}
+        {items.length === 0 ? <li>{t("usage.empty")}</li> : null}
       </ul>
     </section>
   );
