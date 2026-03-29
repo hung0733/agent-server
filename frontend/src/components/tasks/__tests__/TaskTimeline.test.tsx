@@ -51,4 +51,11 @@ describe("TaskTimeline", () => {
       "timeline-item__snippet",
     );
   });
+
+  it("renders an empty state when there are no timeline items", () => {
+    renderWithRouter(<TaskTimeline items={[]} />);
+
+    expect(screen.getByText("最近未見跨會話活動")).toBeInTheDocument();
+    expect(screen.getByText("目前未有可顯示的排程、任務或協作事件。")).toBeInTheDocument();
+  });
 });

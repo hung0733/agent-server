@@ -92,21 +92,21 @@ export interface TasksPayload {
 }
 
 export interface MemoryPayload {
-  summary: {
-    title: string;
-    body: string;
+  stats: {
+    agents: number;
+    tasks: number;
+    messages: number;
   };
-  stats: Array<{
-    title: string;
-    value: number;
-    note: string;
-    status: Exclude<SystemStatus, "idle">;
-  }>;
+  health: {
+    status: SystemStatus;
+    summary: string;
+  };
   recentEntries: Array<{
-    id: string;
-    title: string;
-    detail: string;
+    kind: string;
     timestamp: string;
+    agent: string;
+    summary: string;
+    status: SystemStatus;
   }>;
   source: string;
 }

@@ -142,36 +142,29 @@ export const tasksPayload: TasksPayload = {
 };
 
 export const memoryPayload: MemoryPayload = {
-  summary: {
-    title: "記憶整理摘要",
-    body: "摘要批次已恢復正常，待整理寫入維持低位。",
+  stats: {
+    agents: 3,
+    tasks: 1,
+    messages: 2,
   },
-  stats: [
+  health: {
+    status: "healthy",
+    summary: "最近 3 項用戶活動可歸因。",
+  },
+  recentEntries: [
     {
-      title: "待整理片段",
-      value: 12,
-      note: "較昨日減少 3 項",
+      kind: "message",
+      agent: "Main",
+      summary: "客戶升級要求已完成摘要。",
+      timestamp: "2026-03-29T10:28:00+08:00",
       status: "healthy",
     },
     {
-      title: "最近 1 小時寫入",
-      value: 28,
-      note: "高峰期後回落",
+      kind: "task",
+      agent: "Pandas",
+      summary: "部署事故跟進已補寫長期記憶。",
+      timestamp: "2026-03-29T10:19:00+08:00",
       status: "warning",
-    },
-  ],
-  recentEntries: [
-    {
-      id: "memory-1",
-      title: "客戶升級要求",
-      detail: "2 分鐘前完成摘要",
-      timestamp: "2 分鐘前",
-    },
-    {
-      id: "memory-2",
-      title: "部署事故跟進",
-      detail: "11 分鐘前補寫長期記憶",
-      timestamp: "11 分鐘前",
     },
   ],
   source: "mock",

@@ -10,43 +10,36 @@ vi.mock("../../hooks/useDashboardResource", () => ({
 }));
 
 const memoryFixture: MemoryPayload = {
-  summary: {
-    title: "記憶整理摘要",
-    body: "摘要批次已恢復正常，待整理寫入維持低位。",
+  stats: {
+    agents: 2,
+    tasks: 1,
+    messages: 1,
   },
-  stats: [
+  health: {
+    status: "healthy",
+    summary: "最近 2 項用戶活動可歸因。",
+  },
+  recentEntries: [
     {
-      title: "待整理片段",
-      value: 12,
-      note: "較昨日減少 3 項",
+      kind: "message",
+      agent: "Beta",
+      summary: "2 分鐘前完成摘要",
+      timestamp: "2026-03-29T10:00:00+08:00",
       status: "healthy",
     },
     {
-      title: "最近 1 小時寫入",
-      value: 28,
-      note: "高峰期後回落",
+      kind: "task",
+      agent: "Alpha",
+      summary: "11 分鐘前補寫長期記憶",
+      timestamp: "2026-03-29T09:51:00+08:00",
       status: "warning",
-    },
-  ],
-  recentEntries: [
-    {
-      id: "entry-1",
-      title: "客戶升級要求",
-      detail: "2 分鐘前完成摘要",
-      timestamp: "2 分鐘前",
-    },
-    {
-      id: "entry-2",
-      title: "部署事故跟進",
-      detail: "11 分鐘前補寫長期記憶",
-      timestamp: "11 分鐘前",
     },
   ],
   source: "test",
 };
 
 describe("MemoryPage", () => {
-  it("renders structured summary, stats, and recent entries", () => {
+  it("renders backend memory health, counts, and recent entries", () => {
     vi.mocked(useDashboardResource).mockReturnValue({
       isLoading: false,
       resource: memoryFixture,
@@ -54,27 +47,65 @@ describe("MemoryPage", () => {
 
     renderWithRouter(<MemoryPage />);
 
-    expect(screen.getByText("記憶整理摘要")).toBeInTheDocument();
-    expect(screen.getByText("摘要批次已恢復正常，待整理寫入維持低位。")).toBeInTheDocument();
-    expect(screen.getByText("待整理片段")).toBeInTheDocument();
-    expect(screen.getByText("12")).toBeInTheDocument();
-    expect(screen.getByText("最近 1 小時寫入")).toBeInTheDocument();
-    expect(screen.getByText("客戶升級要求")).toBeInTheDocument();
-    expect(screen.getByText("部署事故跟進")).toBeInTheDocument();
+    expect(screen.getByText("最近 2 項用戶活動可歸因。")).toBeInTheDocument();
+    expect(screen.getByText("2")).toBeInTheDocument();
+    expect(screen.getAllByText("1")).toHaveLength(2);
+    expect(screen.getByText(/Beta/)).toBeInTheDocument();
+    expect(screen.getByText("2 分鐘前完成摘要")).toBeInTheDocument();
+    expect(screen.getByText(/Alpha/)).toBeInTheDocument();
+    expect(screen.getByText("11 分鐘前補寫長期記憶")).toBeInTheDocument();
   });
 
-  it("renders fallback copy when stats and recent entries are empty", () => {
+  it("uses an empty payload fallback instead of mock memory content", () => {
+    vi.mocked(useDashboardResource).mockReturnValue({
+      isLoading: false,
+      resource: memoryFixture,
+    });
+
+    renderWithRouter(<MemoryPage />);
+
+    expect(vi.mocked(useDashboardResource)).toHaveBeenCalledWith(
+      expect.any(Function),
+      {
+        stats: {
+          agents: 0,
+          tasks: 0,
+          messages: 0,
+        },
+        health: {
+          status: "idle",
+          summary: "",
+        },
+        recentEntries: [],
+        source: "empty",
+      },
+      {
+        blockOnFirstLoad: true,
+      },
+    );
+  });
+
+  it("renders empty state when there is no memory activity", () => {
     vi.mocked(useDashboardResource).mockReturnValue({
       isLoading: false,
       resource: {
         ...memoryFixture,
-        stats: [],
+        stats: {
+          agents: 0,
+          tasks: 0,
+          messages: 0,
+        },
+        health: {
+          status: "idle",
+          summary: "",
+        },
         recentEntries: [],
       },
     });
 
     renderWithRouter(<MemoryPage />);
 
-    expect(screen.getAllByText("今日未見記憶堆積，摘要與整理節奏正常。")).toHaveLength(2);
+    expect(screen.getByText("最近記憶寫入穩定")).toBeInTheDocument();
+    expect(screen.getByText("今日未見記憶堆積，摘要與整理節奏正常。")).toBeInTheDocument();
   });
 });
