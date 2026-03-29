@@ -46,7 +46,9 @@ describe("TaskTimeline", () => {
       />,
     );
 
-    expect(screen.getByText("內容審批")).toBeInTheDocument();
-    expect(screen.getByText("等緊新一批可審查內容先可以繼續。")).toBeInTheDocument();
+    expect(screen.getByText("內容審批")).toHaveClass("timeline-item__group");
+    expect(screen.getByText("等緊新一批可審查內容先可以繼續。")).toHaveClass(
+      "timeline-item__snippet",
+    );
   });
 });

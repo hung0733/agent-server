@@ -582,6 +582,18 @@ textarea {
   gap: 16px;
 }
 
+.timeline-item__group {
+  margin-top: 6px;
+  color: var(--text-3);
+  font-size: 0.9rem;
+}
+
+.timeline-item__snippet {
+  margin-top: 14px;
+  color: var(--text-1);
+  line-height: 1.5;
+}
+
 .timeline-item details {
   margin-top: 16px;
   color: var(--text-2);
