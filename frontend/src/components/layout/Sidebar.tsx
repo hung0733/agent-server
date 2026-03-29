@@ -10,7 +10,7 @@ const navItems = [
   { key: "settings", path: "/settings" },
 ];
 
-export default function Sidebar() {
+export default function Sidebar({ onLogout }: { onLogout?: () => void }) {
   const { i18n, t } = useTranslation();
 
   return (
@@ -51,6 +51,9 @@ export default function Sidebar() {
           </NavLink>
         ))}
       </nav>
+      <button type="button" className="sidebar__logout" onClick={onLogout}>
+        {t("shell.logout")}
+      </button>
     </aside>
   );
 }

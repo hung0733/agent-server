@@ -16,6 +16,7 @@
   "shell.navigation": "Primary navigation",
   "shell.lastUpdated": "Last updated",
   "shell.language": "Language",
+  "shell.logout": "Log out",
   "shell.switchToEnglish": "Switch to English",
   "shell.switchToChinese": "Switch to Chinese",
   "shell.pagePlaceholder": "Page coming soon",
@@ -78,5 +79,6 @@
   "auth.loginTitle": "Sign in with API key",
   "auth.loginBody": "Enter your API key. The dashboard only shows agents and usage that belong to your user.",
   "auth.apiKeyLabel": "API Key",
-  "auth.loginButton": "Sign in"
+  "auth.loginButton": "Sign in",
+  "auth.loginError": "The API key is invalid, expired, or you do not have dashboard access."
 }

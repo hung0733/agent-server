@@ -15,7 +15,10 @@ function formatDateTime(value: string, locale: string): string {
   }).format(new Date(value));
 }
 
-export default function AppShell({ children }: PropsWithChildren) {
+export default function AppShell({
+  children,
+  onLogout,
+}: PropsWithChildren<{ onLogout?: () => void }>) {
   const { i18n, t } = useTranslation();
   const { isLoading, resource: overview } = useDashboardResource(fetchOverview, overviewPayload, {
     blockOnFirstLoad: true,
@@ -23,7 +26,7 @@ export default function AppShell({ children }: PropsWithChildren) {
 
   return (
     <div className="app-shell">
-      <Sidebar />
+      <Sidebar onLogout={onLogout} />
       <main className="app-main">
         {isLoading ? <section className="card dashboard-loading">正在載入控制台...</section> : (
           <DashboardOverviewContext.Provider value={overview}>

@@ -285,11 +285,7 @@ class DashboardDataProvider:
         }
 
     async def _get_agents(self, limit: int, user_id=None) -> list[dict[str, Any]]:
-        try:
-            rows = await AgentInstanceDAO.get_by_user_id(user_id, limit=limit) if user_id else await AgentInstanceDAO.get_all(limit=limit)
-        except Exception:
-            rows = []
-
+        rows = await self._get_user_agents(user_id=user_id, limit=limit)
         agents = []
         for row in rows:
             agents.append(
@@ -327,6 +323,14 @@ class DashboardDataProvider:
                 "scheduled": False,
             },
         ]
+
+    async def _get_user_agents(self, user_id=None, limit: int = 100):
+        try:
+            rows = await AgentInstanceDAO.get_by_user_id(user_id, limit=limit) if user_id else await AgentInstanceDAO.get_all(limit=limit)
+        except Exception:
+            rows = []
+
+        return rows
 
     async def _get_agent_name_lookup(self, user_id=None) -> dict[Any, str]:
         try:

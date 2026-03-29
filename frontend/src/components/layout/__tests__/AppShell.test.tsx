@@ -71,8 +71,8 @@ describe("App shell", () => {
     await user.type(screen.getByLabelText("API Key"), "good-key");
     await user.click(screen.getByRole("button", { name: "登入" }));
 
+    expect(await screen.findByRole("navigation", { name: "主導覽" })).toBeInTheDocument();
     expect(window.sessionStorage.getItem("dashboard_api_key")).toBe("good-key");
-    expect(screen.getByRole("navigation", { name: "主導覽" })).toBeInTheDocument();
   });
 
   it("shows a blocking loading state before dashboard data resolves", () => {
@@ -97,6 +97,36 @@ describe("App shell", () => {
     );
 
     renderWithRouter(<App />);
+
+    expect(await screen.findByText("使用 API Key 登入控制台")).toBeInTheDocument();
+    expect(window.sessionStorage.getItem("dashboard_api_key")).toBeNull();
+  });
+
+  it("shows a login failure message when the provided API key is invalid", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: "unauthorized" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    renderWithRouter(<App />);
+
+    await user.type(screen.getByLabelText("API Key"), "bad-key");
+    await user.click(screen.getByRole("button", { name: "登入" }));
+
+    expect(await screen.findByText("API key 無效、已過期，或你未有控制台存取權限。"))
+      .toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "主導覽" })).not.toBeInTheDocument();
+  });
+
+  it("logs out from the sidebar and returns to the login page", async () => {
+    const user = userEvent.setup();
+    window.sessionStorage.setItem("dashboard_api_key", "test-key");
+    renderWithRouter(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "登出" }));
 
     expect(await screen.findByText("使用 API Key 登入控制台")).toBeInTheDocument();
     expect(window.sessionStorage.getItem("dashboard_api_key")).toBeNull();

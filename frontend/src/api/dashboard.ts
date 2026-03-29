@@ -12,7 +12,10 @@ const API_BASE = import.meta.env.VITE_DASHBOARD_API_BASE ?? "";
 export const DASHBOARD_AUTH_EXPIRED_EVENT = "dashboard-auth-expired";
 
 async function requestJson<T>(path: string): Promise<T> {
-  const apiKey = getStoredApiKey();
+  return requestJsonWithKey<T>(path, getStoredApiKey());
+}
+
+async function requestJsonWithKey<T>(path: string, apiKey: string): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     headers: apiKey ? { "X-API-Key": apiKey } : {},
   });
@@ -29,6 +32,10 @@ async function requestJson<T>(path: string): Promise<T> {
 
 export function fetchOverview(): Promise<OverviewPayload> {
   return requestJson<OverviewPayload>("/api/dashboard/overview");
+}
+
+export function fetchOverviewWithApiKey(apiKey: string): Promise<OverviewPayload> {
+  return requestJsonWithKey<OverviewPayload>("/api/dashboard/overview", apiKey);
 }
 
 export function fetchUsage(): Promise<UsagePayload> {

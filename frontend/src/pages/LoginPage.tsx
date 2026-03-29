@@ -1,14 +1,26 @@
 import { FormEvent, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-export default function LoginPage({ onLogin }: { onLogin: (apiKey: string) => void }) {
+export default function LoginPage({
+  onLogin,
+  errorMessage,
+}: {
+  onLogin: (apiKey: string) => Promise<void>;
+  errorMessage?: string | null;
+}) {
   const { t } = useTranslation();
   const [apiKey, setApiKey] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (apiKey.trim()) {
-      onLogin(apiKey.trim());
+      setIsSubmitting(true);
+      try {
+        await onLogin(apiKey.trim());
+      } finally {
+        setIsSubmitting(false);
+      }
     }
   };
 
@@ -39,6 +51,7 @@ export default function LoginPage({ onLogin }: { onLogin: (apiKey: string) => vo
             <p>輸入有效 key 後即可進入專屬控制台。</p>
           </div>
           <div className="login-card__form" data-testid="login-form-stack">
+            {errorMessage ? <p className="login-card__error">{errorMessage}</p> : null}
             <label className="login-card__label" htmlFor="dashboard-api-key">
               {t("auth.apiKeyLabel")}
             </label>
@@ -53,7 +66,7 @@ export default function LoginPage({ onLogin }: { onLogin: (apiKey: string) => vo
               onChange={(event) => setApiKey(event.target.value)}
             />
             <div className="login-card__actions">
-              <button type="submit">{t("auth.loginButton")}</button>
+              <button type="submit" disabled={isSubmitting}>{t("auth.loginButton")}</button>
             </div>
           </div>
         </form>
