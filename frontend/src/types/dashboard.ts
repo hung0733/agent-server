@@ -92,8 +92,22 @@ export interface TasksPayload {
 }
 
 export interface MemoryPayload {
-  title: string;
-  body: string;
+  summary: {
+    title: string;
+    body: string;
+  };
+  stats: Array<{
+    title: string;
+    value: number;
+    note: string;
+    status: Exclude<SystemStatus, "idle">;
+  }>;
+  recentEntries: Array<{
+    id: string;
+    title: string;
+    detail: string;
+    timestamp: string;
+  }>;
   source: string;
 }
 

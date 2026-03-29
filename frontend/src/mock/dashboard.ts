@@ -142,8 +142,38 @@ export const tasksPayload: TasksPayload = {
 };
 
 export const memoryPayload: MemoryPayload = {
-  title: "最近記憶寫入穩定",
-  body: "今日未見記憶堆積，摘要與整理節奏正常。",
+  summary: {
+    title: "記憶整理摘要",
+    body: "摘要批次已恢復正常，待整理寫入維持低位。",
+  },
+  stats: [
+    {
+      title: "待整理片段",
+      value: 12,
+      note: "較昨日減少 3 項",
+      status: "healthy",
+    },
+    {
+      title: "最近 1 小時寫入",
+      value: 28,
+      note: "高峰期後回落",
+      status: "warning",
+    },
+  ],
+  recentEntries: [
+    {
+      id: "memory-1",
+      title: "客戶升級要求",
+      detail: "2 分鐘前完成摘要",
+      timestamp: "2 分鐘前",
+    },
+    {
+      id: "memory-2",
+      title: "部署事故跟進",
+      detail: "11 分鐘前補寫長期記憶",
+      timestamp: "11 分鐘前",
+    },
+  ],
   source: "mock",
 };
 
