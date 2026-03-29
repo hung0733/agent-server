@@ -52,6 +52,37 @@ class TestMsgQueueSystemPromptOverride:
         assert dto.total_tokens == 19
         assert dto.estimated_cost_usd == Decimal("0")
 
+    async def test_save_token_usage_persists_task_and_endpoint_links(self, monkeypatch):
+        user_id = uuid4()
+        agent_id = uuid4()
+        task_id = uuid4()
+        endpoint_id = uuid4()
+        create_mock = AsyncMock()
+
+        monkeypatch.setattr(
+            "db.dao.collaboration_session_dao.CollaborationSessionDAO.get_by_session_id",
+            AsyncMock(return_value=SimpleNamespace(user_id=user_id)),
+        )
+        monkeypatch.setattr("db.dao.token_usage_dao.TokenUsageDAO.create", create_mock)
+
+        await MsgQueueHandler._save_token_usage(
+            session_id="session-001",
+            agent_db_id=str(agent_id),
+            usage_payload={
+                "input_tokens": 12,
+                "output_tokens": 7,
+                "total_tokens": 19,
+                "model": "qwen3.5-35b-a3b",
+                "available": True,
+                "task_id": str(task_id),
+                "llm_endpoint_id": str(endpoint_id),
+            },
+        )
+
+        dto = create_mock.await_args.args[0]
+        assert dto.task_id == task_id
+        assert dto.llm_endpoint_id == endpoint_id
+
     async def test_pack_memory_uses_system_prompt_when_provided(self):
         task = QueueTask(
             agent_id="agent-001",

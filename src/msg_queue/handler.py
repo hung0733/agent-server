@@ -262,6 +262,8 @@ class MsgQueueHandler:
             TokenUsageCreate(
                 user_id=session.user_id,
                 agent_id=UUID(agent_db_id),
+                task_id=UUID(usage_payload["task_id"]) if usage_payload.get("task_id") else None,
+                llm_endpoint_id=UUID(usage_payload["llm_endpoint_id"]) if usage_payload.get("llm_endpoint_id") else None,
                 session_id=session_id,
                 model_name=usage_payload.get("model") or "unknown",
                 input_tokens=int(usage_payload.get("input_tokens") or 0),

@@ -203,6 +203,7 @@ class MessageTaskExecutor:
                     priority=QueueTaskPriority.NORMAL,
                     metadata={
                         "scheduled_task_id": str(task.id),
+                        "task_id": str(task.id),
                         "source": "task_scheduler",
                     },
                 ):
