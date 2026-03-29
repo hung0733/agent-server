@@ -8,6 +8,7 @@ from decimal import Decimal
 from typing import Any
 
 from db.dao.agent_instance_dao import AgentInstanceDAO
+from db.dao.agent_message_dao import AgentMessageDAO
 from db.dao.task_queue_dao import TaskQueueDAO
 from db.dao.task_schedule_dao import TaskScheduleDAO
 from db.dao.token_usage_dao import TokenUsageDAO
@@ -39,6 +40,37 @@ def _map_task_status(status: str) -> str:
         "failed": "danger",
         "cancelled": "warning",
     }.get(status, "warning")
+
+
+def _truncate_text(value: str, limit: int = 120) -> str:
+    text = " ".join(value.split())
+    if len(text) <= limit:
+        return text
+    return f"{text[: limit - 3].rstrip()}..."
+
+
+def _summarize_message_content(content: Any) -> str:
+    if isinstance(content, str):
+        return _truncate_text(content)
+
+    if isinstance(content, dict):
+        for key in ("summary", "content", "message", "text"):
+            value = content.get(key)
+            if isinstance(value, str) and value.strip():
+                return _truncate_text(value)
+
+        for value in content.values():
+            summary = _summarize_message_content(value)
+            if summary:
+                return summary
+
+    if isinstance(content, list):
+        for value in content:
+            summary = _summarize_message_content(value)
+            if summary:
+                return summary
+
+    return ""
 
 
 @dataclass(slots=True)
@@ -143,44 +175,110 @@ class DashboardDataProvider:
         return {"agents": await self._get_agents(limit=8, user_id=user_id), "source": "mixed"}
 
     async def get_tasks(self, user_id=None) -> dict[str, Any]:
+        agent_lookup = await self._get_agent_name_lookup(user_id=user_id)
         task_rows = await self._get_task_rows(limit=8)
+        message_rows = await self._get_message_rows(limit=8)
         items = []
-        for index, task in enumerate(task_rows[:4]):
+
+        for task in task_rows:
+            if task.claimed_by not in agent_lookup:
+                continue
+
+            context = task.result_json if isinstance(task.result_json, dict) else {}
             items.append(
                 {
                     "id": str(task.id),
                     "type": task.status,
-                    "sourceAgent": task.claimed_by or "system",
+                    "sourceAgent": agent_lookup.get(task.claimed_by, "system"),
                     "targetAgent": "queue",
                     "title": f"任務 {task.status}",
                     "summary": task.error_message or "系統任務狀態已同步。",
                     "timestamp": task.queued_at.isoformat() if task.queued_at else _iso_now(),
                     "status": _map_task_status(task.status),
                     "technicalDetails": str(task.task_id),
+                    "group": context.get("group"),
+                    "origin": context.get("origin"),
+                    "relatedTaskId": context.get("relatedTaskId"),
+                    "messageSnippet": None,
                 }
             )
 
-        if not items:
-            items = [
+        for message in message_rows:
+            if message.sender_agent_id not in agent_lookup and message.receiver_agent_id not in agent_lookup:
+                continue
+
+            snippet = _summarize_message_content(message.content_json) or "最近消息已記錄。"
+            items.append(
                 {
-                    "id": "evt-mock-1",
-                    "type": "announce",
-                    "sourceAgent": "Main",
-                    "targetAgent": "Pandas",
-                    "title": "發起跨會話消息",
-                    "summary": "請回覆最新狀態與最大阻塞",
-                    "timestamp": _iso_now(),
+                    "id": str(message.id),
+                    "type": "message",
+                    "sourceAgent": agent_lookup.get(message.sender_agent_id, "system"),
+                    "targetAgent": agent_lookup.get(message.receiver_agent_id, "queue"),
+                    "title": "代理消息",
+                    "summary": snippet,
+                    "timestamp": message.created_at.isoformat() if message.created_at else _iso_now(),
                     "status": "healthy",
-                    "technicalDetails": "sessions_send",
+                    "technicalDetails": getattr(message, "message_type", "message"),
+                    "group": None,
+                    "origin": "message",
+                    "relatedTaskId": None,
+                    "messageSnippet": snippet,
                 }
-            ]
-        return {"items": items, "source": "mixed"}
+            )
+
+        items.sort(key=lambda item: item["timestamp"], reverse=True)
+        if not items:
+            return {"items": [], "source": "mixed"}
+
+        return {"items": items[:8], "source": "mixed"}
 
     async def get_memory(self, user_id=None) -> dict[str, Any]:
+        agent_lookup = await self._get_agent_name_lookup(user_id=user_id)
+        task_rows = [task for task in await self._get_task_rows(limit=8) if task.claimed_by in agent_lookup]
+        message_rows = [
+            message
+            for message in await self._get_message_rows(limit=8)
+            if message.sender_agent_id in agent_lookup or message.receiver_agent_id in agent_lookup
+        ]
+
+        recent_entries = []
+        for task in task_rows:
+            recent_entries.append(
+                {
+                    "kind": "task",
+                    "timestamp": task.queued_at.isoformat() if task.queued_at else _iso_now(),
+                    "agent": agent_lookup.get(task.claimed_by, "system"),
+                    "summary": task.error_message or f"任務 {task.status}",
+                    "status": _map_task_status(task.status),
+                }
+            )
+
+        for message in message_rows:
+            recent_entries.append(
+                {
+                    "kind": "message",
+                    "timestamp": message.created_at.isoformat() if message.created_at else _iso_now(),
+                    "agent": agent_lookup.get(message.sender_agent_id, "system"),
+                    "summary": _summarize_message_content(message.content_json) or "最近消息已記錄。",
+                    "status": "healthy",
+                }
+            )
+
+        recent_entries.sort(key=lambda entry: entry["timestamp"], reverse=True)
+        activity_count = len(task_rows) + len(message_rows)
+
         return {
-            "title": "最近記憶寫入穩定",
-            "body": "今日未見記憶堆積，摘要與整理節奏正常。",
-            "source": "mock",
+            "stats": {
+                "agents": len(agent_lookup),
+                "tasks": len(task_rows),
+                "messages": len(message_rows),
+            },
+            "health": {
+                "status": "healthy" if activity_count else "idle",
+                "summary": f"最近 {activity_count} 項用戶活動可歸因。",
+            },
+            "recentEntries": recent_entries[:5],
+            "source": "mixed",
         }
 
     async def get_settings(self, user_id=None) -> dict[str, Any]:
@@ -234,6 +332,17 @@ class DashboardDataProvider:
             },
         ]
 
+    async def _get_agent_name_lookup(self, user_id=None) -> dict[Any, str]:
+        try:
+            rows = await AgentInstanceDAO.get_by_user_id(user_id, limit=100) if user_id else await AgentInstanceDAO.get_all(limit=100)
+        except Exception:
+            rows = []
+
+        return {
+            row.id: (row.name or row.agent_id or f"agent-{str(row.id)[:8]}")
+            for row in rows
+        }
+
     async def _get_usage_totals(self, user_id=None) -> dict[str, Any]:
         today_tokens = 0
         today_cost = Decimal("0")
@@ -281,5 +390,11 @@ class DashboardDataProvider:
     async def _get_task_rows(self, limit: int):
         try:
             return await TaskQueueDAO.get_all(limit=limit)
+        except Exception:
+            return []
+
+    async def _get_message_rows(self, limit: int):
+        try:
+            return await AgentMessageDAO.get_all(limit=limit)
         except Exception:
             return []
