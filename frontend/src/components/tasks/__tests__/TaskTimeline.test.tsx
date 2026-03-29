@@ -13,7 +13,7 @@ describe("TaskTimeline", () => {
             targetAgent: "Pandas",
             title: "發起跨會話消息",
             summary: "請回覆最新狀態與最大阻塞",
-            timestamp: "1 小時前",
+            timestamp: "2026-03-29T09:42:35.733248+00:00",
             status: "healthy",
             technicalDetails: "sessions_send",
           },
@@ -23,6 +23,7 @@ describe("TaskTimeline", () => {
 
     expect(screen.getByText("發起跨會話消息")).toBeInTheDocument();
     expect(screen.getByText(/Main -> Pandas/)).toBeInTheDocument();
+    expect(screen.getByText("2026-03-29 09:42:35")).toBeInTheDocument();
   });
 
   it("renders optional task context when group and message snippet are present", () => {
