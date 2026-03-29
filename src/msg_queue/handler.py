@@ -16,6 +16,7 @@ Pipeline order:
 
 from __future__ import annotations
 
+from decimal import Decimal
 from datetime import datetime
 import logging
 from typing import Any, AsyncGenerator, Dict, Optional
@@ -25,7 +26,9 @@ from agent.agent import Agent
 from agent.bulter import Bulter
 from db.dao.agent_message_dao import AgentMessageDAO
 from db.dao.collaboration_session_dao import CollaborationSessionDAO
+from db.dao.token_usage_dao import TokenUsageDAO
 from db.dto.collaboration_dto import AgentMessageCreate
+from db.dto.token_usage_dto import TokenUsageCreate
 from db.types import MessageType
 from i18n import _
 from models.llm import LLMSet
@@ -242,6 +245,33 @@ class MsgQueueHandler:
             )
 
     @staticmethod
+    async def _save_token_usage(
+        session_id: str,
+        agent_db_id: str,
+        usage_payload: dict[str, Any],
+    ) -> None:
+        if not usage_payload.get("available"):
+            return
+
+        session = await CollaborationSessionDAO.get_by_session_id(session_id)
+        if session is None:
+            logger.warning(_("Token usage skipped: session %s not found"), session_id)
+            return
+
+        await TokenUsageDAO.create(
+            TokenUsageCreate(
+                user_id=session.user_id,
+                agent_id=UUID(agent_db_id),
+                session_id=session_id,
+                model_name=usage_payload.get("model") or "unknown",
+                input_tokens=int(usage_payload.get("input_tokens") or 0),
+                output_tokens=int(usage_payload.get("output_tokens") or 0),
+                total_tokens=int(usage_payload.get("total_tokens") or 0),
+                estimated_cost_usd=Decimal("0"),
+            )
+        )
+
+    @staticmethod
     async def send_llm_msg(task: QueueTask) -> None:
         """Stream the LLM response and push chunks to the task queue."""
         logger.debug(_("Task %s: send_llm_msg"), task.id)
@@ -340,6 +370,15 @@ class MsgQueueHandler:
                 )
 
                 Tools.start_async_task(task.agent.review_stm(task.model_set))
+
+                if usage_payload is not None:
+                    Tools.start_async_task(
+                        MsgQueueHandler._save_token_usage(
+                            session_id=task.session_id,
+                            agent_db_id=task.agent.agent_db_id,
+                            usage_payload=usage_payload,
+                        )
+                    )
 
                 logger.debug(
                     _("Task %s: background save tasks created (DB + memory)"), task.id

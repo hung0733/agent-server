@@ -44,6 +44,22 @@ def _message(*, message_id, created_at, sender_agent_id=None, receiver_agent_id=
     )
 
 
+def _usage(*, user_id, agent_id, session_id: str, model_name: str, total_tokens: int, input_tokens: int, output_tokens: int, cost: str, created_at) -> SimpleNamespace:
+    from decimal import Decimal
+
+    return SimpleNamespace(
+        user_id=user_id,
+        agent_id=agent_id,
+        session_id=session_id,
+        model_name=model_name,
+        total_tokens=total_tokens,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        estimated_cost_usd=Decimal(cost),
+        created_at=created_at,
+    )
+
+
 @pytest.mark.asyncio
 async def test_get_tasks_merges_user_queue_and_messages_sorted_newest_first(monkeypatch) -> None:
     provider = DashboardDataProvider(queue=object(), dedup=object())
@@ -294,3 +310,63 @@ async def test_user_scoped_activity_is_found_beyond_initial_global_limit(monkeyp
     assert tasks_payload["items"][1]["origin"] == "scheduler"
     assert memory_payload["stats"] == {"agents": 2, "tasks": 1, "messages": 1}
     assert [entry["agent"] for entry in memory_payload["recentEntries"]] == ["Primary Agent", "Primary Agent"]
+
+
+@pytest.mark.asyncio
+async def test_get_usage_aggregates_real_token_usage_without_mock_fallback(monkeypatch) -> None:
+    from decimal import Decimal
+
+    provider = DashboardDataProvider(queue=object(), dedup=object())
+    user_id = uuid4()
+    now = datetime(2026, 3, 29, 12, 0, tzinfo=UTC)
+
+    async def fake_get_usage(user_id_value, limit=500, offset=0, session=None):
+        assert user_id_value == user_id
+        return [
+            _usage(
+                user_id=user_id,
+                agent_id=uuid4(),
+                session_id="session-1",
+                model_name="qwen3.5-35b-a3b",
+                total_tokens=72,
+                input_tokens=17,
+                output_tokens=55,
+                cost="0",
+                created_at=now,
+            ),
+            _usage(
+                user_id=user_id,
+                agent_id=uuid4(),
+                session_id="session-2",
+                model_name="qwen3.5-35b-a3b",
+                total_tokens=28,
+                input_tokens=20,
+                output_tokens=8,
+                cost="0",
+                created_at=now,
+            ),
+            _usage(
+                user_id=user_id,
+                agent_id=uuid4(),
+                session_id="session-3",
+                model_name="llama-3.1-8b",
+                total_tokens=50,
+                input_tokens=40,
+                output_tokens=10,
+                cost="0.25",
+                created_at=now,
+            ),
+        ]
+
+    monkeypatch.setattr(dashboard_module.TokenUsageDAO, "get_by_user_id", fake_get_usage)
+
+    payload = await provider.get_usage(user_id=user_id)
+
+    assert payload["todayTokens"] == 150
+    assert payload["todayCostUsd"] == str(Decimal("0.25"))
+    assert payload["total"] == 150
+    assert payload["items"][0]["label"] == "qwen3.5-35b-a3b"
+    assert payload["items"][0]["value"] == 100
+    assert payload["items"][0]["percentage"] == pytest.approx(66.67, rel=0, abs=0.01)
+    assert payload["items"][1]["label"] == "llama-3.1-8b"
+    assert payload["items"][1]["value"] == 50
