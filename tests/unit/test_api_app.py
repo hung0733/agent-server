@@ -40,7 +40,20 @@ class _FakeDashboardProvider:
 
     async def get_memory(self, user_id=None) -> dict:
         self.last_user_id = user_id
-        return {"title": "memory", "source": "mock"}
+        return {
+            "stats": {"agents": 1, "tasks": 2, "messages": 3},
+            "health": {"status": "healthy", "summary": "最近 5 項用戶活動可歸因。"},
+            "recentEntries": [
+                {
+                    "kind": "message",
+                    "agent": "main",
+                    "summary": "ok",
+                    "status": "healthy",
+                    "timestamp": "2026-03-29T12:00:00+00:00",
+                }
+            ],
+            "source": "mixed",
+        }
 
     async def get_settings(self, user_id=None) -> dict:
         self.last_user_id = user_id
@@ -98,6 +111,33 @@ async def test_dashboard_endpoints_return_provider_payloads() -> None:
     assert payload["summary"]["headline"] == "ok"
     assert payload["source"] == "mixed"
     assert provider.last_user_id == user_id
+
+
+@pytest.mark.asyncio
+async def test_memory_endpoint_returns_provider_contract_shape() -> None:
+    provider = _FakeDashboardProvider()
+    user_id = uuid4()
+    app = create_app(
+        _FakeQueue(),
+        _FakeDedup(),
+        dashboard_data_provider=provider,
+        auth_service=_FakeAuthService(user_id),
+    )
+    server = TestServer(app)
+    client = TestClient(server)
+
+    await client.start_server()
+    try:
+        response = await client.get("/api/dashboard/memory", headers={"X-API-Key": "good-key"})
+        payload = await response.json()
+    finally:
+        await client.close()
+
+    assert response.status == 200
+    assert payload["stats"] == {"agents": 1, "tasks": 2, "messages": 3}
+    assert payload["health"]["summary"] == "最近 5 項用戶活動可歸因。"
+    assert payload["recentEntries"][0]["kind"] == "message"
+    assert payload["source"] == "mixed"
 
 
 @pytest.mark.asyncio

@@ -92,6 +92,8 @@ export const taskTimeline: TimelineItem[] = [
     type: "reply",
     sourceAgent: "Pandas",
     targetAgent: "Main",
+    group: "內容審批",
+    messageSnippet: "等緊新一批可審查內容先可以繼續。",
     title: "通過既有會話回信",
     summary: "目前缺的不是任務，而是可審查輸入。",
     timestamp: "58 分鐘前",
@@ -140,8 +142,31 @@ export const tasksPayload: TasksPayload = {
 };
 
 export const memoryPayload: MemoryPayload = {
-  title: "最近記憶寫入穩定",
-  body: "今日未見記憶堆積，摘要與整理節奏正常。",
+  stats: {
+    agents: 3,
+    tasks: 1,
+    messages: 2,
+  },
+  health: {
+    status: "healthy",
+    summary: "最近 3 項用戶活動可歸因。",
+  },
+  recentEntries: [
+    {
+      kind: "message",
+      agent: "Main",
+      summary: "客戶升級要求已完成摘要。",
+      timestamp: "2026-03-29T10:28:00+08:00",
+      status: "healthy",
+    },
+    {
+      kind: "task",
+      agent: "Pandas",
+      summary: "部署事故跟進已補寫長期記憶。",
+      timestamp: "2026-03-29T10:19:00+08:00",
+      status: "warning",
+    },
+  ],
   source: "mock",
 };
 

@@ -3,11 +3,16 @@ import { fetchTasks } from "../api/dashboard";
 import TaskTimeline from "../components/tasks/TaskTimeline";
 import SectionHeader from "../components/ui/SectionHeader";
 import { useDashboardResource } from "../hooks/useDashboardResource";
-import { tasksPayload } from "../mock/dashboard";
+import { TasksPayload } from "../types/dashboard";
+
+const emptyTasksPayload: TasksPayload = {
+  items: [],
+  source: "empty",
+};
 
 export default function TasksPage() {
   const { t } = useTranslation();
-  const { isLoading, resource: payload } = useDashboardResource(fetchTasks, tasksPayload, {
+  const { isLoading, resource: payload } = useDashboardResource(fetchTasks, emptyTasksPayload, {
     blockOnFirstLoad: true,
   });
 

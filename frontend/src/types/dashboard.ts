@@ -33,6 +33,8 @@ export interface TimelineItem {
   type: string;
   sourceAgent: string;
   targetAgent: string;
+  group?: string;
+  messageSnippet?: string;
   title: string;
   summary: string;
   timestamp: string;
@@ -90,8 +92,22 @@ export interface TasksPayload {
 }
 
 export interface MemoryPayload {
-  title: string;
-  body: string;
+  stats: {
+    agents: number;
+    tasks: number;
+    messages: number;
+  };
+  health: {
+    status: SystemStatus;
+    summary: string;
+  };
+  recentEntries: Array<{
+    kind: string;
+    timestamp: string;
+    agent: string;
+    summary: string;
+    status: SystemStatus;
+  }>;
   source: string;
 }
 
