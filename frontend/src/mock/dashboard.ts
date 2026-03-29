@@ -175,5 +175,31 @@ export const settingsPayload: SettingsPayload = {
   featureFlags: {
     dashboardApi: true,
   },
+  endpoints: [
+    {
+      id: "endpoint-1",
+      name: "Local Qwen",
+      baseUrl: "http://localhost:8601/v1",
+      modelName: "qwen3.5-35b-a3b",
+      isActive: true,
+      apiKeyConfigured: true,
+    },
+  ],
+  groups: [
+    {
+      id: "group-1",
+      name: "Default Group",
+      slots: [
+        {
+          id: "slot-1",
+          difficultyLevel: 1,
+          involvesSecrets: false,
+          endpointId: "endpoint-1",
+          priority: 0,
+          isActive: true,
+        },
+      ],
+    },
+  ],
   source: "mock",
 };

@@ -650,6 +650,71 @@ textarea {
   font-size: 1.8rem;
 }
 
+.settings-section {
+  display: grid;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.settings-section__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: start;
+}
+
+.settings-error {
+  margin-bottom: 16px;
+  color: #ffb4a8;
+}
+
+.settings-endpoint-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.settings-endpoint-form input {
+  width: 100%;
+}
+
+.settings-checkbox {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.settings-endpoint-list,
+.settings-group-list {
+  display: grid;
+  gap: 12px;
+}
+
+.settings-endpoint-item,
+.settings-group-card {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 16px;
+  display: grid;
+  gap: 8px;
+}
+
+.settings-endpoint-item__meta,
+.settings-endpoint-item__actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.settings-mapping-row {
+  display: grid;
+  gap: 6px;
+}
+
+.settings-mapping-row select {
+  max-width: 420px;
+}
+
 .usage-legend__donut {
   display: grid;
   place-items: center;
@@ -717,6 +782,12 @@ textarea {
 
   .usage-summary-grid {
     grid-template-columns: 1fr;
+  }
+
+  .settings-section__header,
+  .settings-endpoint-form {
+    grid-template-columns: 1fr;
+    display: grid;
   }
 }
 

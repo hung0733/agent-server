@@ -114,5 +114,25 @@ export interface MemoryPayload {
 export interface SettingsPayload {
   locales: string[];
   featureFlags: Record<string, boolean>;
+  endpoints: Array<{
+    id: string;
+    name: string;
+    baseUrl: string;
+    modelName: string;
+    isActive: boolean;
+    apiKeyConfigured: boolean;
+  }>;
+  groups: Array<{
+    id: string;
+    name: string;
+    slots: Array<{
+      id: string;
+      difficultyLevel: number;
+      involvesSecrets: boolean;
+      endpointId: string;
+      priority: number;
+      isActive: boolean;
+    }>;
+  }>;
   source: string;
 }

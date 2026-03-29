@@ -5,11 +5,17 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import TYPE_CHECKING
+from uuid import UUID
 
 from aiohttp import web
 
 from api.auth import DashboardAuthService
 from api.dashboard import DashboardDataProvider
+from db.crypto import CryptoManager
+from db.dao.llm_endpoint_dao import LLMEndpointDAO
+from db.dao.llm_endpoint_group_dao import LLMEndpointGroupDAO
+from db.dao.llm_level_endpoint_dao import LLMLevelEndpointDAO
+from db.dto.llm_endpoint_dto import LLMEndpointCreate, LLMEndpointUpdate, LLMLevelEndpointCreate
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -98,6 +104,131 @@ async def _dashboard_settings(request: web.Request) -> web.Response:
     return web.json_response(await provider.get_settings(user_id=auth_context["user_id"]))
 
 
+def _serialize_endpoint(endpoint) -> dict:
+    return {
+        "id": str(endpoint.id),
+        "name": endpoint.name,
+        "baseUrl": endpoint.base_url,
+        "modelName": endpoint.model_name,
+        "isActive": endpoint.is_active,
+        "apiKeyConfigured": bool(getattr(endpoint, "api_key_encrypted", "")),
+    }
+
+
+async def _settings_create_endpoint(request: web.Request) -> web.Response:
+    auth_context = await _require_auth(request)
+    body = await request.json()
+    encrypted_key = CryptoManager().encrypt(body["apiKey"]) if body.get("apiKey") else ""
+    endpoint = await LLMEndpointDAO.create(
+        LLMEndpointCreate(
+            user_id=auth_context["user_id"],
+            name=body["name"],
+            base_url=body["baseUrl"],
+            api_key_encrypted=encrypted_key,
+            model_name=body["modelName"],
+            config_json=body.get("configJson"),
+            is_active=body.get("isActive", True),
+        )
+    )
+    return web.json_response({"endpoint": _serialize_endpoint(endpoint)})
+
+
+async def _settings_update_endpoint(request: web.Request) -> web.Response:
+    auth_context = await _require_auth(request)
+    endpoint_id = UUID(request.match_info["endpoint_id"])
+    existing = await LLMEndpointDAO.get_by_id(endpoint_id)
+    if existing is None or existing.user_id != auth_context["user_id"]:
+        raise web.HTTPNotFound()
+
+    body = await request.json()
+    update_kwargs = {
+        "id": endpoint_id,
+        "name": body.get("name"),
+        "base_url": body.get("baseUrl"),
+        "model_name": body.get("modelName"),
+        "config_json": body.get("configJson"),
+        "is_active": body.get("isActive"),
+    }
+    if body.get("apiKey"):
+        update_kwargs["api_key_encrypted"] = CryptoManager().encrypt(body["apiKey"])
+    endpoint = await LLMEndpointDAO.update(LLMEndpointUpdate(**update_kwargs))
+    if endpoint is None:
+        raise web.HTTPNotFound()
+    return web.json_response({"endpoint": _serialize_endpoint(endpoint)})
+
+
+async def _settings_delete_endpoint(request: web.Request) -> web.Response:
+    auth_context = await _require_auth(request)
+    endpoint_id = UUID(request.match_info["endpoint_id"])
+    existing = await LLMEndpointDAO.get_by_id(endpoint_id)
+    if existing is None or existing.user_id != auth_context["user_id"]:
+        raise web.HTTPNotFound()
+    assignment = await LLMLevelEndpointDAO.get_by_endpoint_id(endpoint_id)
+    if assignment is not None:
+        raise web.HTTPConflict(
+            text=json.dumps({"error": "endpoint_in_use"}),
+            content_type="application/json",
+        )
+    await LLMEndpointDAO.delete(endpoint_id)
+    return web.json_response({"deleted": True})
+
+
+async def _settings_put_mapping(request: web.Request) -> web.Response:
+    auth_context = await _require_auth(request)
+    body = await request.json()
+    group_id = UUID(body["groupId"])
+    endpoint_id = UUID(body["endpointId"]) if body.get("endpointId") else None
+    group = await LLMEndpointGroupDAO.get_by_id(group_id)
+    if group is None or group.user_id != auth_context["user_id"]:
+        raise web.HTTPNotFound()
+    if endpoint_id is not None:
+        endpoint = await LLMEndpointDAO.get_by_id(endpoint_id)
+        if endpoint is None or endpoint.user_id != auth_context["user_id"]:
+            raise web.HTTPNotFound()
+
+    rows = await LLMLevelEndpointDAO.get_by_group_id(group_id)
+    matching = [
+        row
+        for row in rows
+        if row.difficulty_level == int(body["difficultyLevel"])
+        and row.involves_secrets is bool(body["involvesSecrets"])
+    ]
+    if endpoint_id is None:
+        for row in matching:
+            await LLMLevelEndpointDAO.delete(row.id)
+        return web.json_response({"mapping": None})
+
+    existing_for_endpoint = await LLMLevelEndpointDAO.get_by_endpoint_id(endpoint_id)
+    if existing_for_endpoint is not None and all(existing_for_endpoint.id != row.id for row in matching):
+        await LLMLevelEndpointDAO.delete(existing_for_endpoint.id)
+
+    for row in matching:
+        await LLMLevelEndpointDAO.delete(row.id)
+
+    created = await LLMLevelEndpointDAO.create(
+        LLMLevelEndpointCreate(
+            group_id=group_id,
+            endpoint_id=endpoint_id,
+            difficulty_level=int(body["difficultyLevel"]),
+            involves_secrets=bool(body["involvesSecrets"]),
+            priority=int(body.get("priority", 0)),
+            is_active=True,
+        )
+    )
+    return web.json_response(
+        {
+            "mapping": {
+                "id": str(created.id),
+                "difficultyLevel": created.difficulty_level,
+                "involvesSecrets": created.involves_secrets,
+                "endpointId": str(created.endpoint_id),
+                "priority": created.priority,
+                "isActive": created.is_active,
+            }
+        }
+    )
+
+
 def _default_frontend_dist() -> Path:
     return Path(__file__).resolve().parents[2] / "frontend" / "dist"
 
@@ -140,6 +271,10 @@ def create_app(
     app.router.add_get("/api/dashboard/tasks", _dashboard_tasks)
     app.router.add_get("/api/dashboard/memory", _dashboard_memory)
     app.router.add_get("/api/dashboard/settings", _dashboard_settings)
+    app.router.add_post("/api/dashboard/settings/endpoints", _settings_create_endpoint)
+    app.router.add_patch("/api/dashboard/settings/endpoints/{endpoint_id}", _settings_update_endpoint)
+    app.router.add_delete("/api/dashboard/settings/endpoints/{endpoint_id}", _settings_delete_endpoint)
+    app.router.add_put("/api/dashboard/settings/mappings", _settings_put_mapping)
 
     dist_path = frontend_dist or _default_frontend_dist()
     if dist_path.exists():

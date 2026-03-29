@@ -30,6 +30,28 @@ async function requestJsonWithKey<T>(path: string, apiKey: string): Promise<T> {
   return (await response.json()) as T;
 }
 
+async function mutateJson<T>(path: string, method: string, body: unknown): Promise<T> {
+  const apiKey = getStoredApiKey();
+  const response = await fetch(`${API_BASE}${path}`, {
+    method,
+    headers: {
+      ...(apiKey ? { "X-API-Key": apiKey } : {}),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  if (response.status === 401) {
+    clearStoredApiKey();
+    window.dispatchEvent(new CustomEvent(DASHBOARD_AUTH_EXPIRED_EVENT));
+    throw new Error("Dashboard API unauthorized");
+  }
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.error ?? `Dashboard API request failed: ${response.status}`);
+  }
+  return (await response.json()) as T;
+}
+
 export function fetchOverview(): Promise<OverviewPayload> {
   return requestJson<OverviewPayload>("/api/dashboard/overview");
 }
@@ -56,4 +78,23 @@ export function fetchMemory(): Promise<MemoryPayload> {
 
 export function fetchSettings(): Promise<SettingsPayload> {
   return requestJson<SettingsPayload>("/api/dashboard/settings");
+}
+
+export function createSettingsEndpoint(body: unknown): Promise<{ endpoint: SettingsPayload["endpoints"][number] }> {
+  return mutateJson("/api/dashboard/settings/endpoints", "POST", body);
+}
+
+export function updateSettingsEndpoint(
+  endpointId: string,
+  body: unknown,
+): Promise<{ endpoint: SettingsPayload["endpoints"][number] }> {
+  return mutateJson(`/api/dashboard/settings/endpoints/${endpointId}`, "PATCH", body);
+}
+
+export function deleteSettingsEndpoint(endpointId: string): Promise<{ deleted: boolean }> {
+  return mutateJson(`/api/dashboard/settings/endpoints/${endpointId}`, "DELETE", {});
+}
+
+export function saveSettingsMapping(body: unknown): Promise<{ mapping: SettingsPayload["groups"][number]["slots"][number] | null }> {
+  return mutateJson("/api/dashboard/settings/mappings", "PUT", body);
 }

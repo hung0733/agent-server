@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -57,7 +58,7 @@ class _FakeDashboardProvider:
 
     async def get_settings(self, user_id=None) -> dict:
         self.last_user_id = user_id
-        return {"locales": ["zh-HK"], "source": "mock"}
+        return {"locales": ["zh-HK"], "featureFlags": {}, "endpoints": [], "groups": [], "source": "mixed"}
 
 
 class _FakeAuthService:
@@ -187,3 +188,97 @@ async def test_spa_routes_serve_built_frontend(tmp_path: Path) -> None:
     assert "spa shell" in route_text
     assert asset_response.status == 200
     assert "console.log" in asset_text
+
+
+@pytest.mark.asyncio
+async def test_endpoint_crud_routes_require_valid_auth_and_return_json(monkeypatch) -> None:
+    user_id = uuid4()
+    endpoint_id = uuid4()
+
+    monkeypatch.setattr(
+        "api.app.CryptoManager",
+        lambda: type("FakeCrypto", (), {"encrypt": staticmethod(lambda value: f"enc:{value}")})(),
+    )
+    monkeypatch.setattr(
+        "api.app.LLMEndpointDAO.create",
+        AsyncMock(
+            return_value=type(
+                "Endpoint",
+                (),
+                {
+                    "id": endpoint_id,
+                    "name": "Local Qwen",
+                    "base_url": "http://localhost:8601/v1",
+                    "model_name": "qwen",
+                    "is_active": True,
+                },
+            )()
+        ),
+    )
+
+    app = create_app(
+        _FakeQueue(),
+        _FakeDedup(),
+        dashboard_data_provider=_FakeDashboardProvider(),
+        auth_service=_FakeAuthService(user_id),
+    )
+    server = TestServer(app)
+    client = TestClient(server)
+
+    await client.start_server()
+    try:
+        response = await client.post(
+            "/api/dashboard/settings/endpoints",
+            headers={"X-API-Key": "good-key"},
+            json={
+                "name": "Local Qwen",
+                "baseUrl": "http://localhost:8601/v1",
+                "modelName": "qwen",
+                "apiKey": "EMPTY",
+                "isActive": True,
+            },
+        )
+        payload = await response.json()
+    finally:
+        await client.close()
+
+    assert response.status == 200
+    assert payload["endpoint"]["id"] == str(endpoint_id)
+    assert payload["endpoint"]["name"] == "Local Qwen"
+
+
+@pytest.mark.asyncio
+async def test_delete_endpoint_rejects_when_mapping_exists(monkeypatch) -> None:
+    user_id = uuid4()
+    endpoint_id = uuid4()
+
+    monkeypatch.setattr(
+        "api.app.LLMEndpointDAO.get_by_id",
+        AsyncMock(return_value=type("Endpoint", (), {"id": endpoint_id, "user_id": user_id})()),
+    )
+    monkeypatch.setattr(
+        "api.app.LLMLevelEndpointDAO.get_by_endpoint_id",
+        AsyncMock(return_value=type("LevelAssignment", (), {"id": uuid4()})()),
+    )
+
+    app = create_app(
+        _FakeQueue(),
+        _FakeDedup(),
+        dashboard_data_provider=_FakeDashboardProvider(),
+        auth_service=_FakeAuthService(user_id),
+    )
+    server = TestServer(app)
+    client = TestClient(server)
+
+    await client.start_server()
+    try:
+        response = await client.delete(
+            f"/api/dashboard/settings/endpoints/{endpoint_id}",
+            headers={"X-API-Key": "good-key"},
+        )
+        payload = await response.json()
+    finally:
+        await client.close()
+
+    assert response.status == 409
+    assert payload["error"] == "endpoint_in_use"

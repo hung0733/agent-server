@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -57,6 +58,34 @@ def _usage(*, user_id, agent_id, session_id: str, model_name: str, total_tokens:
         output_tokens=output_tokens,
         estimated_cost_usd=Decimal(cost),
         created_at=created_at,
+    )
+
+
+def _endpoint(*, endpoint_id, user_id, name: str, base_url: str, model_name: str, is_active: bool = True, api_key_encrypted: str = "secret") -> SimpleNamespace:
+    return SimpleNamespace(
+        id=endpoint_id,
+        user_id=user_id,
+        name=name,
+        base_url=base_url,
+        model_name=model_name,
+        is_active=is_active,
+        api_key_encrypted=api_key_encrypted,
+    )
+
+
+def _group(*, group_id, user_id, name: str) -> SimpleNamespace:
+    return SimpleNamespace(id=group_id, user_id=user_id, name=name)
+
+
+def _level_assignment(*, assignment_id, group_id, endpoint_id, difficulty_level: int, involves_secrets: bool, priority: int = 0, is_active: bool = True) -> SimpleNamespace:
+    return SimpleNamespace(
+        id=assignment_id,
+        group_id=group_id,
+        endpoint_id=endpoint_id,
+        difficulty_level=difficulty_level,
+        involves_secrets=involves_secrets,
+        priority=priority,
+        is_active=is_active,
     )
 
 
@@ -370,3 +399,58 @@ async def test_get_usage_aggregates_real_token_usage_without_mock_fallback(monke
     assert payload["items"][0]["percentage"] == pytest.approx(66.67, rel=0, abs=0.01)
     assert payload["items"][1]["label"] == "llama-3.1-8b"
     assert payload["items"][1]["value"] == 50
+
+
+@pytest.mark.asyncio
+async def test_get_settings_returns_endpoint_inventory_and_mapping_slots(monkeypatch) -> None:
+    provider = DashboardDataProvider(queue=object(), dedup=object())
+    user_id = uuid4()
+    group_id = uuid4()
+    endpoint_id = uuid4()
+
+    async def fake_groups(user_id_value, session=None):
+        assert user_id_value == user_id
+        return [_group(group_id=group_id, user_id=user_id, name="Default Group")]
+
+    async def fake_endpoints(user_id_value, session=None):
+        assert user_id_value == user_id
+        return [
+            _endpoint(
+                endpoint_id=endpoint_id,
+                user_id=user_id,
+                name="Local Qwen",
+                base_url="http://localhost:8601/v1",
+                model_name="qwen3.5-35b-a3b",
+            )
+        ]
+
+    async def fake_levels(group_id_value, session=None):
+        assert group_id_value == group_id
+        return [
+            _level_assignment(
+                assignment_id=uuid4(),
+                group_id=group_id,
+                endpoint_id=endpoint_id,
+                difficulty_level=1,
+                involves_secrets=False,
+                priority=10,
+            )
+        ]
+
+    async def fake_endpoint_usage(endpoint_id_value, session=None):
+        assert endpoint_id_value == endpoint_id
+        return SimpleNamespace(total=2)
+
+    monkeypatch.setattr(dashboard_module.LLMEndpointGroupDAO, "get_by_user_id", fake_groups)
+    monkeypatch.setattr(dashboard_module.LLMEndpointDAO, "get_by_user_id", fake_endpoints)
+    monkeypatch.setattr(dashboard_module.LLMLevelEndpointDAO, "get_by_group_id", fake_levels)
+    monkeypatch.setattr(dashboard_module.LLMLevelEndpointDAO, "get_by_endpoint_id", AsyncMock(return_value=None), raising=False)
+
+    payload = await provider.get_settings(user_id=user_id)
+
+    assert payload["source"] == "mixed"
+    assert payload["endpoints"][0]["name"] == "Local Qwen"
+    assert payload["endpoints"][0]["apiKeyConfigured"] is True
+    assert payload["groups"][0]["name"] == "Default Group"
+    assert payload["groups"][0]["slots"][0]["difficultyLevel"] == 1
+    assert payload["groups"][0]["slots"][0]["endpointId"] == str(endpoint_id)

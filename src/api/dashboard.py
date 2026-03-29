@@ -9,6 +9,9 @@ from typing import Any
 
 from db.dao.agent_instance_dao import AgentInstanceDAO
 from db.dao.agent_message_dao import AgentMessageDAO
+from db.dao.llm_endpoint_dao import LLMEndpointDAO
+from db.dao.llm_endpoint_group_dao import LLMEndpointGroupDAO
+from db.dao.llm_level_endpoint_dao import LLMLevelEndpointDAO
 from db.dao.task_queue_dao import TaskQueueDAO
 from db.dao.task_schedule_dao import TaskScheduleDAO
 from db.dao.token_usage_dao import TokenUsageDAO
@@ -273,10 +276,64 @@ class DashboardDataProvider:
         }
 
     async def get_settings(self, user_id=None) -> dict[str, Any]:
+        endpoints = []
+        groups = []
+
+        try:
+            endpoint_rows = await LLMEndpointDAO.get_by_user_id(user_id)
+        except Exception:
+            endpoint_rows = []
+
+        try:
+            group_rows = await LLMEndpointGroupDAO.get_by_user_id(user_id)
+        except Exception:
+            group_rows = []
+
+        for row in endpoint_rows:
+            endpoints.append(
+                {
+                    "id": str(row.id),
+                    "name": row.name,
+                    "baseUrl": row.base_url,
+                    "modelName": row.model_name,
+                    "isActive": row.is_active,
+                    "apiKeyConfigured": bool(row.api_key_encrypted),
+                }
+            )
+
+        for group in group_rows:
+            try:
+                level_rows = await LLMLevelEndpointDAO.get_by_group_id(group.id)
+            except Exception:
+                level_rows = []
+
+            groups.append(
+                {
+                    "id": str(group.id),
+                    "name": group.name,
+                    "slots": [
+                        {
+                            "id": str(level.id),
+                            "difficultyLevel": level.difficulty_level,
+                            "involvesSecrets": level.involves_secrets,
+                            "endpointId": str(level.endpoint_id),
+                            "priority": level.priority,
+                            "isActive": level.is_active,
+                        }
+                        for level in sorted(
+                            level_rows,
+                            key=lambda item: (item.difficulty_level, item.involves_secrets),
+                        )
+                    ],
+                }
+            )
+
         return {
             "locales": ["zh-HK", "en"],
             "featureFlags": {"dashboardApi": True},
-            "source": "mock",
+            "endpoints": endpoints,
+            "groups": groups,
+            "source": "mixed",
         }
 
     async def _get_agents(self, limit: int, user_id=None) -> list[dict[str, Any]]:
