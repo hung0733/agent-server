@@ -20,11 +20,13 @@ export default function TaskTimeline({ items }: { items: TimelineItem[] }) {
             <div>
               <h3>{item.title}</h3>
               <p>{item.sourceAgent} -&gt; {item.targetAgent}</p>
+              {item.group ? <p>{item.group}</p> : null}
             </div>
             <div className="timeline-item__meta">
               <Badge tone={toneMap[item.status]} label={item.timestamp} />
             </div>
           </div>
+          {item.messageSnippet ? <p>{item.messageSnippet}</p> : null}
           <p className="timeline-item__summary">{item.summary}</p>
           <details>
             <summary>{t("tasks.technicalDetails")}</summary>

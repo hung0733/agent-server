@@ -24,4 +24,29 @@ describe("TaskTimeline", () => {
     expect(screen.getByText("發起跨會話消息")).toBeInTheDocument();
     expect(screen.getByText(/Main -> Pandas/)).toBeInTheDocument();
   });
+
+  it("renders optional task context when group and message snippet are present", () => {
+    renderWithRouter(
+      <TaskTimeline
+        items={[
+          {
+            id: "evt-2",
+            type: "reply",
+            sourceAgent: "Pandas",
+            targetAgent: "Main",
+            title: "通過既有會話回信",
+            summary: "目前缺的不是任務，而是可審查輸入。",
+            timestamp: "58 分鐘前",
+            status: "warning",
+            technicalDetails: "announce_step",
+            group: "內容審批",
+            messageSnippet: "等緊新一批可審查內容先可以繼續。",
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("內容審批")).toBeInTheDocument();
+    expect(screen.getByText("等緊新一批可審查內容先可以繼續。")).toBeInTheDocument();
+  });
 });

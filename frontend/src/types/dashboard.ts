@@ -33,6 +33,8 @@ export interface TimelineItem {
   type: string;
   sourceAgent: string;
   targetAgent: string;
+  group?: string;
+  messageSnippet?: string;
   title: string;
   summary: string;
   timestamp: string;

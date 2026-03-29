@@ -92,6 +92,8 @@ export const taskTimeline: TimelineItem[] = [
     type: "reply",
     sourceAgent: "Pandas",
     targetAgent: "Main",
+    group: "內容審批",
+    messageSnippet: "等緊新一批可審查內容先可以繼續。",
     title: "通過既有會話回信",
     summary: "目前缺的不是任務，而是可審查輸入。",
     timestamp: "58 分鐘前",
