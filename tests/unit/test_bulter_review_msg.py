@@ -157,6 +157,83 @@ class TestBulterReviewMsg:
             }
         }
 
+    async def test_send_merges_final_state_metadata_into_stream_usage(self, monkeypatch):
+        endpoint_id = "00000000-0000-0000-0000-000000000099"
+
+        async def _fake_astream(*_args, **_kwargs):
+            yield (
+                AIMessageChunk(
+                    content="hello",
+                    usage_metadata={
+                        "input_tokens": 12,
+                        "output_tokens": 7,
+                        "total_tokens": 19,
+                    },
+                ),
+                {"langgraph_node": "Butler"},
+            )
+
+        async def _fake_aget_state(_config):
+            return SimpleNamespace(
+                values={
+                    "messages": [
+                        AIMessage(
+                            content="hello",
+                            usage_metadata={
+                                "input_tokens": 12,
+                                "output_tokens": 7,
+                                "total_tokens": 19,
+                            },
+                            additional_kwargs={
+                                "llm_endpoint_id": endpoint_id,
+                                "model_name": "qwen-live",
+                            },
+                        )
+                    ]
+                }
+            )
+
+        monkeypatch.setattr(
+            "graph.graph_node.GraphNode.prepare_chat_node_config",
+            lambda *_args, **_kwargs: {"configurable": {}},
+        )
+        monkeypatch.setattr(
+            Bulter,
+            "_graph",
+            SimpleNamespace(astream=_fake_astream, aget_state=_fake_aget_state),
+        )
+
+        butler = Bulter(
+            agent_db_id="agent-db-1",
+            session_db_id="session-db-1",
+            agent_id="agent-001",
+            session_id="session-001",
+            involves_secrets=False,
+            name="Butler",
+        )
+
+        chunks = []
+        async for chunk in butler.send(
+            models=[],
+            sys_prompt="prompt",
+            message="hello",
+            think_mode=False,
+            metadata={},
+        ):
+            chunks.append(chunk)
+
+        assert chunks[1].data == {
+            "usage": {
+                "input_tokens": 12,
+                "output_tokens": 7,
+                "total_tokens": 19,
+                "provider": None,
+                "model": "qwen-live",
+                "available": True,
+                "llm_endpoint_id": endpoint_id,
+            }
+        }
+
     def test_parse_review_msg_output_allows_empty_string(self):
         raw = (
             '{"SOUL":{"updated_data":""},'

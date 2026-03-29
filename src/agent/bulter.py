@@ -206,8 +206,11 @@ class Bulter(Agent):
                         timestamp=time.time(),  # type: ignore
                     )
 
+            final_state_usage = await self._extract_usage_from_final_state(config, metadata)
             if usage_payload is None:
-                usage_payload = await self._extract_usage_from_final_state(config, metadata)
+                usage_payload = final_state_usage
+            elif final_state_usage is not None:
+                usage_payload = self._merge_usage_payloads(usage_payload, final_state_usage)
 
             if usage_payload is not None:
                 yield StreamChunk(
@@ -303,6 +306,16 @@ class Bulter(Agent):
         if task_id is not None:
             payload["task_id"] = task_id
         return payload
+
+    @staticmethod
+    def _merge_usage_payloads(
+        primary: Dict[str, Any], fallback: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        merged = dict(primary)
+        for key, value in fallback.items():
+            if merged.get(key) in (None, "") and value not in (None, ""):
+                merged[key] = value
+        return merged
 
     async def review_stm(self, model_set: LLMSet):
         await self._proc_review_stm(Bulter._graph, model_set)
