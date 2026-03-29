@@ -279,6 +279,8 @@ async def level_1_node(
             )
 
             response.additional_kwargs["datetime"] = datetime.now()
+            response.additional_kwargs["llm_endpoint_id"] = str(model_dto.id)
+            response.additional_kwargs["model_name"] = model_dto.model_name
 
             return {"messages": [response]}
         except Exception as exc:
@@ -378,6 +380,8 @@ async def level_2_node(
             )
 
             response.additional_kwargs["datetime"] = datetime.now()
+            response.additional_kwargs["llm_endpoint_id"] = str(model_dto.id)
+            response.additional_kwargs["model_name"] = model_dto.model_name
 
             return {"messages": [response]}
         except Exception as exc:
@@ -477,6 +481,8 @@ async def level_3_node(
             )
 
             response.additional_kwargs["datetime"] = datetime.now()
+            response.additional_kwargs["llm_endpoint_id"] = str(model_dto.id)
+            response.additional_kwargs["model_name"] = model_dto.model_name
 
             return {"messages": [response]}
         except Exception as exc:

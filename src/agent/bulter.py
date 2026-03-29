@@ -116,7 +116,7 @@ class Bulter(Agent):
             # 注入 agent_db_id (自動注入到工具)
             config["configurable"]["agent_db_id"] = self.agent_db_id  # type: ignore
 
-            async for msg, metadata in Bulter._graph.astream(
+            async for msg, stream_metadata in Bulter._graph.astream(
                 {
                     "messages": [
                         HumanMessage(
@@ -129,8 +129,8 @@ class Bulter(Agent):
                 stream_mode="messages",
             ):
                 # Skip messages from Router node
-                if metadata and isinstance(metadata, dict):
-                    langgraph_node = metadata.get("langgraph_node", "")
+                if stream_metadata and isinstance(stream_metadata, dict):
+                    langgraph_node = stream_metadata.get("langgraph_node", "")
                     if langgraph_node == "Router":
                         continue
 
@@ -207,7 +207,7 @@ class Bulter(Agent):
                     )
 
             if usage_payload is None:
-                usage_payload = await self._extract_usage_from_final_state(config)
+                usage_payload = await self._extract_usage_from_final_state(config, metadata)
 
             if usage_payload is not None:
                 yield StreamChunk(
@@ -229,7 +229,7 @@ class Bulter(Agent):
         logger.debug(_("✅ LLM 串流處理完成，agent: %s"), self.agent_id)  # type: ignore
 
     async def _extract_usage_from_final_state(
-        self, config: Dict[str, Any]
+        self, config: Dict[str, Any], metadata: Optional[Dict[str, Any]] = None
     ) -> Optional[Dict[str, Any]]:
         try:
             state = await Bulter._graph.aget_state(config)
@@ -239,7 +239,7 @@ class Bulter(Agent):
         messages = state.values.get("messages", []) if state else []
         for message in reversed(messages):
             if isinstance(message, AIMessage):
-                return self._extract_provider_usage(message)
+                return self._extract_provider_usage(message, metadata)
         return None
 
     @staticmethod
@@ -271,8 +271,26 @@ class Bulter(Agent):
         model = response_metadata.get("model_name") if isinstance(response_metadata, dict) else None
         if model is None and isinstance(metadata, dict):
             model = metadata.get("model_name") or metadata.get("ls_model_name")
+        if model is None:
+            additional_kwargs = getattr(msg, "additional_kwargs", None) or {}
+            if isinstance(additional_kwargs, dict):
+                model = additional_kwargs.get("model_name")
 
-        return {
+        additional_kwargs = getattr(msg, "additional_kwargs", None) or {}
+        if not isinstance(additional_kwargs, dict):
+            additional_kwargs = {}
+
+        llm_endpoint_id = None
+        task_id = None
+        if isinstance(metadata, dict):
+            llm_endpoint_id = metadata.get("llm_endpoint_id")
+            task_id = metadata.get("task_id")
+        if llm_endpoint_id is None:
+            llm_endpoint_id = additional_kwargs.get("llm_endpoint_id")
+        if task_id is None:
+            task_id = additional_kwargs.get("task_id")
+
+        payload = {
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
             "total_tokens": total_tokens,
@@ -280,6 +298,11 @@ class Bulter(Agent):
             "model": model,
             "available": True,
         }
+        if llm_endpoint_id is not None:
+            payload["llm_endpoint_id"] = llm_endpoint_id
+        if task_id is not None:
+            payload["task_id"] = task_id
+        return payload
 
     async def review_stm(self, model_set: LLMSet):
         await self._proc_review_stm(Bulter._graph, model_set)

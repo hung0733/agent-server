@@ -78,6 +78,22 @@ class TokenUsage(Base):
         index=False,  # Custom index defined in __table_args__
     )
     """Foreign key reference to the agent instance that processed the request."""
+
+    task_id: Mapped[UUID | None] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("tasks.id", ondelete="SET NULL"),
+        nullable=True,
+        index=False,
+    )
+    """Optional foreign key reference to the originating task row."""
+
+    llm_endpoint_id: Mapped[UUID | None] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("llm_endpoints.id", ondelete="SET NULL"),
+        nullable=True,
+        index=False,
+    )
+    """Optional foreign key reference to the selected LLM endpoint."""
     
     session_id: Mapped[str] = mapped_column(
         Text,
@@ -127,6 +143,8 @@ class TokenUsage(Base):
     __table_args__ = (
         Index("idx_token_usage_user_created", "user_id", "created_at"),
         Index("idx_token_usage_session", "session_id"),
+        Index("idx_token_usage_task", "task_id"),
+        Index("idx_token_usage_llm_endpoint", "llm_endpoint_id"),
         {"extend_existing": True},
     )
     

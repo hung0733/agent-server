@@ -74,6 +74,8 @@ class TokenUsageDAO:
         entity = TokenUsageEntity(
             user_id=dto.user_id,
             agent_id=dto.agent_id,
+            task_id=dto.task_id,
+            llm_endpoint_id=dto.llm_endpoint_id,
             session_id=dto.session_id,
             model_name=dto.model_name,
             input_tokens=dto.input_tokens,
