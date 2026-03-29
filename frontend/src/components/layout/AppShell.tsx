@@ -4,10 +4,16 @@ import { useTranslation } from "react-i18next";
 import { fetchOverview } from "../../api/dashboard";
 import { DashboardOverviewContext } from "../../context/dashboard-overview";
 import { useDashboardResource } from "../../hooks/useDashboardResource";
-import { formatDateTime } from "../../lib/format";
 import { overviewPayload } from "../../mock/dashboard";
 import Sidebar from "./Sidebar";
 import StatusRail from "./StatusRail";
+
+function formatDateTime(value: string, locale: string): string {
+  return new Intl.DateTimeFormat(locale, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
+}
 
 export default function AppShell({ children }: PropsWithChildren) {
   const { i18n, t } = useTranslation();
