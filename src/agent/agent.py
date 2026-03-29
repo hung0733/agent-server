@@ -3,13 +3,13 @@ from typing import Any, List
 
 from langchain_core.messages import RemoveMessage, HumanMessage
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
 from db.crypto import CryptoManager
 from db.dao.llm_endpoint_dao import LLMEndpointDAO
 from db.dto.memory_block_dto import MemoryBlock
 from i18n import _
 from models.llm import LLMSet
+from models.llm import build_streaming_chat_openai
 from utils.tools import Tools
 
 logger = logging.getLogger(__name__)
@@ -222,11 +222,10 @@ class Agent:
                         else:
                             api_key = "EMPTY"  # Placeholder for local models
 
-                        model: BaseChatModel = ChatOpenAI(
+                        model: BaseChatModel = build_streaming_chat_openai(
                             base_url=model_dto.base_url,
                             api_key=SecretStr(api_key),
-                            model=model_dto.model_name,
-                            streaming=True,
+                            model_name=model_dto.model_name,
                         )
 
                         model = model.bind(

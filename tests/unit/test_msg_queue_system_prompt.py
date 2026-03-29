@@ -96,3 +96,55 @@ class TestMsgQueueSystemPromptOverride:
         await MsgQueueHandler.send_llm_msg(task)
 
         assert started_tasks == []
+
+    async def test_send_llm_msg_includes_provider_usage_in_completion_result(self):
+        async def _fake_stream():
+            yield StreamChunk(chunk_type="content", content="hello")
+            yield StreamChunk(
+                chunk_type="usage",
+                data={
+                    "usage": {
+                        "input_tokens": 12,
+                        "output_tokens": 7,
+                        "total_tokens": 19,
+                        "provider": "openai",
+                        "model": "gpt-test",
+                        "available": True,
+                    }
+                },
+            )
+
+        task = QueueTask(
+            agent_id="agent-001",
+            session_id="session-001",
+            message="hello",
+            metadata={},
+        )
+        task.agent = SimpleNamespace(
+            send=lambda **_kwargs: _fake_stream(),
+            review_stm=AsyncMock(),
+            session_db_id="00000000-0000-0000-0000-000000000001",
+            agent_db_id="00000000-0000-0000-0000-000000000002",
+        )
+        task.model_set = object()
+        task.packed_prompt = "prompt"
+        task.packed_message = "message"
+        complete_callback = AsyncMock()
+        object.__setattr__(task, "complete_callback", complete_callback)
+
+        await MsgQueueHandler.send_llm_msg(task)
+
+        complete_callback.assert_awaited_once_with(
+            {
+                "task_id": task.id,
+                "status": "completed",
+                "usage": {
+                    "input_tokens": 12,
+                    "output_tokens": 7,
+                    "total_tokens": 19,
+                    "provider": "openai",
+                    "model": "gpt-test",
+                    "available": True,
+                },
+            }
+        )

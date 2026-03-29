@@ -97,6 +97,7 @@ class Bulter(Agent):
         )
         logger.debug(_("📝 消息長度：%s, think_mode: %s"), len(message), think_mode)  # type: ignore
         try:
+            usage_payload: Optional[Dict[str, Any]] = None
             thread_id = self.session_id
             if metadata and isinstance(metadata, dict):
                 thread_id_override = metadata.get("thread_id_override")
@@ -135,6 +136,9 @@ class Bulter(Agent):
 
                 # 我哋只處理 LLM 嘔出嚟嘅 Chunk，忽略其他 LangGraph 嘅系統事件
                 if isinstance(msg, AIMessageChunk):
+                    chunk_usage = self._extract_provider_usage(msg, metadata)
+                    if chunk_usage is not None:
+                        usage_payload = chunk_usage
 
                     # 處理 Thinking (思考)
                     reasoning_content = msg.additional_kwargs.get("reasoning_content")
@@ -201,6 +205,16 @@ class Bulter(Agent):
                         content=content,
                         timestamp=time.time(),  # type: ignore
                     )
+
+            if usage_payload is None:
+                usage_payload = await self._extract_usage_from_final_state(config)
+
+            if usage_payload is not None:
+                yield StreamChunk(
+                    chunk_type="usage",
+                    data={"usage": usage_payload},
+                    timestamp=time.time(),  # type: ignore
+                )
         except Exception as e:
             logger.error(
                 _("❌ LLM 處理失敗，agentId: %s, sessionId: %s (%s): %s"),  # type: ignore
@@ -213,6 +227,57 @@ class Bulter(Agent):
             raise
 
         logger.debug(_("✅ LLM 串流處理完成，agent: %s"), self.agent_id)  # type: ignore
+
+    async def _extract_usage_from_final_state(
+        self, config: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        try:
+            state = await Bulter._graph.aget_state(config)
+        except Exception:
+            return None
+
+        messages = state.values.get("messages", []) if state else []
+        for message in reversed(messages):
+            if isinstance(message, AIMessage):
+                return self._extract_provider_usage(message)
+        return None
+
+    @staticmethod
+    def _extract_provider_usage(
+        msg: AIMessage | AIMessageChunk, metadata: Optional[Dict[str, Any]] = None
+    ) -> Optional[Dict[str, Any]]:
+        usage_metadata = getattr(msg, "usage_metadata", None)
+        response_metadata = getattr(msg, "response_metadata", None) or {}
+
+        if isinstance(usage_metadata, dict):
+            input_tokens = usage_metadata.get("input_tokens")
+            output_tokens = usage_metadata.get("output_tokens")
+            total_tokens = usage_metadata.get("total_tokens")
+        else:
+            token_usage = response_metadata.get("token_usage") if isinstance(response_metadata, dict) else None
+            if not isinstance(token_usage, dict):
+                return None
+            input_tokens = token_usage.get("prompt_tokens")
+            output_tokens = token_usage.get("completion_tokens")
+            total_tokens = token_usage.get("total_tokens")
+
+        if input_tokens is None and output_tokens is None and total_tokens is None:
+            return None
+
+        provider = None
+        if isinstance(metadata, dict):
+            provider = metadata.get("ls_provider")
+
+        model = response_metadata.get("model_name") if isinstance(response_metadata, dict) else None
+
+        return {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": total_tokens,
+            "provider": provider,
+            "model": model,
+            "available": True,
+        }
 
     async def review_stm(self, model_set: LLMSet):
         await self._proc_review_stm(Bulter._graph, model_set)

@@ -6,7 +6,6 @@ import re
 from typing import Annotated, Sequence, TypedDict
 from langchain_core.messages import BaseMessage, AIMessage, SystemMessage, RemoveMessage
 from langgraph.graph.message import add_messages
-from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph, START, END
 from langchain_core.runnables import RunnableConfig
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -17,6 +16,7 @@ from db.crypto import CryptoManager
 from db.dao.llm_endpoint_dao import LLMEndpointDAO
 from graph.graph_node import GraphNode
 from i18n import _
+from models.llm import build_streaming_chat_openai
 from tools.tools import get_tools
 from utils.tools import Tools
 
@@ -244,11 +244,10 @@ async def level_1_node(
             else:
                 api_key = "EMPTY"  # Placeholder for local models
 
-            model: BaseChatModel = ChatOpenAI(
+            model: BaseChatModel = build_streaming_chat_openai(
                 base_url=model_dto.base_url,
                 api_key=SecretStr(api_key),
-                model=model_dto.model_name,
-                streaming=True,
+                model_name=model_dto.model_name,
             )
 
             # 4. 綁定 Tools 落 9B
@@ -344,11 +343,10 @@ async def level_2_node(
             else:
                 api_key = "EMPTY"  # Placeholder for local models
 
-            model: BaseChatModel = ChatOpenAI(
+            model: BaseChatModel = build_streaming_chat_openai(
                 base_url=model_dto.base_url,
                 api_key=SecretStr(api_key),
-                model=model_dto.model_name,
-                streaming=True,
+                model_name=model_dto.model_name,
             )
 
             # 4. 綁定 Tools 落 27B
@@ -444,11 +442,10 @@ async def level_3_node(
             else:
                 api_key = "EMPTY"  # Placeholder for local models
 
-            model: BaseChatModel = ChatOpenAI(
+            model: BaseChatModel = build_streaming_chat_openai(
                 base_url=model_dto.base_url,
                 api_key=SecretStr(api_key),
-                model=model_dto.model_name,
-                streaming=True,
+                model_name=model_dto.model_name,
             )
 
             # 4. 綁定 Tools 落 122B

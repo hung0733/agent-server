@@ -7,6 +7,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
+from langchain_core.messages import AIMessage, AIMessageChunk
+
 from db.dto.memory_block_dto import MemoryBlock
 from db.types import MessageType
 from msg_queue.models import StreamChunk
@@ -31,6 +33,125 @@ async def _stream_with_content(content: str):
 
 
 class TestBulterReviewMsg:
+    async def test_send_emits_provider_usage_chunk_from_response_metadata(self, monkeypatch):
+        async def _fake_astream(*_args, **_kwargs):
+            yield (
+                AIMessageChunk(
+                    content="hello",
+                    response_metadata={
+                        "token_usage": {
+                            "prompt_tokens": 12,
+                            "completion_tokens": 7,
+                            "total_tokens": 19,
+                        },
+                        "model_name": "gpt-test",
+                    },
+                ),
+                {"langgraph_node": "Butler"},
+            )
+
+        monkeypatch.setattr(
+            "graph.graph_node.GraphNode.prepare_chat_node_config",
+            lambda *_args, **_kwargs: {"configurable": {}},
+        )
+        monkeypatch.setattr(Bulter, "_graph", SimpleNamespace(astream=_fake_astream))
+
+        butler = Bulter(
+            agent_db_id="agent-db-1",
+            session_db_id="session-db-1",
+            agent_id="agent-001",
+            session_id="session-001",
+            involves_secrets=False,
+            name="Butler",
+        )
+
+        chunks = []
+        async for chunk in butler.send(
+            models=[],
+            sys_prompt="prompt",
+            message="hello",
+            think_mode=False,
+            metadata={},
+        ):
+            chunks.append(chunk)
+
+        assert [chunk.chunk_type for chunk in chunks] == ["content", "usage"]
+        assert chunks[1].data == {
+            "usage": {
+                "input_tokens": 12,
+                "output_tokens": 7,
+                "total_tokens": 19,
+                "provider": None,
+                "model": "gpt-test",
+                "available": True,
+            }
+        }
+
+    async def test_send_falls_back_to_final_graph_state_usage(self, monkeypatch):
+        async def _fake_astream(*_args, **_kwargs):
+            yield (AIMessageChunk(content="hello"), {"langgraph_node": "Butler"})
+
+        async def _fake_aget_state(_config):
+            return SimpleNamespace(
+                values={
+                    "messages": [
+                        AIMessage(
+                            content="hello",
+                            usage_metadata={
+                                "input_tokens": 21,
+                                "output_tokens": 4,
+                                "total_tokens": 25,
+                            },
+                            response_metadata={
+                                "model_name": "qwen-live",
+                                "model_provider": "openai",
+                            },
+                        )
+                    ]
+                }
+            )
+
+        monkeypatch.setattr(
+            "graph.graph_node.GraphNode.prepare_chat_node_config",
+            lambda *_args, **_kwargs: {"configurable": {}},
+        )
+        monkeypatch.setattr(
+            Bulter,
+            "_graph",
+            SimpleNamespace(astream=_fake_astream, aget_state=_fake_aget_state),
+        )
+
+        butler = Bulter(
+            agent_db_id="agent-db-1",
+            session_db_id="session-db-1",
+            agent_id="agent-001",
+            session_id="session-001",
+            involves_secrets=False,
+            name="Butler",
+        )
+
+        chunks = []
+        async for chunk in butler.send(
+            models=[],
+            sys_prompt="prompt",
+            message="hello",
+            think_mode=False,
+            metadata={},
+        ):
+            chunks.append(chunk)
+
+        assert [chunk.chunk_type for chunk in chunks] == ["content", "usage"]
+        assert chunks[1].data == {
+            "usage": {
+                "input_tokens": 21,
+                "output_tokens": 4,
+                "total_tokens": 25,
+                "provider": None,
+                "model": "qwen-live",
+                "available": True,
+            }
+        }
+
     def test_parse_review_msg_output_allows_empty_string(self):
         raw = (
             '{"SOUL":{"updated_data":""},'
