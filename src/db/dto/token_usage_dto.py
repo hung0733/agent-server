@@ -102,6 +102,18 @@ class TokenUsageCreate(TokenUsageBase):
     )
     """Foreign key to the agent instance."""
 
+    task_id: Optional[UUID] = Field(
+        default=None,
+        description="Optional ID of the originating task row",
+    )
+    """Optional foreign key to the task row."""
+
+    llm_endpoint_id: Optional[UUID] = Field(
+        default=None,
+        description="Optional ID of the selected LLM endpoint",
+    )
+    """Optional foreign key to the selected LLM endpoint."""
+
 
 class TokenUsageUpdate(BaseModel):
     """DTO for updating a token usage record.
@@ -155,6 +167,18 @@ class TokenUsage(TokenUsageBase):
         description="ID of the agent instance that processed the request",
     )
     """Foreign key to the agent instance."""
+
+    task_id: Optional[UUID] = Field(
+        default=None,
+        description="Optional ID of the originating task row",
+    )
+    """Optional foreign key to the task row."""
+
+    llm_endpoint_id: Optional[UUID] = Field(
+        default=None,
+        description="Optional ID of the selected LLM endpoint",
+    )
+    """Optional foreign key to the selected LLM endpoint."""
     
     created_at: datetime = Field(
         default_factory=now_utc,
