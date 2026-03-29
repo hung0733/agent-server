@@ -276,9 +276,12 @@ class MsgQueueHandler:
             content: str = ""
             tool_args: str = ""
             chunk_type = ""
+            usage_payload: Optional[Dict[str, Any]] = None
 
             async for chunk in gen:
                 await task.stream_callback(chunk)
+                if chunk.chunk_type == "usage" and chunk.data:
+                    usage_payload = chunk.data.get("usage")
                 if not chunk_type and chunk_type != chunk.chunk_type:
                     if len(content) > 0:
                         llm_response_content.append(
@@ -349,7 +352,10 @@ class MsgQueueHandler:
 
             await task.stream_callback(StreamChunk(chunk_type="done"))
             task.update_state(QueueTaskState.COMPLETED)
-            await task.complete_callback({"task_id": task.id, "status": "completed"})
+            result = {"task_id": task.id, "status": "completed"}
+            if usage_payload is not None:
+                result["usage"] = usage_payload
+            await task.complete_callback(result)
 
         except Exception as exc:
             logger.error(_("Task %s: send_llm_msg failed: %s"), task.id, exc)

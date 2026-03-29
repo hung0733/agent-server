@@ -16,6 +16,21 @@ from utils.tools import Tools
 logger = logging.getLogger(__name__)
 
 
+def build_streaming_chat_openai(
+    *,
+    base_url: str,
+    api_key: SecretStr,
+    model_name: str,
+) -> ChatOpenAI:
+    return ChatOpenAI(
+        base_url=base_url,
+        api_key=api_key,
+        model=model_name,
+        streaming=True,
+        stream_usage=True,
+    )
+
+
 class LLMSet(BaseModel):
     rte_model: BaseChatModel
     level: Dict[int, list[LLMEndpoint]]
@@ -27,11 +42,10 @@ class LLMSet(BaseModel):
     def from_model(cls, end_points: list[LLMEndpointWithLevel]):
         logger.debug(_("LLMSet.from_model: 收到 %d 個端點"), len(end_points))
 
-        rte_model: BaseChatModel = ChatOpenAI(
+        rte_model: BaseChatModel = build_streaming_chat_openai(
             base_url=Tools.require_env("ROUTING_LLM_ENDPOINT"),
             api_key=SecretStr(Tools.require_env("ROUTING_LLM_API_KEY")),
-            model=Tools.require_env("ROUTING_LLM_MODEL"),
-            streaming=True,
+            model_name=Tools.require_env("ROUTING_LLM_MODEL"),
         )
         level: Dict[int, list[LLMEndpoint]] = {1: [], 2: [], 3: []}
         sec_level: Dict[int, list[LLMEndpoint]] = {1: [], 2: [], 3: []}
