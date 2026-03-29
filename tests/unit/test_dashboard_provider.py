@@ -94,8 +94,9 @@ async def test_get_tasks_merges_user_queue_and_messages_sorted_newest_first(monk
         assert user_id_value == user_id
         return user_agents
 
-    async def fake_get_tasks(limit=8, status=None):
+    async def fake_get_tasks(limit=8, offset=0, status=None):
         assert limit == 8
+        assert offset == 0
         return task_rows
 
     async def fake_get_messages(limit=8, offset=0, message_type=None, session=None):
@@ -136,7 +137,8 @@ async def test_get_tasks_returns_empty_items_without_user_scoped_activity(monkey
         assert user_id_value == user_id
         return [_agent(agent_id=user_agent, user_id=user_id, name="Owner")]
 
-    async def fake_get_tasks(limit=8, status=None):
+    async def fake_get_tasks(limit=8, offset=0, status=None):
+        assert offset == 0
         return [_task(queue_id=uuid4(), task_id=uuid4(), claimed_by=outsider, queued_at=now)]
 
     async def fake_get_messages(limit=8, offset=0, message_type=None, session=None):
@@ -172,7 +174,8 @@ async def test_get_memory_returns_structured_user_scoped_summary(monkeypatch) ->
             _agent(agent_id=agent_beta, user_id=user_id, name="Beta"),
         ]
 
-    async def fake_get_tasks(limit=8, status=None):
+    async def fake_get_tasks(limit=8, offset=0, status=None):
+        assert offset == 0
         return [
             _task(
                 queue_id=uuid4(),
@@ -227,3 +230,67 @@ async def test_get_memory_returns_structured_user_scoped_summary(monkeypatch) ->
     assert payload["recentEntries"][0]["summary"] == "Shared launch notes with final blockers."
     assert payload["recentEntries"][1]["kind"] == "task"
     assert payload["recentEntries"][1]["agent"] == "Alpha"
+
+
+@pytest.mark.asyncio
+async def test_user_scoped_activity_is_found_beyond_initial_global_limit(monkeypatch) -> None:
+    provider = DashboardDataProvider(queue=object(), dedup=object())
+    user_id = uuid4()
+    user_agent = uuid4()
+    outsider = uuid4()
+    now = datetime(2026, 3, 29, 12, 0, tzinfo=UTC)
+
+    async def fake_get_agents(user_id_value, limit=100):
+        assert user_id_value == user_id
+        return [
+            _agent(agent_id=user_agent, user_id=user_id, name="Primary Agent"),
+            _agent(agent_id=uuid4(), user_id=user_id, name="fallback"),
+        ]
+
+    task_rows = [
+        _task(queue_id=uuid4(), task_id=uuid4(), claimed_by=outsider, queued_at=now - timedelta(minutes=index))
+        for index in range(8)
+    ] + [
+        _task(
+            queue_id=uuid4(),
+            task_id=uuid4(),
+            claimed_by=user_agent,
+            queued_at=now - timedelta(minutes=20),
+            result_json={"origin": "scheduler"},
+        )
+    ]
+    message_rows = [
+        _message(message_id=uuid4(), created_at=now - timedelta(minutes=index), sender_agent_id=outsider)
+        for index in range(8)
+    ] + [
+        _message(
+            message_id=uuid4(),
+            created_at=now - timedelta(minutes=15),
+            sender_agent_id=user_agent,
+            content_json={"content": "User-owned activity should still be included."},
+        )
+    ]
+
+    async def fake_get_tasks(limit=8, offset=0, status=None):
+        return task_rows[offset : offset + limit]
+
+    async def fake_get_messages(limit=8, offset=0, message_type=None, session=None):
+        return message_rows[offset : offset + limit]
+
+    monkeypatch.setattr(dashboard_module.AgentInstanceDAO, "get_by_user_id", fake_get_agents)
+    monkeypatch.setattr(dashboard_module.TaskQueueDAO, "get_all", fake_get_tasks)
+    monkeypatch.setattr(
+        dashboard_module,
+        "AgentMessageDAO",
+        SimpleNamespace(get_all=fake_get_messages),
+        raising=False,
+    )
+
+    tasks_payload = await provider.get_tasks(user_id=user_id)
+    memory_payload = await provider.get_memory(user_id=user_id)
+
+    assert [item["sourceAgent"] for item in tasks_payload["items"]] == ["Primary Agent", "Primary Agent"]
+    assert tasks_payload["items"][0]["type"] == "message"
+    assert tasks_payload["items"][1]["origin"] == "scheduler"
+    assert memory_payload["stats"] == {"agents": 2, "tasks": 1, "messages": 1}
+    assert [entry["agent"] for entry in memory_payload["recentEntries"]] == ["Primary Agent", "Primary Agent"]

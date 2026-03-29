@@ -73,6 +73,10 @@ def _summarize_message_content(content: Any) -> str:
     return ""
 
 
+def _agent_display_name(agent: Any) -> str:
+    return agent.name or agent.agent_id or f"agent-{str(agent.id)[:8]}"
+
+
 @dataclass(slots=True)
 class DashboardDataProvider:
     """Build dashboard responses from mixed real and assembled data."""
@@ -176,14 +180,12 @@ class DashboardDataProvider:
 
     async def get_tasks(self, user_id=None) -> dict[str, Any]:
         agent_lookup = await self._get_agent_name_lookup(user_id=user_id)
-        task_rows = await self._get_task_rows(limit=8)
-        message_rows = await self._get_message_rows(limit=8)
+        agent_ids = set(agent_lookup)
+        task_rows = await self._get_user_scoped_task_rows(agent_ids=agent_ids, limit=8)
+        message_rows = await self._get_user_scoped_message_rows(agent_ids=agent_ids, limit=8)
         items = []
 
         for task in task_rows:
-            if task.claimed_by not in agent_lookup:
-                continue
-
             context = task.result_json if isinstance(task.result_json, dict) else {}
             items.append(
                 {
@@ -204,9 +206,6 @@ class DashboardDataProvider:
             )
 
         for message in message_rows:
-            if message.sender_agent_id not in agent_lookup and message.receiver_agent_id not in agent_lookup:
-                continue
-
             snippet = _summarize_message_content(message.content_json) or "最近消息已記錄。"
             items.append(
                 {
@@ -234,12 +233,9 @@ class DashboardDataProvider:
 
     async def get_memory(self, user_id=None) -> dict[str, Any]:
         agent_lookup = await self._get_agent_name_lookup(user_id=user_id)
-        task_rows = [task for task in await self._get_task_rows(limit=8) if task.claimed_by in agent_lookup]
-        message_rows = [
-            message
-            for message in await self._get_message_rows(limit=8)
-            if message.sender_agent_id in agent_lookup or message.receiver_agent_id in agent_lookup
-        ]
+        agent_ids = set(agent_lookup)
+        task_rows = await self._get_user_scoped_task_rows(agent_ids=agent_ids, limit=8)
+        message_rows = await self._get_user_scoped_message_rows(agent_ids=agent_ids, limit=8)
 
         recent_entries = []
         for task in task_rows:
@@ -299,7 +295,7 @@ class DashboardDataProvider:
             agents.append(
                 {
                     "id": str(row.id),
-                    "name": row.name or row.agent_id or f"agent-{str(row.id)[:8]}",
+                    "name": _agent_display_name(row),
                     "role": "主控與協調" if not row.is_sub_agent else "協作子代理",
                     "status": _map_agent_status(row.status),
                     "currentTask": "等待後端聚合輸出",
@@ -339,9 +335,51 @@ class DashboardDataProvider:
             rows = []
 
         return {
-            row.id: (row.name or row.agent_id or f"agent-{str(row.id)[:8]}")
+            row.id: _agent_display_name(row)
             for row in rows
         }
+
+    async def _get_user_scoped_task_rows(self, agent_ids: set[Any], limit: int) -> list[Any]:
+        if not agent_ids:
+            return []
+
+        rows = []
+        offset = 0
+        batch_size = max(limit, 8)
+        while len(rows) < limit:
+            batch = await self._get_task_rows(limit=batch_size, offset=offset)
+            if not batch:
+                break
+
+            rows.extend(task for task in batch if task.claimed_by in agent_ids)
+            offset += len(batch)
+            if len(batch) < batch_size:
+                break
+
+        return rows[:limit]
+
+    async def _get_user_scoped_message_rows(self, agent_ids: set[Any], limit: int) -> list[Any]:
+        if not agent_ids:
+            return []
+
+        rows = []
+        offset = 0
+        batch_size = max(limit, 8)
+        while len(rows) < limit:
+            batch = await self._get_message_rows(limit=batch_size, offset=offset)
+            if not batch:
+                break
+
+            rows.extend(
+                message
+                for message in batch
+                if message.sender_agent_id in agent_ids or message.receiver_agent_id in agent_ids
+            )
+            offset += len(batch)
+            if len(batch) < batch_size:
+                break
+
+        return rows[:limit]
 
     async def _get_usage_totals(self, user_id=None) -> dict[str, Any]:
         today_tokens = 0
@@ -387,14 +425,14 @@ class DashboardDataProvider:
         except Exception:
             return 0
 
-    async def _get_task_rows(self, limit: int):
+    async def _get_task_rows(self, limit: int, offset: int = 0):
         try:
-            return await TaskQueueDAO.get_all(limit=limit)
+            return await TaskQueueDAO.get_all(limit=limit, offset=offset)
         except Exception:
             return []
 
-    async def _get_message_rows(self, limit: int):
+    async def _get_message_rows(self, limit: int, offset: int = 0):
         try:
-            return await AgentMessageDAO.get_all(limit=limit)
+            return await AgentMessageDAO.get_all(limit=limit, offset=offset)
         except Exception:
             return []
