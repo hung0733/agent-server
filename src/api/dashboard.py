@@ -9,6 +9,7 @@ from typing import Any
 
 from db.dao.agent_instance_dao import AgentInstanceDAO
 from db.dao.agent_message_dao import AgentMessageDAO
+from db.dao.api_key_dao import APIKeyDAO
 from db.dao.llm_endpoint_dao import LLMEndpointDAO
 from db.dao.llm_endpoint_group_dao import LLMEndpointGroupDAO
 from db.dao.llm_level_endpoint_dao import LLMLevelEndpointDAO
@@ -288,6 +289,10 @@ class DashboardDataProvider:
             group_rows = await LLMEndpointGroupDAO.get_by_user_id(user_id)
         except Exception:
             group_rows = []
+        try:
+            api_key_rows = await APIKeyDAO.get_by_user_id(user_id)
+        except Exception:
+            api_key_rows = []
 
         for row in endpoint_rows:
             endpoints.append(
@@ -328,11 +333,25 @@ class DashboardDataProvider:
                 }
             )
 
+        auth_keys = []
+        for row in api_key_rows:
+            auth_keys.append(
+                {
+                    "id": str(row.id),
+                    "name": row.name or "未命名 Key",
+                    "isActive": row.is_active,
+                    "lastUsedAt": row.last_used_at.isoformat() if row.last_used_at else None,
+                    "expiresAt": row.expires_at.isoformat() if row.expires_at else None,
+                    "createdAt": row.created_at.isoformat(),
+                }
+            )
+
         return {
             "locales": ["zh-HK", "en"],
             "featureFlags": {"dashboardApi": True},
             "endpoints": endpoints,
             "groups": groups,
+            "authKeys": auth_keys,
             "source": "mixed",
         }
 

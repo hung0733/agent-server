@@ -668,6 +668,20 @@ textarea {
   color: #ffb4a8;
 }
 
+.settings-secret-panel {
+  margin-bottom: 16px;
+  display: grid;
+  gap: 10px;
+}
+
+.settings-secret-panel code {
+  display: block;
+  word-break: break-all;
+  padding: 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
 .settings-endpoint-form {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -701,6 +715,10 @@ textarea {
   align-items: center;
   gap: 16px;
   padding-top: 4px;
+}
+
+.settings-form-footer--single {
+  justify-content: flex-end;
 }
 
 .settings-form-actions {

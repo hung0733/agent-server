@@ -2,9 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   createSettingsEndpoint,
+  createAuthKey,
+  deleteAuthKey,
   deleteSettingsEndpoint,
   fetchSettings,
+  regenerateAuthKey,
   saveSettingsMapping,
+  updateAuthKey,
   updateSettingsEndpoint,
 } from "../api/dashboard";
 import SectionHeader from "../components/ui/SectionHeader";
@@ -29,6 +33,22 @@ const emptyForm: EndpointFormState = {
   isActive: true,
 };
 
+type AuthKeyFormState = {
+  name: string;
+  expiresAt: string;
+};
+
+const emptyAuthKeyForm: AuthKeyFormState = {
+  name: "",
+  expiresAt: "",
+};
+
+function formatSettingDate(value: string | null): string {
+  if (!value) return "-";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString("zh-HK");
+}
+
 export default function SettingsPage() {
   const { t } = useTranslation();
   const { isLoading, resource: payload } = useDashboardResource(fetchSettings, settingsPayload, {
@@ -36,7 +56,9 @@ export default function SettingsPage() {
   });
   const [settings, setSettings] = useState<SettingsPayload>(settingsPayload);
   const [form, setForm] = useState<EndpointFormState>(emptyForm);
+  const [authKeyForm, setAuthKeyForm] = useState<AuthKeyFormState>(emptyAuthKeyForm);
   const [error, setError] = useState<string | null>(null);
+  const [rawKeyNotice, setRawKeyNotice] = useState<string | null>(null);
 
   useEffect(() => {
     setSettings(payload);
@@ -49,6 +71,7 @@ export default function SettingsPage() {
 
   async function submitEndpoint() {
     setError(null);
+    setRawKeyNotice(null);
     const body = {
       name: form.name,
       baseUrl: form.baseUrl,
@@ -80,6 +103,7 @@ export default function SettingsPage() {
 
   async function removeEndpoint(endpointId: string) {
     setError(null);
+    setRawKeyNotice(null);
     try {
       await deleteSettingsEndpoint(endpointId);
       setSettings((current) => ({
@@ -98,6 +122,7 @@ export default function SettingsPage() {
     endpointId: string,
   ) {
     setError(null);
+    setRawKeyNotice(null);
     try {
       const response = await saveSettingsMapping({
         groupId,
@@ -120,6 +145,61 @@ export default function SettingsPage() {
     }
   }
 
+  async function submitAuthKey() {
+    setError(null);
+    try {
+      const response = await createAuthKey({
+        name: authKeyForm.name || null,
+        expiresAt: authKeyForm.expiresAt || null,
+      });
+      setSettings((current) => ({ ...current, authKeys: [response.key, ...current.authKeys] }));
+      setRawKeyNotice(response.rawKey);
+      setAuthKeyForm(emptyAuthKeyForm);
+    } catch (authKeyError) {
+      setError(authKeyError instanceof Error ? authKeyError.message : "建立 Auth Key 失敗");
+    }
+  }
+
+  async function toggleAuthKey(keyId: string, isActive: boolean) {
+    setError(null);
+    try {
+      const response = await updateAuthKey(keyId, { isActive: !isActive });
+      setSettings((current) => ({
+        ...current,
+        authKeys: current.authKeys.map((item) => (item.id === keyId ? response.key : item)),
+      }));
+    } catch (authKeyError) {
+      setError(authKeyError instanceof Error ? authKeyError.message : "更新 Auth Key 失敗");
+    }
+  }
+
+  async function removeAuthKey(keyId: string) {
+    setError(null);
+    try {
+      await deleteAuthKey(keyId);
+      setSettings((current) => ({
+        ...current,
+        authKeys: current.authKeys.filter((item) => item.id !== keyId),
+      }));
+    } catch (authKeyError) {
+      setError(authKeyError instanceof Error ? authKeyError.message : "刪除 Auth Key 失敗");
+    }
+  }
+
+  async function regenerateKey(keyId: string, name: string, expiresAt: string | null) {
+    setError(null);
+    try {
+      const response = await regenerateAuthKey(keyId, { name, expiresAt });
+      setSettings((current) => ({
+        ...current,
+        authKeys: [response.key, ...current.authKeys.map((item) => (item.id === keyId ? { ...item, isActive: false } : item))],
+      }));
+      setRawKeyNotice(response.rawKey);
+    } catch (authKeyError) {
+      setError(authKeyError instanceof Error ? authKeyError.message : "重新產生 Auth Key 失敗");
+    }
+  }
+
   if (isLoading) {
     return <section className="card dashboard-loading">正在載入控制台...</section>;
   }
@@ -128,6 +208,12 @@ export default function SettingsPage() {
     <section>
       <SectionHeader title={t("settings.title")} subtitle={t("settings.subtitle")} />
       {error ? <article className="card settings-error">{error}</article> : null}
+      {rawKeyNotice ? (
+        <article className="card settings-secret-panel">
+          <h3>新 Auth Key（只顯示一次）</h3>
+          <code>{rawKeyNotice}</code>
+        </article>
+      ) : null}
 
       <article className="card settings-section">
         <div className="settings-section__header">
@@ -237,6 +323,60 @@ export default function SettingsPage() {
               </section>
             );
           })}
+        </div>
+      </article>
+
+      <article className="card settings-section">
+        <div className="settings-section__header">
+          <div>
+            <h3>Auth Keys</h3>
+            <p>建立、停用、刪除或重新產生你自己嘅 dashboard auth key。</p>
+          </div>
+        </div>
+
+        <div className="settings-endpoint-form">
+          <label className="settings-field">
+            <span>名稱</span>
+            <input value={authKeyForm.name} onChange={(event) => setAuthKeyForm((current) => ({ ...current, name: event.target.value }))} placeholder="例如：Dashboard main" />
+          </label>
+          <label className="settings-field">
+            <span>到期時間</span>
+            <input type="datetime-local" value={authKeyForm.expiresAt} onChange={(event) => setAuthKeyForm((current) => ({ ...current, expiresAt: event.target.value }))} />
+          </label>
+          <div className="settings-form-footer settings-form-footer--single">
+            <div className="settings-form-actions">
+              <button className="button button--primary" type="button" onClick={submitAuthKey}>
+                建立 Auth Key
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="settings-endpoint-list">
+          {settings.authKeys.map((key) => (
+            <article className="settings-endpoint-item" key={key.id}>
+              <div>
+                <strong>{key.name}</strong>
+                <p>建立時間：{formatSettingDate(key.createdAt)}</p>
+                <p>最後使用：{formatSettingDate(key.lastUsedAt)}</p>
+                <p>到期時間：{formatSettingDate(key.expiresAt)}</p>
+              </div>
+              <div className="settings-endpoint-item__meta">
+                <span>{key.isActive ? "啟用中" : "已停用"}</span>
+              </div>
+              <div className="settings-endpoint-item__actions">
+                <button type="button" onClick={() => toggleAuthKey(key.id, key.isActive)}>
+                  {key.isActive ? "停用" : "啟用"}
+                </button>
+                <button type="button" onClick={() => regenerateKey(key.id, key.name, key.expiresAt)}>
+                  重新產生
+                </button>
+                <button type="button" onClick={() => removeAuthKey(key.id)}>
+                  刪除
+                </button>
+              </div>
+            </article>
+          ))}
         </div>
       </article>
     </section>

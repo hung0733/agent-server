@@ -4,18 +4,31 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import secrets
 from typing import TYPE_CHECKING
 from uuid import UUID
+from datetime import datetime
 
 from aiohttp import web
 
 from api.auth import DashboardAuthService
+from api.auth import hash_api_key
 from api.dashboard import DashboardDataProvider
+from db.dao.api_key_dao import APIKeyDAO
 from db.crypto import CryptoManager
 from db.dao.llm_endpoint_dao import LLMEndpointDAO
 from db.dao.llm_endpoint_group_dao import LLMEndpointGroupDAO
 from db.dao.llm_level_endpoint_dao import LLMLevelEndpointDAO
 from db.dto.llm_endpoint_dto import LLMEndpointCreate, LLMEndpointUpdate, LLMLevelEndpointCreate
+from db.dto.user_dto import APIKeyCreate, APIKeyUpdate
+
+
+def _parse_optional_datetime(value):
+    if not value:
+        return None
+    if isinstance(value, str):
+        return datetime.fromisoformat(value)
+    return value
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -229,6 +242,85 @@ async def _settings_put_mapping(request: web.Request) -> web.Response:
     )
 
 
+def _serialize_auth_key(key) -> dict:
+    return {
+        "id": str(key.id),
+        "name": key.name or "未命名 Key",
+        "isActive": key.is_active,
+        "lastUsedAt": key.last_used_at.isoformat() if key.last_used_at else None,
+        "expiresAt": key.expires_at.isoformat() if key.expires_at else None,
+        "createdAt": key.created_at.isoformat() if key.created_at else None,
+    }
+
+
+async def _settings_create_auth_key(request: web.Request) -> web.Response:
+    auth_context = await _require_auth(request)
+    body = await request.json()
+    raw_key = secrets.token_urlsafe(32)
+    key = await APIKeyDAO.create(
+        APIKeyCreate(
+            user_id=auth_context["user_id"],
+            key_hash=hash_api_key(raw_key),
+            name=body.get("name"),
+            is_active=True,
+            expires_at=_parse_optional_datetime(body.get("expiresAt")),
+        )
+    )
+    return web.json_response({"key": _serialize_auth_key(key), "rawKey": raw_key})
+
+
+async def _settings_update_auth_key(request: web.Request) -> web.Response:
+    auth_context = await _require_auth(request)
+    key_id = UUID(request.match_info["key_id"])
+    existing = await APIKeyDAO.get_by_id(key_id)
+    if existing is None or existing.user_id != auth_context["user_id"]:
+        raise web.HTTPNotFound()
+    body = await request.json()
+    key = await APIKeyDAO.update(
+        APIKeyUpdate(
+            id=key_id,
+            name=body.get("name"),
+            is_active=body.get("isActive"),
+            expires_at=_parse_optional_datetime(body.get("expiresAt")),
+        )
+    )
+    if key is None:
+        raise web.HTTPNotFound()
+    return web.json_response({"key": _serialize_auth_key(key)})
+
+
+async def _settings_delete_auth_key(request: web.Request) -> web.Response:
+    auth_context = await _require_auth(request)
+    key_id = UUID(request.match_info["key_id"])
+    existing = await APIKeyDAO.get_by_id(key_id)
+    if existing is None or existing.user_id != auth_context["user_id"]:
+        raise web.HTTPNotFound()
+    await APIKeyDAO.delete(key_id)
+    return web.json_response({"deleted": True})
+
+
+async def _settings_regenerate_auth_key(request: web.Request) -> web.Response:
+    auth_context = await _require_auth(request)
+    key_id = UUID(request.match_info["key_id"])
+    existing = await APIKeyDAO.get_by_id(key_id)
+    if existing is None or existing.user_id != auth_context["user_id"]:
+        raise web.HTTPNotFound()
+
+    await APIKeyDAO.update(APIKeyUpdate(id=key_id, is_active=False))
+    body = await request.json()
+    raw_key = secrets.token_urlsafe(32)
+    key = await APIKeyDAO.create(
+        APIKeyCreate(
+            user_id=auth_context["user_id"],
+            key_hash=hash_api_key(raw_key),
+            name=body.get("name") or existing.name,
+            is_active=True,
+            expires_at=_parse_optional_datetime(body.get("expiresAt")) if "expiresAt" in body else existing.expires_at,
+        )
+    )
+    return web.json_response({"key": _serialize_auth_key(key), "rawKey": raw_key})
+
+
 def _default_frontend_dist() -> Path:
     return Path(__file__).resolve().parents[2] / "frontend" / "dist"
 
@@ -275,6 +367,10 @@ def create_app(
     app.router.add_patch("/api/dashboard/settings/endpoints/{endpoint_id}", _settings_update_endpoint)
     app.router.add_delete("/api/dashboard/settings/endpoints/{endpoint_id}", _settings_delete_endpoint)
     app.router.add_put("/api/dashboard/settings/mappings", _settings_put_mapping)
+    app.router.add_post("/api/dashboard/settings/auth-keys", _settings_create_auth_key)
+    app.router.add_patch("/api/dashboard/settings/auth-keys/{key_id}", _settings_update_auth_key)
+    app.router.add_delete("/api/dashboard/settings/auth-keys/{key_id}", _settings_delete_auth_key)
+    app.router.add_post("/api/dashboard/settings/auth-keys/{key_id}/regenerate", _settings_regenerate_auth_key)
 
     dist_path = frontend_dist or _default_frontend_dist()
     if dist_path.exists():

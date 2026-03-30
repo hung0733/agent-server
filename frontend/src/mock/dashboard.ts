@@ -201,5 +201,15 @@ export const settingsPayload: SettingsPayload = {
       ],
     },
   ],
+  authKeys: [
+    {
+      id: "key-1",
+      name: "Dashboard main",
+      isActive: true,
+      lastUsedAt: "2026-03-29T18:00:00+08:00",
+      expiresAt: null,
+      createdAt: "2026-03-28T10:00:00+08:00",
+    },
+  ],
   source: "mock",
 };
