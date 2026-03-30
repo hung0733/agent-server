@@ -9,5 +9,7 @@ describe("SettingsPage", () => {
     expect(screen.getByRole("button", { name: "建立 Endpoint" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "新增 Endpoint" })).not.toBeInTheDocument();
     expect(screen.getByText("Group / Level Mapping")).toBeInTheDocument();
+    expect(screen.getByText("Auth Keys")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "建立 Auth Key" })).toBeInTheDocument();
   });
 });

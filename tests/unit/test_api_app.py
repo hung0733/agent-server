@@ -7,6 +7,7 @@ from uuid import uuid4
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
+import api.app as app_module
 from api.app import create_app
 
 
@@ -58,7 +59,7 @@ class _FakeDashboardProvider:
 
     async def get_settings(self, user_id=None) -> dict:
         self.last_user_id = user_id
-        return {"locales": ["zh-HK"], "featureFlags": {}, "endpoints": [], "groups": [], "source": "mixed"}
+        return {"locales": ["zh-HK"], "featureFlags": {}, "endpoints": [], "groups": [], "authKeys": [], "source": "mixed"}
 
 
 class _FakeAuthService:
@@ -282,3 +283,108 @@ async def test_delete_endpoint_rejects_when_mapping_exists(monkeypatch) -> None:
 
     assert response.status == 409
     assert payload["error"] == "endpoint_in_use"
+
+
+@pytest.mark.asyncio
+async def test_auth_key_routes_create_and_regenerate_one_time_secret(monkeypatch) -> None:
+    user_id = uuid4()
+    key_id = uuid4()
+    regenerated_id = uuid4()
+
+    monkeypatch.setattr(
+        app_module.APIKeyDAO,
+        "create",
+        AsyncMock(
+            side_effect=[
+                type("Key", (), {"id": key_id, "user_id": user_id, "name": "Main key", "is_active": True, "last_used_at": None, "expires_at": None, "created_at": None})(),
+                type("Key", (), {"id": regenerated_id, "user_id": user_id, "name": "Main key", "is_active": True, "last_used_at": None, "expires_at": None, "created_at": None})(),
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        app_module.APIKeyDAO,
+        "get_by_id",
+        AsyncMock(return_value=type("Key", (), {"id": key_id, "user_id": user_id, "name": "Main key", "is_active": True, "last_used_at": None, "expires_at": None, "created_at": None})()),
+    )
+    monkeypatch.setattr(app_module.APIKeyDAO, "update", AsyncMock())
+
+    app = create_app(
+        _FakeQueue(),
+        _FakeDedup(),
+        dashboard_data_provider=_FakeDashboardProvider(),
+        auth_service=_FakeAuthService(user_id),
+    )
+    server = TestServer(app)
+    client = TestClient(server)
+
+    await client.start_server()
+    try:
+        create_response = await client.post(
+            "/api/dashboard/settings/auth-keys",
+            headers={"X-API-Key": "good-key"},
+            json={"name": "Main key"},
+        )
+        create_payload = await create_response.json()
+
+        regenerate_response = await client.post(
+            f"/api/dashboard/settings/auth-keys/{key_id}/regenerate",
+            headers={"X-API-Key": "good-key"},
+            json={"name": "Main key"},
+        )
+        regenerate_payload = await regenerate_response.json()
+    finally:
+        await client.close()
+
+    assert create_response.status == 200
+    assert create_payload["key"]["id"] == str(key_id)
+    assert create_payload["rawKey"]
+    assert regenerate_response.status == 200
+    assert regenerate_payload["key"]["id"] == str(regenerated_id)
+    assert regenerate_payload["rawKey"]
+
+
+@pytest.mark.asyncio
+async def test_auth_key_delete_and_toggle_routes_are_user_scoped(monkeypatch) -> None:
+    user_id = uuid4()
+    key_id = uuid4()
+    monkeypatch.setattr(
+        app_module.APIKeyDAO,
+        "get_by_id",
+        AsyncMock(return_value=type("Key", (), {"id": key_id, "user_id": user_id, "name": "Main key", "is_active": True, "last_used_at": None, "expires_at": None, "created_at": None})()),
+    )
+    monkeypatch.setattr(
+        app_module.APIKeyDAO,
+        "update",
+        AsyncMock(return_value=type("Key", (), {"id": key_id, "user_id": user_id, "name": "Main key", "is_active": False, "last_used_at": None, "expires_at": None, "created_at": None})()),
+    )
+    monkeypatch.setattr(app_module.APIKeyDAO, "delete", AsyncMock(return_value=True))
+
+    app = create_app(
+        _FakeQueue(),
+        _FakeDedup(),
+        dashboard_data_provider=_FakeDashboardProvider(),
+        auth_service=_FakeAuthService(user_id),
+    )
+    server = TestServer(app)
+    client = TestClient(server)
+
+    await client.start_server()
+    try:
+        patch_response = await client.patch(
+            f"/api/dashboard/settings/auth-keys/{key_id}",
+            headers={"X-API-Key": "good-key"},
+            json={"isActive": False},
+        )
+        patch_payload = await patch_response.json()
+        delete_response = await client.delete(
+            f"/api/dashboard/settings/auth-keys/{key_id}",
+            headers={"X-API-Key": "good-key"},
+        )
+        delete_payload = await delete_response.json()
+    finally:
+        await client.close()
+
+    assert patch_response.status == 200
+    assert patch_payload["key"]["isActive"] is False
+    assert delete_response.status == 200
+    assert delete_payload == {"deleted": True}

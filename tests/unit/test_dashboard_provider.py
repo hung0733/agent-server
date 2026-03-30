@@ -96,7 +96,7 @@ async def test_get_tasks_merges_user_queue_and_messages_sorted_newest_first(monk
     agent_alpha = uuid4()
     agent_beta = uuid4()
     outsider = uuid4()
-    now = datetime(2026, 3, 29, 12, 0, tzinfo=UTC)
+    now = datetime.now(UTC)
 
     user_agents = [
         _agent(agent_id=agent_alpha, user_id=user_id, name="Alpha"),
@@ -176,7 +176,7 @@ async def test_get_tasks_returns_empty_items_without_user_scoped_activity(monkey
     user_id = uuid4()
     user_agent = uuid4()
     outsider = uuid4()
-    now = datetime(2026, 3, 29, 12, 0, tzinfo=UTC)
+    now = datetime.now(UTC)
 
     async def fake_get_agents(user_id_value, limit=100):
         assert user_id_value == user_id
@@ -347,7 +347,7 @@ async def test_get_usage_aggregates_real_token_usage_without_mock_fallback(monke
 
     provider = DashboardDataProvider(queue=object(), dedup=object())
     user_id = uuid4()
-    now = datetime(2026, 3, 29, 12, 0, tzinfo=UTC)
+    now = datetime.now(UTC)
 
     async def fake_get_usage(user_id_value, limit=500, offset=0, session=None):
         assert user_id_value == user_id
@@ -454,3 +454,49 @@ async def test_get_settings_returns_endpoint_inventory_and_mapping_slots(monkeyp
     assert payload["groups"][0]["name"] == "Default Group"
     assert payload["groups"][0]["slots"][0]["difficultyLevel"] == 1
     assert payload["groups"][0]["slots"][0]["endpointId"] == str(endpoint_id)
+
+
+@pytest.mark.asyncio
+async def test_get_settings_returns_auth_keys_without_raw_key(monkeypatch) -> None:
+    provider = DashboardDataProvider(queue=object(), dedup=object())
+    user_id = uuid4()
+    key_id = uuid4()
+    now = datetime(2026, 3, 29, 18, 0, tzinfo=UTC)
+
+    async def fake_groups(user_id_value, session=None):
+        assert user_id_value == user_id
+        return []
+
+    async def fake_endpoints(user_id_value, session=None):
+        assert user_id_value == user_id
+        return []
+
+    async def fake_api_keys(user_id_value, session=None):
+        assert user_id_value == user_id
+        return [
+            SimpleNamespace(
+                id=key_id,
+                user_id=user_id,
+                key_hash="sha256:abc",
+                name="Dashboard main",
+                is_active=True,
+                last_used_at=now,
+                expires_at=None,
+                created_at=now,
+            )
+        ]
+
+    monkeypatch.setattr(dashboard_module.LLMEndpointGroupDAO, "get_by_user_id", fake_groups)
+    monkeypatch.setattr(dashboard_module.LLMEndpointDAO, "get_by_user_id", fake_endpoints)
+    monkeypatch.setattr(dashboard_module.APIKeyDAO, "get_by_user_id", fake_api_keys)
+
+    payload = await provider.get_settings(user_id=user_id)
+
+    assert payload["authKeys"][0] == {
+        "id": str(key_id),
+        "name": "Dashboard main",
+        "isActive": True,
+        "lastUsedAt": now.isoformat(),
+        "expiresAt": None,
+        "createdAt": now.isoformat(),
+    }

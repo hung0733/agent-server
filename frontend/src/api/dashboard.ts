@@ -98,3 +98,25 @@ export function deleteSettingsEndpoint(endpointId: string): Promise<{ deleted: b
 export function saveSettingsMapping(body: unknown): Promise<{ mapping: SettingsPayload["groups"][number]["slots"][number] | null }> {
   return mutateJson("/api/dashboard/settings/mappings", "PUT", body);
 }
+
+export function createAuthKey(body: unknown): Promise<{ key: SettingsPayload["authKeys"][number]; rawKey: string }> {
+  return mutateJson("/api/dashboard/settings/auth-keys", "POST", body);
+}
+
+export function updateAuthKey(
+  keyId: string,
+  body: unknown,
+): Promise<{ key: SettingsPayload["authKeys"][number] }> {
+  return mutateJson(`/api/dashboard/settings/auth-keys/${keyId}`, "PATCH", body);
+}
+
+export function deleteAuthKey(keyId: string): Promise<{ deleted: boolean }> {
+  return mutateJson(`/api/dashboard/settings/auth-keys/${keyId}`, "DELETE", {});
+}
+
+export function regenerateAuthKey(
+  keyId: string,
+  body: unknown,
+): Promise<{ key: SettingsPayload["authKeys"][number]; rawKey: string }> {
+  return mutateJson(`/api/dashboard/settings/auth-keys/${keyId}/regenerate`, "POST", body);
+}

@@ -134,5 +134,13 @@ export interface SettingsPayload {
       isActive: boolean;
     }>;
   }>;
+  authKeys: Array<{
+    id: string;
+    name: string;
+    isActive: boolean;
+    lastUsedAt: string | null;
+    expiresAt: string | null;
+    createdAt: string | null;
+  }>;
   source: string;
 }
