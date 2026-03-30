@@ -9,15 +9,22 @@ Import path: src.db.dao.agent_instance_dao
 """
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from typing import List, Optional
 from uuid import UUID
 
-from sqlalchemy import select, func, update, delete, not_
+from sqlalchemy import select, func, update, delete, not_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.dto.agent_dto import AgentInstanceCreate, AgentInstance, AgentInstanceUpdate
 from db.entity.agent_entity import AgentInstance as AgentInstanceEntity
 from db.entity.user_entity import User as UserEntity
+
+
+def _stale_busy_cutoff(now: Optional[datetime] = None) -> datetime:
+    if now is None:
+        now = datetime.now(UTC)
+    return now - timedelta(minutes=5)
 
 
 class AgentInstanceDAO:
@@ -594,13 +601,27 @@ class AgentInstanceDAO:
         async def _claim(s: AsyncSession) -> bool:
             # Use UPDATE with WHERE condition for atomic claim
             from sqlalchemy import update as sql_update
+            stale_before = _stale_busy_cutoff()
             stmt = (
                 sql_update(AgentInstanceEntity)
                 .where(
                     AgentInstanceEntity.id == agent_instance_id,
-                    AgentInstanceEntity.status == "idle",
+                    or_(
+                        AgentInstanceEntity.status == "idle",
+                        (
+                            AgentInstanceEntity.status == "busy"
+                        )
+                        & (
+                            func.coalesce(
+                                AgentInstanceEntity.last_heartbeat_at,
+                                AgentInstanceEntity.updated_at,
+                                AgentInstanceEntity.created_at,
+                            )
+                            < stale_before
+                        ),
+                    ),
                 )
-                .values(status="busy")
+                .values(status="busy", updated_at=func.now())
             )
             result = await s.execute(stmt)
             await s.commit()

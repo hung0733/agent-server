@@ -206,7 +206,8 @@ class TestAgentInstanceDAOCreate:
         
         with pytest.raises(Exception):  # ForeignKey violation
             await AgentInstanceDAO.create(agent_instance_create, session=db_session)
-    
+
+
     async def test_create_with_invalid_user_raises_error(
         self,
         db_session: AsyncSession,
