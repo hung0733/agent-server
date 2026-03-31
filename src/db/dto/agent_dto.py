@@ -32,7 +32,13 @@ def gen_random_uuid() -> UUID:
 
 class AgentTypeBase(BaseModel):
     """Base model with common agent type fields."""
-    
+
+    user_id: UUID = Field(
+        ...,
+        description="ID of the owning user",
+    )
+    """Owning user ID."""
+
     name: str = Field(
         ...,
         min_length=1,
@@ -69,6 +75,7 @@ class AgentTypeBase(BaseModel):
         extra="ignore",
         json_schema_extra={
             "example": {
+                "user_id": "440d7300-d28a-30c3-9605-335544440000",
                 "name": "ResearchAgent",
                 "description": "An agent that performs web research",
                 "capabilities": {"web_search": True, "summarization": True},
@@ -168,6 +175,7 @@ class AgentType(AgentTypeBase):
         json_schema_extra={
             "example": {
                 "id": "550e8400-e29b-41d4-a716-446655440000",
+                "user_id": "440d7300-d28a-30c3-9605-335544440000",
                 "name": "ResearchAgent",
                 "description": "An agent that performs web research",
                 "capabilities": {"web_search": True, "summarization": True},
