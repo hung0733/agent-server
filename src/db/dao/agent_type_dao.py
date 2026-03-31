@@ -64,6 +64,7 @@ class AgentTypeDAO:
             IntegrityError: If unique constraint violated (duplicate name).
         """
         entity = AgentTypeEntity(
+            user_id=dto.user_id,
             name=dto.name,
             description=dto.description,
             capabilities=dto.capabilities,
@@ -161,21 +162,25 @@ class AgentTypeDAO:
         limit: int = 100,
         offset: int = 0,
         active_only: bool = False,
+        user_id: Optional[UUID] = None,
         session: Optional[AsyncSession] = None,
     ) -> List[AgentType]:
         """Retrieve all agent types with pagination.
-        
+
         Args:
             limit: Maximum number of records to return (default 100).
             offset: Number of records to skip (default 0).
             active_only: If True, only return active agent types.
+            user_id: If provided, filter by owning user.
             session: Optional async session for transaction control.
-            
+
         Returns:
             List of AgentType DTOs.
         """
         async def _query(s: AsyncSession) -> List[AgentTypeEntity]:
             query = select(AgentTypeEntity)
+            if user_id is not None:
+                query = query.where(AgentTypeEntity.user_id == user_id)
             if active_only:
                 query = query.where(AgentTypeEntity.is_active.is_(True))
             query = query.limit(limit).offset(offset)
