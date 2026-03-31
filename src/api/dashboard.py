@@ -8,11 +8,13 @@ from decimal import Decimal
 from typing import Any
 
 from db.dao.agent_instance_dao import AgentInstanceDAO
+from db.dao.agent_tool_dao import AgentInstanceToolDAO
 from db.dao.agent_message_dao import AgentMessageDAO
 from db.dao.api_key_dao import APIKeyDAO
 from db.dao.llm_endpoint_dao import LLMEndpointDAO
 from db.dao.llm_endpoint_group_dao import LLMEndpointGroupDAO
 from db.dao.llm_level_endpoint_dao import LLMLevelEndpointDAO
+from db.dao.tool_dao import ToolDAO
 from db.dao.task_queue_dao import TaskQueueDAO
 from db.dao.task_schedule_dao import TaskScheduleDAO
 from db.dao.token_usage_dao import TokenUsageDAO
@@ -352,6 +354,74 @@ class DashboardDataProvider:
             "endpoints": endpoints,
             "groups": groups,
             "authKeys": auth_keys,
+            "source": "mixed",
+        }
+
+    async def get_agent_tools(self, user_id=None) -> dict[str, Any]:
+        agent_rows = await self._get_user_agents(user_id=user_id, limit=100)
+        try:
+            tool_rows = await ToolDAO.get_active()
+        except Exception:
+            tool_rows = []
+
+        available_tools = [
+            {
+                "id": str(tool.id),
+                "name": tool.name,
+                "description": tool.description,
+                "isActive": tool.is_active,
+            }
+            for tool in tool_rows
+        ]
+
+        agents = []
+        for row in agent_rows:
+            try:
+                effective_tool_ids = set(await AgentInstanceToolDAO.get_effective_tools(row.id))
+            except Exception:
+                effective_tool_ids = set()
+
+            try:
+                overrides = await AgentInstanceToolDAO.get_overrides_for_instance(row.id)
+            except Exception:
+                overrides = []
+
+            override_map = {override.tool_id: override for override in overrides}
+            tools = []
+            for tool in tool_rows:
+                override = override_map.get(tool.id)
+                is_enabled = tool.id in effective_tool_ids
+                if override is not None:
+                    source = "override"
+                elif is_enabled:
+                    source = "type"
+                else:
+                    source = "inactive"
+
+                tools.append(
+                    {
+                        "id": str(tool.id),
+                        "name": tool.name,
+                        "description": tool.description,
+                        "isActive": tool.is_active,
+                        "isEnabled": is_enabled,
+                        "source": source,
+                    }
+                )
+
+            agents.append(
+                {
+                    "id": str(row.id),
+                    "name": _agent_display_name(row),
+                    "role": "主控與協調" if not row.is_sub_agent else "協作子代理",
+                    "status": _map_agent_status(row.status),
+                    "tools": tools,
+                }
+            )
+
+        return {
+            "agents": agents,
+            "availableTools": available_tools,
             "source": "mixed",
         }
 

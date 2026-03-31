@@ -500,3 +500,65 @@ async def test_get_settings_returns_auth_keys_without_raw_key(monkeypatch) -> No
         "expiresAt": None,
         "createdAt": now.isoformat(),
     }
+
+
+@pytest.mark.asyncio
+async def test_get_agent_tools_returns_effective_tool_state(monkeypatch) -> None:
+    provider = DashboardDataProvider(queue=object(), dedup=object())
+    user_id = uuid4()
+    agent_id = uuid4()
+    other_agent_id = uuid4()
+    tool_id = uuid4()
+    disabled_tool_id = uuid4()
+
+    agent_row = SimpleNamespace(
+        id=agent_id,
+        user_id=user_id,
+        name="Main",
+        agent_id="main",
+        is_sub_agent=False,
+        status="idle",
+        agent_type_id=uuid4(),
+    )
+    other_agent_row = SimpleNamespace(
+        id=other_agent_id,
+        user_id=user_id,
+        name="Pandas",
+        agent_id="pandas",
+        is_sub_agent=True,
+        status="busy",
+        agent_type_id=uuid4(),
+    )
+
+    async def fake_get_agents(user_id_value, limit=100):
+        assert user_id_value == user_id
+        return [agent_row, other_agent_row]
+
+    async def fake_get_active_tools(session=None):
+        return [
+            SimpleNamespace(id=tool_id, name="web_search", description="Search the web", is_active=True),
+            SimpleNamespace(id=disabled_tool_id, name="file_reader", description="Read files", is_active=True),
+        ]
+
+    async def fake_get_effective_tools(instance_id, session=None):
+        assert instance_id in {agent_id, other_agent_id}
+        return [tool_id] if instance_id == agent_id else [tool_id, disabled_tool_id]
+
+    async def fake_get_overrides(instance_id, session=None):
+        if instance_id == agent_id:
+            return [SimpleNamespace(tool_id=tool_id, is_enabled=True), SimpleNamespace(tool_id=disabled_tool_id, is_enabled=False)]
+        return []
+
+    monkeypatch.setattr(dashboard_module.AgentInstanceDAO, "get_by_user_id", fake_get_agents)
+    monkeypatch.setattr(dashboard_module.ToolDAO, "get_active", fake_get_active_tools)
+    monkeypatch.setattr(dashboard_module.AgentInstanceToolDAO, "get_effective_tools", fake_get_effective_tools)
+    monkeypatch.setattr(dashboard_module.AgentInstanceToolDAO, "get_overrides_for_instance", fake_get_overrides)
+
+    payload = await provider.get_agent_tools(user_id=user_id)
+
+    assert payload["source"] == "mixed"
+    assert [agent["name"] for agent in payload["agents"]] == ["Main", "Pandas"]
+    assert [tool["name"] for tool in payload["availableTools"]] == ["web_search", "file_reader"]
+    assert payload["agents"][0]["tools"][0]["isEnabled"] is True
+    assert payload["agents"][0]["tools"][1]["isEnabled"] is False
+    assert payload["agents"][0]["tools"][1]["source"] == "override"
