@@ -41,6 +41,21 @@ def upgrade() -> None:
             'uq_agent_types_user_id_name', ['user_id', 'name']
         )
 
+    # Guard: if orphaned rows exist, a user must exist to assign them to
+    result = op.get_bind().execute(
+        sa.text("SELECT COUNT(*) FROM agent_types WHERE user_id IS NULL")
+    )
+    orphan_count = result.scalar()
+    if orphan_count > 0:
+        user_result = op.get_bind().execute(
+            sa.text("SELECT COUNT(*) FROM users")
+        )
+        if user_result.scalar() == 0:
+            raise RuntimeError(
+                f"Cannot migrate: {orphan_count} agent_types row(s) have no user_id "
+                "and no users exist to assign them to. Create a user first."
+            )
+
     # Assign any existing agent_types rows to the first available user.
     # In a fresh multi-tenant deployment there should be no orphaned rows,
     # but a single-tenant seed install may have pre-existing data.
