@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import inspect
 import logging
 from typing import Any, Callable, List, Optional
 from uuid import UUID
@@ -69,7 +70,11 @@ def _build_args_schema(tool_name: str, input_schema: dict[str, Any] | None) -> t
     return create_model(f"{tool_name}Args", **fields)
 
 
-def _make_executor(implementation_ref: str, merged_config: dict[str, Any]) -> Callable:
+def _make_executor(
+    implementation_ref: str,
+    merged_config: dict[str, Any],
+    agent_db_id: str = "",
+) -> Callable:
     """Build an async executor function for a tool.
 
     Dynamically imports ``module.path:function_name`` at call time so that
@@ -77,11 +82,13 @@ def _make_executor(implementation_ref: str, merged_config: dict[str, Any]) -> Ca
 
     The wrapped function receives the tool arguments as keyword arguments plus
     ``_config`` containing the merged tool + instance configuration.
+    If the target function accepts ``agent_db_id``, it is injected automatically.
 
     Args:
         implementation_ref: ``"module.path:function_name"`` string.
         merged_config: Tool-level config_json merged with instance config_override
             (instance values take precedence).
+        agent_db_id: Agent instance UUID to inject into tools that accept it.
 
     Returns:
         An async coroutine function suitable for ``StructuredTool.from_function``.
@@ -91,7 +98,12 @@ def _make_executor(implementation_ref: str, merged_config: dict[str, Any]) -> Ca
     async def _arun(**kwargs: Any) -> str:
         module = importlib.import_module(module_path)
         fn = getattr(module, func_name)
-        result = fn(**kwargs, _config=merged_config)
+        sig = inspect.signature(fn)
+        if agent_db_id and "agent_db_id" in sig.parameters:
+            kwargs.setdefault("agent_db_id", agent_db_id)
+        if "_config" in sig.parameters:
+            kwargs["_config"] = merged_config
+        result = fn(**kwargs)
         if asyncio.iscoroutine(result):
             result = await result
         return str(result)
@@ -143,7 +155,7 @@ async def get_tools(agent_db_id: str) -> List[StructuredTool]:
             **override_map.get(tool_id, {}),
         }
         args_schema = _build_args_schema(tool_dto.name, version.input_schema)
-        executor = _make_executor(version.implementation_ref, merged_config)
+        executor = _make_executor(version.implementation_ref, merged_config, agent_db_id)
 
         structured_tool = StructuredTool.from_function(
             coroutine=executor,
@@ -158,43 +170,6 @@ async def get_tools(agent_db_id: str) -> List[StructuredTool]:
             version.version,
             tool_dto.description[:80] if tool_dto.description else "無描述",
         )
-
-    # 2. Add built-in scheduled task management tools
-    from tools.task_schedule_tools import (
-        create_scheduled_task_for_agent,
-        list_my_scheduled_tasks_for_agent,
-        update_my_scheduled_task_for_agent,
-        delete_my_scheduled_task_for_agent,
-    )
-
-    task_tool_factories = [
-        (create_scheduled_task_for_agent, "create_scheduled_task", _("建立新排程任務")),
-        (list_my_scheduled_tasks_for_agent, "list_my_scheduled_tasks", _("列出此 Agent 的排程任務")),
-        (update_my_scheduled_task_for_agent, "update_my_scheduled_task", _("更新排程任務")),
-        (delete_my_scheduled_task_for_agent, "delete_my_scheduled_task", _("刪除排程任務")),
-    ]
-
-    for factory_func, tool_name, description in task_tool_factories:
-        try:
-            # Use factory to create a function with agent_db_id already bound
-            # This function has the correct signature for Pydantic to inspect
-            task_func = factory_func(agent_db_id)
-
-            # Create StructuredTool from the generated function
-            task_structured_tool = StructuredTool.from_function(
-                coroutine=task_func,
-                name=tool_name,
-                description=description,
-            )
-            tools.append(task_structured_tool)
-            logger.info(_("✅ 已載入排程工具: %s"), tool_name)
-        except Exception as e:
-            logger.error(
-                _("⚠️ 載入排程工具 %s 失敗: %s"),
-                tool_name,
-                str(e),
-                exc_info=True,
-            )
 
     logger.info(_("🔧 共載入 %s 個工具，agent_db_id: %s"), len(tools), agent_db_id)
 

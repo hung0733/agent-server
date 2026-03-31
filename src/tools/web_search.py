@@ -128,3 +128,82 @@ async def _search_with_duckduckgo(
     except Exception as exc:
         logger.error(_("❌ DuckDuckGo 搜索失敗: %s"), exc, exc_info=True)
         return _("搜索失敗：%s") % str(exc)
+
+
+async def execute_web_fetch(
+    url: str,
+    max_length: int = 5000,
+    _config: Dict[str, Any] | None = None,
+) -> str:
+    """抓取 URL 並提取可讀的文字內容。
+
+    Args:
+        url: 要抓取的 URL。
+        max_length: 返回文字的最大字符數（預設: 5000）。
+        _config: 工具配置（由 tools.tools._make_executor 自動注入）。
+
+    Returns:
+        提取的純文字內容，超過 max_length 時截斷。
+    """
+    _config = _config or {}
+    timeout = _config.get("timeout", 15)
+
+    logger.info(_("🌐 抓取網頁: url='%s'"), url)
+
+    try:
+        import urllib.request
+        import urllib.error
+        import html.parser
+
+        class _TextExtractor(html.parser.HTMLParser):
+            """Simple HTML → plain-text extractor."""
+
+            _SKIP_TAGS = {"script", "style", "noscript", "head"}
+
+            def __init__(self) -> None:
+                super().__init__()
+                self._skip_depth = 0
+                self.parts: list[str] = []
+
+            def handle_starttag(self, tag: str, attrs: list) -> None:
+                if tag in self._SKIP_TAGS:
+                    self._skip_depth += 1
+
+            def handle_endtag(self, tag: str) -> None:
+                if tag in self._SKIP_TAGS and self._skip_depth:
+                    self._skip_depth -= 1
+
+            def handle_data(self, data: str) -> None:
+                if not self._skip_depth:
+                    stripped = data.strip()
+                    if stripped:
+                        self.parts.append(stripped)
+
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; AgentBot/1.0)"},
+        )
+        import socket
+        old_timeout = socket.getdefaulttimeout()
+        socket.setdefaulttimeout(timeout)
+        try:
+            with urllib.request.urlopen(req) as resp:
+                raw = resp.read(512 * 1024)  # max 512 KB
+                charset = resp.headers.get_content_charset() or "utf-8"
+        finally:
+            socket.setdefaulttimeout(old_timeout)
+
+        html_text = raw.decode(charset, errors="replace")
+        extractor = _TextExtractor()
+        extractor.feed(html_text)
+        text = "\n".join(extractor.parts)
+
+        if len(text) > max_length:
+            text = text[:max_length] + _("\n...(內容已截斷，共 %d 字符)") % len(text)
+
+        logger.info(_("✅ 網頁抓取成功，返回 %d 字符"), len(text))
+        return text or _("⚠️ 未提取到可讀內容: %s") % url
+
+    except Exception as exc:
+        logger.error(_("❌ 網頁抓取失敗: %s"), exc, exc_info=True)
+        return _("抓取失敗：%s") % str(exc)
