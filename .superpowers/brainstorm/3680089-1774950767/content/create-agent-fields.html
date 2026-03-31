@@ -1,0 +1,56 @@
+<h2>新增 Agent — 表單欄位</h2>
+<p class="subtitle">建立 agent 時需要填寫哪些欄位？</p>
+
+<div class="section">
+  <div class="cards">
+    <div class="card" data-choice="a" onclick="toggleSelect(this)">
+      <div class="card-body">
+        <h3>A — 基本欄位</h3>
+        <div style="margin-top:12px">
+          <div style="margin-bottom:8px"><span class="label">必填</span></div>
+          <input class="mock-input" placeholder="名稱 (name)" style="width:100%;margin-bottom:8px">
+          <input class="mock-input" placeholder="角色 (role)" style="width:100%;margin-bottom:8px">
+          <label style="display:flex;align-items:center;gap:8px;font-size:14px">
+            <input type="checkbox" checked> isActive（啟用）
+          </label>
+        </div>
+        <p style="margin-top:12px;font-size:13px;color:#888">最小可行，與 AgentTypesTab 保持一致風格</p>
+      </div>
+    </div>
+    <div class="card" data-choice="b" onclick="toggleSelect(this)">
+      <div class="card-body">
+        <h3>B — 基本 + 描述</h3>
+        <div style="margin-top:12px">
+          <div style="margin-bottom:8px"><span class="label">必填</span></div>
+          <input class="mock-input" placeholder="名稱 (name)" style="width:100%;margin-bottom:8px">
+          <input class="mock-input" placeholder="角色 (role)" style="width:100%;margin-bottom:8px">
+          <div style="margin-bottom:8px"><span class="label">選填</span></div>
+          <textarea class="mock-input" placeholder="描述 (description)" style="width:100%;height:60px;resize:none;margin-bottom:8px"></textarea>
+          <label style="display:flex;align-items:center;gap:8px;font-size:14px">
+            <input type="checkbox" checked> isActive（啟用）
+          </label>
+        </div>
+        <p style="margin-top:12px;font-size:13px;color:#888">多一個選填描述欄位</p>
+      </div>
+    </div>
+    <div class="card" data-choice="c" onclick="toggleSelect(this)">
+      <div class="card-body">
+        <h3>C — 基本 + Agent Type</h3>
+        <div style="margin-top:12px">
+          <div style="margin-bottom:8px"><span class="label">必填</span></div>
+          <input class="mock-input" placeholder="名稱 (name)" style="width:100%;margin-bottom:8px">
+          <input class="mock-input" placeholder="角色 (role)" style="width:100%;margin-bottom:8px">
+          <select class="mock-input" style="width:100%;margin-bottom:8px">
+            <option>Agent Type（選填）</option>
+            <option>TypeA</option>
+            <option>TypeB</option>
+          </select>
+          <label style="display:flex;align-items:center;gap:8px;font-size:14px">
+            <input type="checkbox" checked> isActive（啟用）
+          </label>
+        </div>
+        <p style="margin-top:12px;font-size:13px;color:#888">可關聯到已有的 agent type</p>
+      </div>
+    </div>
+  </div>
+</div>

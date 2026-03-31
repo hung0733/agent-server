@@ -1,0 +1,70 @@
+<h2>新增 Agent — 確認表單</h2>
+<p class="subtitle">以下是更新後的欄位，確認是否符合需求</p>
+
+<div class="section">
+  <div class="mockup">
+    <div class="mockup-header">新增 Agent（modal）</div>
+    <div class="mockup-body" style="padding:20px;max-width:480px;margin:0 auto">
+
+      <div style="margin-bottom:16px">
+        <div class="label" style="margin-bottom:4px">名稱 *</div>
+        <input class="mock-input" placeholder="Agent 名稱" style="width:100%">
+      </div>
+
+      <div style="margin-bottom:16px">
+        <div class="label" style="margin-bottom:4px">Agent Type（選填）</div>
+        <select class="mock-input" style="width:100%">
+          <option>— 選擇 Agent Type —</option>
+          <option>TypeA</option>
+          <option>TypeB</option>
+        </select>
+      </div>
+
+      <div style="margin-bottom:16px">
+        <div class="label" style="margin-bottom:4px">電話號碼（選填）</div>
+        <input class="mock-input" placeholder="+852 xxxx xxxx" style="width:100%">
+      </div>
+
+      <div style="margin-bottom:16px">
+        <div class="label" style="margin-bottom:4px">WhatsApp Key（選填）</div>
+        <input class="mock-input" placeholder="WhatsApp API Key" style="width:100%">
+      </div>
+
+      <div style="margin-bottom:10px">
+        <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer">
+          <input type="checkbox" checked> <span>啟用（isActive）</span>
+        </label>
+      </div>
+
+      <div style="margin-bottom:20px">
+        <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer">
+          <input type="checkbox"> <span>Sub Agent（isSubAgent）</span>
+        </label>
+      </div>
+
+      <div style="display:flex;gap:10px;justify-content:flex-end">
+        <button class="mock-button" style="background:#444">取消</button>
+        <button class="mock-button">儲存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="options">
+    <div class="option" data-choice="ok" onclick="toggleSelect(this)">
+      <div class="letter">✓</div>
+      <div class="content">
+        <h3>欄位正確，繼續</h3>
+        <p>phone no 和 whatsapp key 都是選填</p>
+      </div>
+    </div>
+    <div class="option" data-choice="change" onclick="toggleSelect(this)">
+      <div class="letter">✎</div>
+      <div class="content">
+        <h3>需要修改</h3>
+        <p>在終端告訴我要改什麼</p>
+      </div>
+    </div>
+  </div>
+</div>
