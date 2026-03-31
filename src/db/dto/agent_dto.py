@@ -43,7 +43,7 @@ class AgentTypeBase(BaseModel):
         ...,
         min_length=1,
         max_length=255,
-        description="Unique name for the agent type",
+        description="Name for the agent type (unique per user)",
     )
     """Unique agent type name."""
     
