@@ -144,3 +144,47 @@ export interface SettingsPayload {
   }>;
   source: string;
 }
+
+export interface AgentToolDefinition {
+  id: string;
+  name: string;
+  description: string;
+  isActive: boolean;
+}
+
+export interface AgentToolState extends AgentToolDefinition {
+  isEnabled: boolean;
+  source: "type" | "override" | "inactive";
+}
+
+export interface AgentToolsAgent extends AgentSummary {
+  tools: AgentToolState[];
+}
+
+export interface AgentToolsPayload {
+  agents: AgentToolsAgent[];
+  availableTools: AgentToolDefinition[];
+  source: string;
+}
+
+export interface AgentToolUpdatePayload {
+  tool: {
+    id: string;
+    agentInstanceId: string;
+    toolId: string;
+    isEnabled: boolean;
+    configOverride: Record<string, unknown> | null;
+  };
+}
+
+export interface AgentTypeItem {
+  id: string;
+  name: string;
+  description: string | null;
+  isActive: boolean;
+  createdAt: string;
+}
+
+export interface AgentTypesPayload {
+  agentTypes: AgentTypeItem[];
+}

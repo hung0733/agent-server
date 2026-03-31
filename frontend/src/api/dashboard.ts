@@ -1,4 +1,8 @@
 import {
+  AgentToolUpdatePayload,
+  AgentToolsPayload,
+  AgentTypeItem,
+  AgentTypesPayload,
   AgentsPayload,
   MemoryPayload,
   OverviewPayload,
@@ -80,6 +84,18 @@ export function fetchSettings(): Promise<SettingsPayload> {
   return requestJson<SettingsPayload>("/api/dashboard/settings");
 }
 
+export function fetchAgentTools(): Promise<AgentToolsPayload> {
+  return requestJson<AgentToolsPayload>("/api/dashboard/agents/tools");
+}
+
+export function updateAgentTool(
+  agentId: string,
+  toolId: string,
+  body: unknown,
+): Promise<AgentToolUpdatePayload> {
+  return mutateJson(`/api/dashboard/agents/${agentId}/tools/${toolId}`, "PATCH", body);
+}
+
 export function createSettingsEndpoint(body: unknown): Promise<{ endpoint: SettingsPayload["endpoints"][number] }> {
   return mutateJson("/api/dashboard/settings/endpoints", "POST", body);
 }
@@ -119,4 +135,25 @@ export function regenerateAuthKey(
   body: unknown,
 ): Promise<{ key: SettingsPayload["authKeys"][number]; rawKey: string }> {
   return mutateJson(`/api/dashboard/settings/auth-keys/${keyId}/regenerate`, "POST", body);
+}
+
+export function fetchAgentTypes(): Promise<AgentTypesPayload> {
+  return requestJson<AgentTypesPayload>("/api/dashboard/agent-types");
+}
+
+export function createAgentType(
+  body: { name: string; description?: string; isActive?: boolean },
+): Promise<{ agentType: AgentTypeItem }> {
+  return mutateJson("/api/dashboard/agent-types", "POST", body);
+}
+
+export function updateAgentType(
+  id: string,
+  body: { name?: string; description?: string; isActive?: boolean },
+): Promise<{ agentType: AgentTypeItem }> {
+  return mutateJson(`/api/dashboard/agent-types/${id}`, "PATCH", body);
+}
+
+export function deleteAgentType(id: string): Promise<{ deleted: boolean }> {
+  return mutateJson(`/api/dashboard/agent-types/${id}`, "DELETE", {});
 }
