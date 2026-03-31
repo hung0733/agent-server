@@ -1,4 +1,9 @@
 import {
+  AgentToolDefinition,
+  AgentToolUpdatePayload,
+  AgentToolsPayload,
+  AgentTypeItem,
+  AgentTypesPayload,
   AgentCardData,
   AgentSummary,
   AgentsPayload,
@@ -136,6 +141,52 @@ export const agentsPayload: AgentsPayload = {
   source: "mock",
 };
 
+export const availableTools: AgentToolDefinition[] = [
+  {
+    id: "tool-web-search",
+    name: "web_search",
+    description: "搜尋公開資料與網頁內容",
+    isActive: true,
+  },
+  {
+    id: "tool-file-reader",
+    name: "file_reader",
+    description: "讀取與摘要檔案內容",
+    isActive: true,
+  },
+];
+
+export const agentToolsPayload: AgentToolsPayload = {
+  agents: [
+    {
+      ...agents[0],
+      tools: [
+        { ...availableTools[0], isEnabled: true, source: "type" },
+        { ...availableTools[1], isEnabled: false, source: "override" },
+      ],
+    },
+    {
+      ...agents[1],
+      tools: [
+        { ...availableTools[0], isEnabled: true, source: "type" },
+        { ...availableTools[1], isEnabled: true, source: "type" },
+      ],
+    },
+  ],
+  availableTools,
+  source: "mock",
+};
+
+export const agentToolUpdatePayload: AgentToolUpdatePayload = {
+  tool: {
+    id: "override-1",
+    agentInstanceId: "main",
+    toolId: "tool-web-search",
+    isEnabled: false,
+    configOverride: null,
+  },
+};
+
 export const tasksPayload: TasksPayload = {
   items: taskTimeline,
   source: "mock",
@@ -212,4 +263,23 @@ export const settingsPayload: SettingsPayload = {
     },
   ],
   source: "mock",
+};
+
+export const agentTypesPayload: AgentTypesPayload = {
+  agentTypes: [
+    {
+      id: "type-research",
+      name: "研究型員工",
+      description: "負責網絡搜尋與資料整理",
+      isActive: true,
+      createdAt: "2026-03-01T00:00:00Z",
+    },
+    {
+      id: "type-assistant",
+      name: "助理型員工",
+      description: "處理日常行政與提醒工作",
+      isActive: true,
+      createdAt: "2026-03-02T00:00:00Z",
+    },
+  ],
 };
