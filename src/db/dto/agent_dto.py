@@ -250,6 +250,12 @@ class AgentInstanceBase(BaseModel):
     )
     """Sub-agent marker flag."""
 
+    is_active: bool = Field(
+        default=True,
+        description="Whether this agent instance is active (soft-delete flag)",
+    )
+    """Active/soft-delete flag."""
+
     model_config = ConfigDict(
         extra="ignore",
         json_schema_extra={
@@ -263,6 +269,7 @@ class AgentInstanceBase(BaseModel):
                 "phone_no": None,
                 "whatsapp_key": None,
                 "is_sub_agent": False,
+                "is_active": True,
             }
         }
     )

@@ -26,6 +26,30 @@ export interface AgentCardData extends AgentSummary {
   currentTask: string;
   latestOutput: string;
   scheduled: boolean;
+  isActive: boolean;
+  isSubAgent: boolean;
+  phoneNo: string | null;
+  whatsappKey: string | null;
+  agentTypeId: string | null;
+  agentTypeName: string | null;
+}
+
+export interface AgentCreateBody {
+  name: string;
+  agentTypeId: string;
+  phoneNo?: string;
+  whatsappKey?: string;
+  isActive?: boolean;
+  isSubAgent?: boolean;
+}
+
+export interface AgentUpdateBody {
+  name?: string;
+  agentTypeId?: string;
+  phoneNo?: string;
+  whatsappKey?: string;
+  isActive?: boolean;
+  isSubAgent?: boolean;
 }
 
 export interface TimelineItem {

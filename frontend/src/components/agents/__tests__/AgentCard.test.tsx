@@ -13,6 +13,12 @@ describe("AgentCard", () => {
           currentTask: "creators-sales-lead-radar",
           latestOutput: "完成第一輪審查摘要",
           scheduled: true,
+          isActive: true,
+          isSubAgent: false,
+          phoneNo: null,
+          whatsappKey: null,
+          agentTypeId: null,
+          agentTypeName: null,
         }}
       />,
     );

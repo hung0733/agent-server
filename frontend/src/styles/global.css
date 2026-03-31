@@ -633,6 +633,156 @@ textarea {
   min-height: 180px;
 }
 
+/* ── Agent Tab ───────────────────────────────────────────────── */
+
+.agent-tab {
+  display: grid;
+  gap: 16px;
+}
+
+.agent-tab-header {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.agent-tab-header button,
+.agent-tab-header .btn {
+  min-height: 40px;
+  padding: 0 20px;
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(135deg, var(--primary), #a7c1ff);
+  color: #08111d;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.agent-tab-header button:hover {
+  transform: translateY(-1px);
+}
+
+.agent-tab-empty {
+  color: var(--text-3);
+  padding: 32px 0;
+  text-align: center;
+}
+
+.agent-card--inactive {
+  opacity: 0.5;
+}
+
+.agent-card__badges {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  flex-shrink: 0;
+}
+
+.badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.badge--inactive {
+  background: rgba(255, 180, 168, 0.15);
+  color: #ffb4a8;
+  border: 1px solid rgba(255, 180, 168, 0.3);
+}
+
+.badge--sub {
+  background: rgba(128, 169, 255, 0.15);
+  color: #80a9ff;
+  border: 1px solid rgba(128, 169, 255, 0.3);
+}
+
+.agent-card__actions {
+  margin-top: 14px;
+  display: flex;
+  gap: 8px;
+}
+
+.agent-card__actions button {
+  padding: 5px 14px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.agent-card__actions button:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-1);
+}
+
+/* Modal overlay */
+.agent-tab-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+}
+
+/* Modal card */
+.agent-tab-modal-inner {
+  background: var(--surface-2, #121e30);
+  border: 1px solid var(--border-soft);
+  border-radius: 20px;
+  padding: 28px;
+  width: min(480px, calc(100vw - 32px));
+  display: grid;
+  gap: 16px;
+  max-height: calc(100vh - 64px);
+  overflow-y: auto;
+}
+
+.agent-tab-modal-inner h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.agent-tab-modal label {
+  display: grid;
+  gap: 6px;
+  font-size: 0.95rem;
+  color: var(--text-2);
+}
+
+.agent-tab-modal input[type="text"],
+.agent-tab-modal select {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(170, 185, 208, 0.18);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-1);
+  font-size: 0.95rem;
+}
+
+.agent-tab-modal input[type="text"]::placeholder {
+  color: var(--text-3);
+}
+
+.agent-tab-modal select option {
+  background: #121e30;
+}
+
+.agent-tab-modal label:has(input[type="checkbox"]) {
+  flex-direction: row;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-1);
+}
+
 /* ── Agent Types Tab ─────────────────────────────────────────── */
 
 .agent-types-tab {

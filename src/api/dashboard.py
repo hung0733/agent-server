@@ -8,6 +8,7 @@ from decimal import Decimal
 from typing import Any
 
 from db.dao.agent_instance_dao import AgentInstanceDAO
+from db.dao.agent_type_dao import AgentTypeDAO
 from db.dao.agent_tool_dao import AgentInstanceToolDAO
 from db.dao.agent_message_dao import AgentMessageDAO
 from db.dao.api_key_dao import APIKeyDAO
@@ -427,8 +428,10 @@ class DashboardDataProvider:
 
     async def _get_agents(self, limit: int, user_id=None) -> list[dict[str, Any]]:
         rows = await self._get_user_agents(user_id=user_id, limit=limit)
+        type_name_lookup = await self._get_agent_type_name_lookup()
         agents = []
         for row in rows:
+            type_id = str(row.agent_type_id) if row.agent_type_id else None
             agents.append(
                 {
                     "id": str(row.id),
@@ -438,32 +441,23 @@ class DashboardDataProvider:
                     "currentTask": "等待後端聚合輸出",
                     "latestOutput": "最近輸出會在後續版本接入真實聚合。",
                     "scheduled": row.status != "offline",
+                    "isActive": row.is_active,
+                    "isSubAgent": row.is_sub_agent,
+                    "phoneNo": row.phone_no,
+                    "whatsappKey": row.whatsapp_key,
+                    "agentTypeId": type_id,
+                    "agentTypeName": type_name_lookup.get(type_id),
                 }
             )
 
-        if agents:
-            return agents
+        return agents
 
-        return [
-            {
-                "id": "main",
-                "name": "main",
-                "role": "主控與協調",
-                "status": "healthy",
-                "currentTask": "creators-sales-lead-radar",
-                "latestOutput": "完成第一輪審查摘要",
-                "scheduled": True,
-            },
-            {
-                "id": "pandas",
-                "name": "pandas",
-                "role": "控制中心交付",
-                "status": "warning",
-                "currentTask": "等待可審查輸入",
-                "latestOutput": "目前缺少可審查輸入",
-                "scheduled": False,
-            },
-        ]
+    async def _get_agent_type_name_lookup(self) -> dict[str, str]:
+        try:
+            types = await AgentTypeDAO.get_all(limit=200)
+            return {str(t.id): t.name for t in types}
+        except Exception:
+            return {}
 
     async def _get_user_agents(self, user_id=None, limit: int = 100):
         try:

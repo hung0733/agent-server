@@ -215,6 +215,14 @@ class AgentInstance(Base):
     )
     """Whether this instance is marked as a sub-agent."""
 
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default="true",
+    )
+    """Soft-delete flag; False means the instance is deactivated."""
+
     # Relationship to llm_endpoint_group
     endpoint_group: Mapped[Optional["LLMEndpointGroup"]] = relationship(  # type: ignore[name-defined]
         "LLMEndpointGroup",

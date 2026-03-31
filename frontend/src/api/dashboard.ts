@@ -1,8 +1,11 @@
 import {
+  AgentCardData,
+  AgentCreateBody,
   AgentToolUpdatePayload,
   AgentToolsPayload,
   AgentTypeItem,
   AgentTypesPayload,
+  AgentUpdateBody,
   AgentsPayload,
   MemoryPayload,
   OverviewPayload,
@@ -135,6 +138,14 @@ export function regenerateAuthKey(
   body: unknown,
 ): Promise<{ key: SettingsPayload["authKeys"][number]; rawKey: string }> {
   return mutateJson(`/api/dashboard/settings/auth-keys/${keyId}/regenerate`, "POST", body);
+}
+
+export function createAgent(body: AgentCreateBody): Promise<{ agent: AgentCardData }> {
+  return mutateJson("/api/dashboard/agents", "POST", body);
+}
+
+export function updateAgent(id: string, body: AgentUpdateBody): Promise<{ agent: AgentCardData }> {
+  return mutateJson(`/api/dashboard/agents/${id}`, "PATCH", body);
 }
 
 export function fetchAgentTypes(): Promise<AgentTypesPayload> {

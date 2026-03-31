@@ -59,6 +59,12 @@ export const agents: AgentCardData[] = [
     currentTask: "creators-sales-lead-radar",
     latestOutput: "完成第一輪審查摘要",
     scheduled: true,
+    isActive: true,
+    isSubAgent: false,
+    phoneNo: null,
+    whatsappKey: null,
+    agentTypeId: "type-research",
+    agentTypeName: "研究型員工",
   },
   {
     id: "otter",
@@ -68,6 +74,12 @@ export const agents: AgentCardData[] = [
     currentTask: "daily-briefing-07-30",
     latestOutput: "已整理今日待辦與重點郵件",
     scheduled: true,
+    isActive: true,
+    isSubAgent: true,
+    phoneNo: "+852 9000 0001",
+    whatsappKey: null,
+    agentTypeId: "type-assistant",
+    agentTypeName: "助理型員工",
   },
   {
     id: "pandas",
@@ -77,6 +89,12 @@ export const agents: AgentCardData[] = [
     currentTask: "等待可審查輸入",
     latestOutput: "目前缺少可審查輸入",
     scheduled: false,
+    isActive: false,
+    isSubAgent: false,
+    phoneNo: null,
+    whatsappKey: null,
+    agentTypeId: "type-research",
+    agentTypeName: "研究型員工",
   },
 ];
 
