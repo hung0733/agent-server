@@ -41,18 +41,18 @@ TOOLS = [
     # -----------------------------------------------------------------------
     {
         "name": "read",
-        "description": "讀取檔案內容。",
+        "description": "Read the full text content of a file from the filesystem.",
         "version": "1.0.0",
         "input_schema": {
             "type": "object",
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "絕對或相對檔案路徑",
+                    "description": "Absolute or relative path to the file to read.",
                 },
                 "encoding": {
                     "type": "string",
-                    "description": "文字編碼（預設：utf-8）",
+                    "description": "Text encoding to use when reading the file (default: utf-8).",
                     "default": "utf-8",
                 },
             },
@@ -62,22 +62,25 @@ TOOLS = [
     },
     {
         "name": "write",
-        "description": "建立或覆寫檔案。",
+        "description": (
+            "Create a new file or completely overwrite an existing file with the given content. "
+            "Parent directories are created automatically if they do not exist."
+        ),
         "version": "1.0.0",
         "input_schema": {
             "type": "object",
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "絕對或相對檔案路徑",
+                    "description": "Absolute or relative path where the file should be written.",
                 },
                 "content": {
                     "type": "string",
-                    "description": "要寫入的文字內容",
+                    "description": "Full text content to write to the file.",
                 },
                 "encoding": {
                     "type": "string",
-                    "description": "文字編碼（預設：utf-8）",
+                    "description": "Text encoding to use when writing the file (default: utf-8).",
                     "default": "utf-8",
                 },
             },
@@ -87,26 +90,30 @@ TOOLS = [
     },
     {
         "name": "edit",
-        "description": "對檔案進行精確的字串替換編輯。",
+        "description": (
+            "Make a precise string replacement inside an existing file. "
+            "Finds an exact occurrence of old_string and replaces it with new_string. "
+            "Use replace_all=true to replace every occurrence instead of just the first."
+        ),
         "version": "1.0.0",
         "input_schema": {
             "type": "object",
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "要編輯的檔案路徑",
+                    "description": "Path to the file to edit.",
                 },
                 "old_string": {
                     "type": "string",
-                    "description": "要搜索的精確文字",
+                    "description": "Exact text to search for in the file. Must match character-for-character.",
                 },
                 "new_string": {
                     "type": "string",
-                    "description": "替換文字",
+                    "description": "Replacement text that will substitute old_string.",
                 },
                 "replace_all": {
                     "type": "boolean",
-                    "description": "是否替換所有出現（預設：False，只替換第一個）",
+                    "description": "If true, replace every occurrence of old_string; if false (default), replace only the first.",
                     "default": False,
                 },
             },
@@ -116,18 +123,21 @@ TOOLS = [
     },
     {
         "name": "apply_patch",
-        "description": "將 unified diff patch 套用到一個或多個檔案。",
+        "description": (
+            "Apply a unified diff patch to one or more files using the system patch command. "
+            "Useful for making multi-file changes expressed as a git diff or diff -u output."
+        ),
         "version": "1.0.0",
         "input_schema": {
             "type": "object",
             "properties": {
                 "patch": {
                     "type": "string",
-                    "description": "Unified diff 格式的 patch 文字",
+                    "description": "Unified diff text to apply (as produced by git diff or diff -u).",
                 },
                 "strip": {
                     "type": "integer",
-                    "description": "要去掉的路徑前綴層數（patch -p，預設：1）",
+                    "description": "Number of leading path components to strip from file paths in the patch (patch -p flag, default: 1).",
                     "default": 1,
                 },
             },
@@ -137,38 +147,41 @@ TOOLS = [
     },
     {
         "name": "grep",
-        "description": "在檔案內容中搜索正則表達式模式。",
+        "description": (
+            "Search file contents for lines matching a regular expression pattern. "
+            "Returns matching lines in file:line_number:content format."
+        ),
         "version": "1.0.0",
         "input_schema": {
             "type": "object",
             "properties": {
                 "pattern": {
                     "type": "string",
-                    "description": "要搜索的正則表達式",
+                    "description": "Regular expression pattern to search for.",
                 },
                 "path": {
                     "type": "string",
-                    "description": "要搜索的檔案或目錄路徑（預設：當前目錄）",
+                    "description": "File or directory to search in. Defaults to the current working directory.",
                     "default": ".",
                 },
                 "recursive": {
                     "type": "boolean",
-                    "description": "是否遞歸搜索子目錄（預設：True）",
+                    "description": "Whether to search subdirectories recursively (default: true).",
                     "default": True,
                 },
                 "ignore_case": {
                     "type": "boolean",
-                    "description": "是否忽略大小寫（預設：False）",
+                    "description": "Whether to perform case-insensitive matching (default: false).",
                     "default": False,
                 },
                 "include": {
                     "type": "string",
-                    "description": "過濾檔案名的 glob 模式（如 *.py）",
+                    "description": "Glob pattern to restrict which files are searched, e.g. '*.py' or '*.{ts,tsx}'.",
                     "default": "",
                 },
                 "max_results": {
                     "type": "integer",
-                    "description": "最多返回的結果行數（預設：100）",
+                    "description": "Maximum number of matching lines to return (default: 100).",
                     "default": 100,
                 },
             },
@@ -178,23 +191,26 @@ TOOLS = [
     },
     {
         "name": "find",
-        "description": "按 glob 模式查找檔案。",
+        "description": (
+            "Find files whose paths match a glob pattern. "
+            "Returns a newline-separated list of matching file paths sorted by modification time."
+        ),
         "version": "1.0.0",
         "input_schema": {
             "type": "object",
             "properties": {
                 "pattern": {
                     "type": "string",
-                    "description": "Glob 模式（如 **/*.py、src/*.ts）",
+                    "description": "Glob pattern to match against file paths, e.g. '**/*.py' or 'src/**/*.ts'.",
                 },
                 "path": {
                     "type": "string",
-                    "description": "搜索的根目錄（預設：當前目錄）",
+                    "description": "Root directory to search from (default: current working directory).",
                     "default": ".",
                 },
                 "max_results": {
                     "type": "integer",
-                    "description": "最多返回的結果數（預設：200）",
+                    "description": "Maximum number of matching paths to return (default: 200).",
                     "default": 200,
                 },
             },
@@ -204,19 +220,19 @@ TOOLS = [
     },
     {
         "name": "ls",
-        "description": "列出目錄內容。",
+        "description": "List the files and subdirectories inside a directory, with file sizes.",
         "version": "1.0.0",
         "input_schema": {
             "type": "object",
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "要列出的目錄路徑（預設：當前目錄）",
+                    "description": "Path to the directory to list (default: current working directory).",
                     "default": ".",
                 },
                 "show_hidden": {
                     "type": "boolean",
-                    "description": "是否顯示隱藏檔案（以 . 開頭，預設：False）",
+                    "description": "Whether to include hidden entries whose names start with a dot (default: false).",
                     "default": False,
                 },
             },
@@ -226,23 +242,26 @@ TOOLS = [
     },
     {
         "name": "exec",
-        "description": "執行 shell 命令並返回輸出（支援 PTY 的 TTY 命令）。",
+        "description": (
+            "Run a shell command and return its combined stdout + stderr output along with the exit code. "
+            "Use for one-shot commands; for long-running background processes use the process tool instead."
+        ),
         "version": "1.0.0",
         "input_schema": {
             "type": "object",
             "properties": {
                 "command": {
                     "type": "string",
-                    "description": "要執行的 shell 命令字符串",
+                    "description": "Shell command string to execute.",
                 },
                 "cwd": {
                     "type": "string",
-                    "description": "工作目錄（可選）",
+                    "description": "Working directory in which to run the command. Defaults to the agent's base_dir config or the server's cwd.",
                     "default": "",
                 },
                 "timeout": {
                     "type": "integer",
-                    "description": "超時秒數（最大 300，預設：60）",
+                    "description": "Maximum seconds to wait for the command to finish (capped at 300, default: 60).",
                     "default": 60,
                 },
             },
@@ -252,28 +271,33 @@ TOOLS = [
     },
     {
         "name": "process",
-        "description": "管理後台 shell 進程會話（啟動、查詢狀態、終止、列出）。",
+        "description": (
+            "Manage long-running background shell processes. "
+            "Use action='start' to launch a command in the background and receive a handle, "
+            "then 'status' to check whether it is still running, "
+            "'kill' to terminate it, or 'list' to see all background processes."
+        ),
         "version": "1.0.0",
         "input_schema": {
             "type": "object",
             "properties": {
                 "action": {
                     "type": "string",
-                    "description": "操作類型：start、status、kill、list",
+                    "description": "Operation to perform: 'start' (launch a background command), 'status' (check if running), 'kill' (terminate), or 'list' (show all active processes).",
                 },
                 "command": {
                     "type": "string",
-                    "description": "要啟動的 shell 命令（action=start 時必填）",
+                    "description": "Shell command to run in the background. Required when action is 'start'.",
                     "default": "",
                 },
                 "handle": {
                     "type": "string",
-                    "description": "start 返回的進程 handle（action=status/kill 時必填）",
+                    "description": "Process handle returned by a previous 'start' call. Required for 'status' and 'kill' actions.",
                     "default": "",
                 },
                 "cwd": {
                     "type": "string",
-                    "description": "工作目錄（action=start 時可選）",
+                    "description": "Working directory for the background process. Used only when action is 'start'.",
                     "default": "",
                 },
             },
@@ -286,31 +310,35 @@ TOOLS = [
     # -----------------------------------------------------------------------
     {
         "name": "create_cron_task",
-        "description": "建立新排程任務，定時發送 prompt 給 agent。",
+        "description": (
+            "Create a new scheduled task that will automatically send a prompt to this agent "
+            "at the specified schedule. Supports cron expressions, fixed intervals, and one-time execution."
+        ),
         "version": "1.0.0",
         "input_schema": {
             "type": "object",
             "properties": {
                 "prompt": {
                     "type": "string",
-                    "description": "排程執行時發送給 agent 的 prompt",
+                    "description": "The prompt message that will be sent to the agent each time the schedule fires.",
                 },
                 "schedule_expression": {
                     "type": "string",
                     "description": (
-                        "排程表達式：cron 格式 \"0 12 * * *\"、"
-                        "interval 格式 \"PT1H\" / \"P1D\"、"
-                        "once 格式 \"2026-03-26T12:00:00Z\""
+                        "Schedule definition whose format depends on schedule_type: "
+                        "cron uses standard 5-field cron syntax e.g. '0 12 * * *' (daily at noon); "
+                        "interval uses ISO 8601 duration e.g. 'PT1H' (every hour) or 'P1D' (daily); "
+                        "once uses an ISO 8601 datetime e.g. '2026-03-26T12:00:00Z' (run once at that time)."
                     ),
                 },
                 "schedule_type": {
                     "type": "string",
-                    "description": "排程類型：cron、interval 或 once（預設：cron）",
+                    "description": "Type of schedule: 'cron' for recurring cron expressions, 'interval' for fixed time intervals, or 'once' for a single future execution (default: cron).",
                     "default": "cron",
                 },
                 "task_name": {
                     "type": "string",
-                    "description": "任務名稱（可選）",
+                    "description": "Optional human-readable name for the task shown in listings.",
                     "default": "",
                 },
             },
@@ -320,7 +348,10 @@ TOOLS = [
     },
     {
         "name": "list_my_cron_tasks",
-        "description": "列出此 Agent 的所有排程任務。",
+        "description": (
+            "List all scheduled tasks belonging to this agent, including their schedule type, "
+            "expression, next run time, and enabled/disabled status."
+        ),
         "version": "1.0.0",
         "input_schema": {
             "type": "object",
@@ -331,26 +362,30 @@ TOOLS = [
     },
     {
         "name": "update_my_cron_task",
-        "description": "更新排程任務的 prompt、排程表達式或啟用狀態。",
+        "description": (
+            "Update an existing scheduled task owned by this agent. "
+            "Can change the prompt, the schedule expression, or enable/disable the task. "
+            "Only provide the fields you want to change."
+        ),
         "version": "1.0.0",
         "input_schema": {
             "type": "object",
             "properties": {
                 "task_id": {
                     "type": "string",
-                    "description": "要更新的任務 ID",
+                    "description": "UUID of the scheduled task to update.",
                 },
                 "prompt": {
                     "type": "string",
-                    "description": "新的 prompt（可選）",
+                    "description": "New prompt to send when the task fires. Omit to keep the current prompt.",
                 },
                 "schedule_expression": {
                     "type": "string",
-                    "description": "新的排程表達式（可選）",
+                    "description": "New schedule expression in the same format as create_cron_task. Omit to keep the current schedule.",
                 },
                 "is_active": {
                     "type": "boolean",
-                    "description": "啟用或停用任務（可選）",
+                    "description": "Set to true to enable the task or false to disable it without deleting it.",
                 },
             },
             "required": ["task_id"],
@@ -359,14 +394,17 @@ TOOLS = [
     },
     {
         "name": "delete_my_cron_task",
-        "description": "刪除排程任務。",
+        "description": (
+            "Permanently delete a scheduled task owned by this agent. "
+            "This also removes its associated schedule. Use update_my_cron_task with is_active=false to disable without deleting."
+        ),
         "version": "1.0.0",
         "input_schema": {
             "type": "object",
             "properties": {
                 "task_id": {
                     "type": "string",
-                    "description": "要刪除的任務 ID",
+                    "description": "UUID of the scheduled task to delete.",
                 },
             },
             "required": ["task_id"],
@@ -378,18 +416,21 @@ TOOLS = [
     # -----------------------------------------------------------------------
     {
         "name": "web_search",
-        "description": "使用 DuckDuckGo 搜索網絡。",
+        "description": (
+            "Search the web using DuckDuckGo and return a ranked list of results with titles, "
+            "snippets, and URLs. Use this to look up current information or verify facts."
+        ),
         "version": "1.0.0",
         "input_schema": {
             "type": "object",
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "搜索查詢字符串",
+                    "description": "Search query string.",
                 },
                 "num_results": {
                     "type": "integer",
-                    "description": "要返回的結果數量（預設：5，最大：10）",
+                    "description": "Number of results to return (default: 5, max: 10).",
                     "default": 5,
                 },
             },
@@ -399,18 +440,21 @@ TOOLS = [
     },
     {
         "name": "web_fetch",
-        "description": "抓取 URL 並提取可讀的文字內容。",
+        "description": (
+            "Fetch a URL and extract its readable plain-text content, stripping HTML tags, "
+            "scripts, and styles. Use this to read the full content of a specific page found via web_search."
+        ),
         "version": "1.0.0",
         "input_schema": {
             "type": "object",
             "properties": {
                 "url": {
                     "type": "string",
-                    "description": "要抓取的 URL",
+                    "description": "The URL to fetch.",
                 },
                 "max_length": {
                     "type": "integer",
-                    "description": "返回文字的最大字符數（預設：5000）",
+                    "description": "Maximum number of characters to return from the extracted text (default: 5000).",
                     "default": 5000,
                 },
             },
@@ -423,7 +467,11 @@ TOOLS = [
     # -----------------------------------------------------------------------
     {
         "name": "agents_list",
-        "description": "列出同一用戶下所有 sub-agent（is_sub_agent=True）的資訊。",
+        "description": (
+            "List all sub-agents (is_sub_agent=True) that belong to the same user as the calling agent. "
+            "Returns each sub-agent's name, ID, current status, and agent type ID. "
+            "Use this to discover available agents before spawning a collaboration session."
+        ),
         "version": "1.0.0",
         "input_schema": {
             "type": "object",
@@ -434,18 +482,22 @@ TOOLS = [
     },
     {
         "name": "sessions_history",
-        "description": "獲取另一個 session / sub-agent 的對話歷史記錄。",
+        "description": (
+            "Fetch the message history of a collaboration session in chronological order. "
+            "Each entry shows the timestamp, message type, sender agent ID, and content. "
+            "Use this to catch up on what another agent has said or done in a shared session."
+        ),
         "version": "1.0.0",
         "input_schema": {
             "type": "object",
             "properties": {
                 "session_id": {
                     "type": "string",
-                    "description": "協作 session 的 session_id（如 session-<uuid>）",
+                    "description": "The session_id string of the collaboration session to read, e.g. 'session-<uuid>'.",
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "最多返回的訊息數（預設：50）",
+                    "description": "Maximum number of messages to return, ordered oldest-first (default: 50).",
                     "default": 50,
                 },
             },
@@ -455,38 +507,36 @@ TOOLS = [
     },
     {
         "name": "sessions_send",
-        "description": "透過協作 session 向另一個 agent 發送訊息。",
+        "description": (
+            "Send a message to another agent through an existing collaboration session. "
+            "The message is stored in the session history and can be read by the receiver via sessions_history. "
+            "Specify receiver_agent_id to target a specific agent, or leave blank to broadcast to all session participants."
+        ),
         "version": "1.0.0",
         "input_schema": {
             "type": "object",
             "properties": {
                 "session_id": {
                     "type": "string",
-                    "description": "協作 session 的 session_id",
+                    "description": "The session_id string of the collaboration session to send the message into.",
                 },
                 "content": {
                     "type": "string",
-                    "description": "要發送的訊息內容",
+                    "description": "Text content of the message to send.",
                 },
                 "receiver_agent_id": {
                     "type": "string",
-                    "description": "接收 agent 的 UUID（可選，空表示廣播）",
+                    "description": "UUID of the agent instance that should receive the message. Leave empty to broadcast to all participants.",
                     "default": "",
                 },
                 "sender_agent_id": {
                     "type": "string",
-                    "description": (
-                        "發送 agent 的 UUID（可選，"
-                        "不填則使用當前 agent）"
-                    ),
+                    "description": "UUID of the agent instance sending the message. Defaults to the calling agent when left empty.",
                     "default": "",
                 },
                 "message_type": {
                     "type": "string",
-                    "description": (
-                        "訊息類型：request、response、notification、"
-                        "ack、tool_call、tool_result（預設：request）"
-                    ),
+                    "description": "Semantic type of the message: 'request' (default), 'response', 'notification', 'ack', 'tool_call', or 'tool_result'.",
                     "default": "request",
                 },
             },
@@ -496,18 +546,22 @@ TOOLS = [
     },
     {
         "name": "sessions_spawn",
-        "description": "與目標 agent 建立新的協作 session。",
+        "description": (
+            "Create a new collaboration session between the calling agent and a target agent. "
+            "Returns a session_id that can be used with sessions_send and sessions_history. "
+            "Use agents_list first to discover available agent IDs."
+        ),
         "version": "1.0.0",
         "input_schema": {
             "type": "object",
             "properties": {
                 "to_agent_id": {
                     "type": "string",
-                    "description": "目標 agent 實例的 UUID",
+                    "description": "UUID of the target agent instance to open a collaboration session with.",
                 },
                 "session_name": {
                     "type": "string",
-                    "description": "Session 名稱（可選）",
+                    "description": "Optional human-readable name for the session. Auto-generated from both agent names if omitted.",
                     "default": "",
                 },
             },
@@ -518,8 +572,9 @@ TOOLS = [
     {
         "name": "session_status",
         "description": (
-            "顯示當前 agent 的狀態卡（用量、時間、模型資訊）；"
-            "適用於模型用量查詢（📊 session_status）。"
+            "Show a status card for the calling agent, including its name, current state, "
+            "last heartbeat time, and the most recent token usage (input tokens, output tokens, model name). "
+            "Use this to answer questions about model usage or to verify the agent is running correctly."
         ),
         "version": "1.0.0",
         "input_schema": {
