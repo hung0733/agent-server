@@ -15,12 +15,18 @@ from api.auth import DashboardAuthService
 from api.auth import hash_api_key
 from api.dashboard import DashboardDataProvider
 from db.dao.api_key_dao import APIKeyDAO
+from db.dao.agent_instance_dao import AgentInstanceDAO
+from db.dao.agent_tool_dao import AgentInstanceToolDAO
 from db.crypto import CryptoManager
 from db.dao.llm_endpoint_dao import LLMEndpointDAO
 from db.dao.llm_endpoint_group_dao import LLMEndpointGroupDAO
 from db.dao.llm_level_endpoint_dao import LLMLevelEndpointDAO
+from db.dao.tool_dao import ToolDAO
 from db.dto.llm_endpoint_dto import LLMEndpointCreate, LLMEndpointUpdate, LLMLevelEndpointCreate
+from db.dto.agent_tool_dto import AgentInstanceToolCreate, AgentInstanceToolUpdate
 from db.dto.user_dto import APIKeyCreate, APIKeyUpdate
+from db.dao.agent_type_dao import AgentTypeDAO
+from db.dto.agent_dto import AgentTypeCreate, AgentTypeUpdate
 
 
 def _parse_optional_datetime(value):
@@ -115,6 +121,12 @@ async def _dashboard_settings(request: web.Request) -> web.Response:
     provider = request.app[DASHBOARD_PROVIDER_KEY]
     auth_context = await _require_auth(request)
     return web.json_response(await provider.get_settings(user_id=auth_context["user_id"]))
+
+
+async def _dashboard_agent_tools(request: web.Request) -> web.Response:
+    provider = request.app[DASHBOARD_PROVIDER_KEY]
+    auth_context = await _require_auth(request)
+    return web.json_response(await provider.get_agent_tools(user_id=auth_context["user_id"]))
 
 
 def _serialize_endpoint(endpoint) -> dict:
@@ -242,6 +254,16 @@ async def _settings_put_mapping(request: web.Request) -> web.Response:
     )
 
 
+def _serialize_agent_type(at) -> dict:
+    return {
+        "id": str(at.id),
+        "name": at.name,
+        "description": at.description,
+        "isActive": at.is_active,
+        "createdAt": at.created_at.isoformat() if at.created_at else None,
+    }
+
+
 def _serialize_auth_key(key) -> dict:
     return {
         "id": str(key.id),
@@ -321,6 +343,112 @@ async def _settings_regenerate_auth_key(request: web.Request) -> web.Response:
     return web.json_response({"key": _serialize_auth_key(key), "rawKey": raw_key})
 
 
+async def _agent_types_list(request: web.Request) -> web.Response:
+    auth_context = await _require_auth(request)
+    items = await AgentTypeDAO.get_all(user_id=auth_context["user_id"])
+    return web.json_response({"agentTypes": [_serialize_agent_type(i) for i in items]})
+
+
+async def _agent_types_create(request: web.Request) -> web.Response:
+    auth_context = await _require_auth(request)
+    body = await request.json()
+    try:
+        agent_type = await AgentTypeDAO.create(
+            AgentTypeCreate(
+                user_id=auth_context["user_id"],
+                name=body["name"],
+                description=body.get("description"),
+                is_active=body.get("isActive", True),
+            )
+        )
+    except Exception as exc:
+        if "unique" in str(exc).lower() or "duplicate" in str(exc).lower():
+            raise web.HTTPConflict(
+                text=json.dumps({"error": "name_already_exists"}),
+                content_type="application/json",
+            )
+        raise
+    return web.json_response({"agentType": _serialize_agent_type(agent_type)}, status=201)
+
+
+async def _agent_types_update(request: web.Request) -> web.Response:
+    auth_context = await _require_auth(request)
+    agent_type_id = UUID(request.match_info["agent_type_id"])
+    existing = await AgentTypeDAO.get_by_id(agent_type_id)
+    if existing is None or existing.user_id != auth_context["user_id"]:
+        raise web.HTTPNotFound()
+    body = await request.json()
+    updated = await AgentTypeDAO.update(
+        AgentTypeUpdate(
+            id=agent_type_id,
+            name=body.get("name"),
+            description=body.get("description"),
+            is_active=body.get("isActive"),
+        )
+    )
+    if updated is None:
+        raise web.HTTPNotFound()
+    return web.json_response({"agentType": _serialize_agent_type(updated)})
+
+
+async def _agent_types_delete(request: web.Request) -> web.Response:
+    auth_context = await _require_auth(request)
+    agent_type_id = UUID(request.match_info["agent_type_id"])
+    existing = await AgentTypeDAO.get_by_id(agent_type_id)
+    if existing is None or existing.user_id != auth_context["user_id"]:
+        raise web.HTTPNotFound()
+    await AgentTypeDAO.delete(agent_type_id)
+    return web.json_response({"deleted": True})
+
+
+async def _agent_tool_update(request: web.Request) -> web.Response:
+    auth_context = await _require_auth(request)
+    agent_id = UUID(request.match_info["agent_id"])
+    tool_id = UUID(request.match_info["tool_id"])
+
+    agent = await AgentInstanceDAO.get_by_id(agent_id)
+    if agent is None or agent.user_id != auth_context["user_id"]:
+        raise web.HTTPNotFound()
+
+    tool = await ToolDAO.get_by_id(tool_id)
+    if tool is None:
+        raise web.HTTPNotFound()
+
+    body = await request.json()
+    is_enabled = bool(body.get("isEnabled", True))
+
+    overrides = await AgentInstanceToolDAO.get_overrides_for_instance(agent_id)
+    existing = next((override for override in overrides if override.tool_id == tool_id), None)
+
+    if existing is None:
+        updated = await AgentInstanceToolDAO.assign(
+            AgentInstanceToolCreate(
+                agent_instance_id=agent_id,
+                tool_id=tool_id,
+                is_enabled=is_enabled,
+            )
+        )
+    else:
+        updated = await AgentInstanceToolDAO.update(
+            AgentInstanceToolUpdate(id=existing.id, is_enabled=is_enabled)
+        )
+
+    if updated is None:
+        raise web.HTTPNotFound()
+
+    return web.json_response(
+        {
+            "tool": {
+                "id": str(updated.id),
+                "agentInstanceId": str(updated.agent_instance_id),
+                "toolId": str(updated.tool_id),
+                "isEnabled": updated.is_enabled,
+                "configOverride": updated.config_override,
+            }
+        }
+    )
+
+
 def _default_frontend_dist() -> Path:
     return Path(__file__).resolve().parents[2] / "frontend" / "dist"
 
@@ -363,6 +491,7 @@ def create_app(
     app.router.add_get("/api/dashboard/tasks", _dashboard_tasks)
     app.router.add_get("/api/dashboard/memory", _dashboard_memory)
     app.router.add_get("/api/dashboard/settings", _dashboard_settings)
+    app.router.add_get("/api/dashboard/agents/tools", _dashboard_agent_tools)
     app.router.add_post("/api/dashboard/settings/endpoints", _settings_create_endpoint)
     app.router.add_patch("/api/dashboard/settings/endpoints/{endpoint_id}", _settings_update_endpoint)
     app.router.add_delete("/api/dashboard/settings/endpoints/{endpoint_id}", _settings_delete_endpoint)
@@ -371,6 +500,11 @@ def create_app(
     app.router.add_patch("/api/dashboard/settings/auth-keys/{key_id}", _settings_update_auth_key)
     app.router.add_delete("/api/dashboard/settings/auth-keys/{key_id}", _settings_delete_auth_key)
     app.router.add_post("/api/dashboard/settings/auth-keys/{key_id}/regenerate", _settings_regenerate_auth_key)
+    app.router.add_patch("/api/dashboard/agents/{agent_id}/tools/{tool_id}", _agent_tool_update)
+    app.router.add_get("/api/dashboard/agent-types", _agent_types_list)
+    app.router.add_post("/api/dashboard/agent-types", _agent_types_create)
+    app.router.add_patch("/api/dashboard/agent-types/{agent_type_id}", _agent_types_update)
+    app.router.add_delete("/api/dashboard/agent-types/{agent_type_id}", _agent_types_delete)
 
     dist_path = frontend_dist or _default_frontend_dist()
     if dist_path.exists():
