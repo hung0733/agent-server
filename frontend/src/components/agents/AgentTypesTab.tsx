@@ -144,7 +144,8 @@ export default function AgentTypesTab() {
       )}
 
       {showForm && (
-        <div role="dialog" aria-modal="true" className="agent-type-modal">
+        <div className="agent-type-modal" onClick={closeForm}>
+          <div role="dialog" aria-modal="true" className="agent-type-modal-inner" onClick={(e) => e.stopPropagation()}>
           <h2>{editing ? t("agents.agentType.editTitle") : t("agents.agentType.createTitle")}</h2>
 
           <label>
@@ -183,6 +184,7 @@ export default function AgentTypesTab() {
               {t("agents.agentType.saveButton")}
             </button>
             <button onClick={closeForm}>{t("agents.agentType.cancelButton")}</button>
+          </div>
           </div>
         </div>
       )}
