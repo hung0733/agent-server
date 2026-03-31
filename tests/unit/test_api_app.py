@@ -510,6 +510,30 @@ async def test_agent_types_create_returns_201() -> None:
 
 
 @pytest.mark.asyncio
+async def test_agent_types_create_returns_409_on_duplicate_name() -> None:
+    from sqlalchemy.exc import IntegrityError
+    user_id = uuid4()
+    app = create_app(
+        _FakeQueue(),
+        _FakeDedup(),
+        dashboard_data_provider=_FakeDashboardProvider(),
+        auth_service=_FakeAuthService(user_id),
+    )
+    with patch("api.app.AgentTypeDAO") as mock_dao:
+        mock_dao.create = AsyncMock(side_effect=IntegrityError("unique", {}, Exception()))
+        async with TestClient(TestServer(app)) as client:
+            response = await client.post(
+                "/api/dashboard/agent-types",
+                headers={"X-API-Key": "good-key"},
+                json={"name": "Duplicate"},
+            )
+            payload = await response.json()
+
+    assert response.status == 409
+    assert payload["error"] == "name_already_exists"
+
+
+@pytest.mark.asyncio
 async def test_agent_types_update_returns_updated() -> None:
     from datetime import datetime, timezone
     user_id = uuid4()

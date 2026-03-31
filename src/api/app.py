@@ -10,6 +10,7 @@ from uuid import UUID
 from datetime import datetime
 
 from aiohttp import web
+from sqlalchemy.exc import IntegrityError
 
 from api.auth import DashboardAuthService
 from api.auth import hash_api_key
@@ -361,13 +362,11 @@ async def _agent_types_create(request: web.Request) -> web.Response:
                 is_active=body.get("isActive", True),
             )
         )
-    except Exception as exc:
-        if "unique" in str(exc).lower() or "duplicate" in str(exc).lower():
-            raise web.HTTPConflict(
-                text=json.dumps({"error": "name_already_exists"}),
-                content_type="application/json",
-            )
-        raise
+    except IntegrityError:
+        raise web.HTTPConflict(
+            text=json.dumps({"error": "name_already_exists"}),
+            content_type="application/json",
+        )
     return web.json_response({"agentType": _serialize_agent_type(agent_type)}, status=201)
 
 
