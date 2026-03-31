@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
@@ -60,6 +60,10 @@ class _FakeDashboardProvider:
     async def get_settings(self, user_id=None) -> dict:
         self.last_user_id = user_id
         return {"locales": ["zh-HK"], "featureFlags": {}, "endpoints": [], "groups": [], "authKeys": [], "source": "mixed"}
+
+    async def get_agent_tools(self, user_id=None) -> dict:
+        self.last_user_id = user_id
+        return {"agents": [], "availableTools": [], "source": "mixed"}
 
 
 class _FakeAuthService:
@@ -388,3 +392,219 @@ async def test_auth_key_delete_and_toggle_routes_are_user_scoped(monkeypatch) ->
     assert patch_payload["key"]["isActive"] is False
     assert delete_response.status == 200
     assert delete_payload == {"deleted": True}
+
+
+@pytest.mark.asyncio
+async def test_agent_tools_routes_return_provider_payloads_and_update_overrides(monkeypatch) -> None:
+    user_id = uuid4()
+    agent_id = uuid4()
+    tool_id = uuid4()
+    override_id = uuid4()
+
+    monkeypatch.setattr(
+        app_module.AgentInstanceDAO,
+        "get_by_id",
+        AsyncMock(return_value=type("Agent", (), {"id": agent_id, "user_id": user_id})()),
+    )
+    monkeypatch.setattr(
+        app_module.AgentInstanceToolDAO,
+        "get_overrides_for_instance",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        app_module.AgentInstanceToolDAO,
+        "assign",
+        AsyncMock(return_value=type("Override", (), {"id": override_id, "agent_instance_id": agent_id, "tool_id": tool_id, "is_enabled": True, "config_override": None})()),
+    )
+    monkeypatch.setattr(
+        app_module.ToolDAO,
+        "get_by_id",
+        AsyncMock(return_value=type("Tool", (), {"id": tool_id, "name": "web_search", "description": "Search", "is_active": True})()),
+    )
+
+    provider = _FakeDashboardProvider()
+    app = create_app(
+        _FakeQueue(),
+        _FakeDedup(),
+        dashboard_data_provider=provider,
+        auth_service=_FakeAuthService(user_id),
+    )
+    server = TestServer(app)
+    client = TestClient(server)
+
+    await client.start_server()
+    try:
+        get_response = await client.get("/api/dashboard/agents/tools", headers={"X-API-Key": "good-key"})
+        get_payload = await get_response.json()
+
+        patch_response = await client.patch(
+            f"/api/dashboard/agents/{agent_id}/tools/{tool_id}",
+            headers={"X-API-Key": "good-key"},
+            json={"isEnabled": True},
+        )
+        patch_payload = await patch_response.json()
+    finally:
+        await client.close()
+
+    assert get_response.status == 200
+    assert get_payload["source"] == "mixed"
+    assert patch_response.status == 200
+    assert patch_payload["tool"]["id"] == str(override_id)
+
+
+@pytest.mark.asyncio
+async def test_agent_types_list_returns_empty_for_user() -> None:
+    user_id = uuid4()
+    app = create_app(
+        _FakeQueue(),
+        _FakeDedup(),
+        dashboard_data_provider=_FakeDashboardProvider(),
+        auth_service=_FakeAuthService(user_id),
+    )
+    with patch("api.app.AgentTypeDAO") as mock_dao:
+        mock_dao.get_all = AsyncMock(return_value=[])
+        async with TestClient(TestServer(app)) as client:
+            response = await client.get(
+                "/api/dashboard/agent-types", headers={"X-API-Key": "good-key"}
+            )
+            payload = await response.json()
+
+    assert response.status == 200
+    assert payload == {"agentTypes": []}
+    mock_dao.get_all.assert_awaited_once_with(user_id=user_id)
+
+
+@pytest.mark.asyncio
+async def test_agent_types_create_returns_201() -> None:
+    from datetime import datetime, timezone
+    user_id = uuid4()
+    type_id = uuid4()
+    now = datetime.now(timezone.utc)
+
+    fake = type(
+        "_FakeAgentType",
+        (),
+        {"id": type_id, "name": "TestType", "description": "desc", "is_active": True, "created_at": now, "user_id": user_id},
+    )()
+
+    app = create_app(
+        _FakeQueue(),
+        _FakeDedup(),
+        dashboard_data_provider=_FakeDashboardProvider(),
+        auth_service=_FakeAuthService(user_id),
+    )
+    with patch("api.app.AgentTypeDAO") as mock_dao:
+        mock_dao.create = AsyncMock(return_value=fake)
+        async with TestClient(TestServer(app)) as client:
+            response = await client.post(
+                "/api/dashboard/agent-types",
+                headers={"X-API-Key": "good-key"},
+                json={"name": "TestType", "description": "desc"},
+            )
+            payload = await response.json()
+
+    assert response.status == 201
+    assert payload["agentType"]["name"] == "TestType"
+    assert payload["agentType"]["description"] == "desc"
+    assert payload["agentType"]["isActive"] is True
+
+
+@pytest.mark.asyncio
+async def test_agent_types_update_returns_updated() -> None:
+    from datetime import datetime, timezone
+    user_id = uuid4()
+    type_id = uuid4()
+    now = datetime.now(timezone.utc)
+
+    fake = type(
+        "_FakeAgentType",
+        (),
+        {"id": type_id, "name": "Updated", "description": None, "is_active": False, "created_at": now, "user_id": user_id},
+    )()
+
+    app = create_app(
+        _FakeQueue(),
+        _FakeDedup(),
+        dashboard_data_provider=_FakeDashboardProvider(),
+        auth_service=_FakeAuthService(user_id),
+    )
+    with patch("api.app.AgentTypeDAO") as mock_dao:
+        mock_dao.get_by_id = AsyncMock(return_value=fake)
+        mock_dao.update = AsyncMock(return_value=fake)
+        async with TestClient(TestServer(app)) as client:
+            response = await client.patch(
+                f"/api/dashboard/agent-types/{type_id}",
+                headers={"X-API-Key": "good-key"},
+                json={"name": "Updated", "isActive": False},
+            )
+            payload = await response.json()
+
+    assert response.status == 200
+    assert payload["agentType"]["name"] == "Updated"
+    assert payload["agentType"]["isActive"] is False
+
+
+@pytest.mark.asyncio
+async def test_agent_types_update_returns_404_for_wrong_user() -> None:
+    user_id = uuid4()
+    other_user_id = uuid4()
+    type_id = uuid4()
+
+    fake = type("_FakeAgentType", (), {"id": type_id, "user_id": other_user_id})()
+
+    app = create_app(
+        _FakeQueue(),
+        _FakeDedup(),
+        dashboard_data_provider=_FakeDashboardProvider(),
+        auth_service=_FakeAuthService(user_id),
+    )
+    with patch("api.app.AgentTypeDAO") as mock_dao:
+        mock_dao.get_by_id = AsyncMock(return_value=fake)
+        async with TestClient(TestServer(app)) as client:
+            response = await client.patch(
+                f"/api/dashboard/agent-types/{type_id}",
+                headers={"X-API-Key": "good-key"},
+                json={"name": "Hacked"},
+            )
+
+    assert response.status == 404
+
+
+@pytest.mark.asyncio
+async def test_agent_types_delete_returns_deleted_true() -> None:
+    user_id = uuid4()
+    type_id = uuid4()
+
+    fake = type("_FakeAgentType", (), {"id": type_id, "user_id": user_id})()
+
+    app = create_app(
+        _FakeQueue(),
+        _FakeDedup(),
+        dashboard_data_provider=_FakeDashboardProvider(),
+        auth_service=_FakeAuthService(user_id),
+    )
+    with patch("api.app.AgentTypeDAO") as mock_dao:
+        mock_dao.get_by_id = AsyncMock(return_value=fake)
+        mock_dao.delete = AsyncMock(return_value=True)
+        async with TestClient(TestServer(app)) as client:
+            response = await client.delete(
+                f"/api/dashboard/agent-types/{type_id}",
+                headers={"X-API-Key": "good-key"},
+            )
+            payload = await response.json()
+
+    assert response.status == 200
+    assert payload == {"deleted": True}
+
+
+@pytest.mark.asyncio
+async def test_agent_types_require_auth() -> None:
+    app = create_app(
+        _FakeQueue(),
+        _FakeDedup(),
+        dashboard_data_provider=_FakeDashboardProvider(),
+    )
+    async with TestClient(TestServer(app)) as client:
+        response = await client.get("/api/dashboard/agent-types")
+
+    assert response.status == 401
