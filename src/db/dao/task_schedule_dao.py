@@ -88,7 +88,7 @@ class TaskScheduleDAO:
         
         if session is not None:
             session.add(entity)
-            await session.commit()
+            await session.flush()
             await session.refresh(entity)
         else:
             engine = create_engine()
@@ -98,7 +98,7 @@ class TaskScheduleDAO:
                 await s.commit()
                 await s.refresh(entity)
             await engine.dispose()
-        
+
         return TaskSchedule.model_validate(entity)
     
     @staticmethod

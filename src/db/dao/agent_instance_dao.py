@@ -88,7 +88,7 @@ class AgentInstanceDAO:
         
         if session is not None:
             session.add(entity)
-            await session.commit()
+            await session.flush()
             await session.refresh(entity)
         else:
             # Create internal session if none provided

@@ -117,7 +117,7 @@ class TaskDAO:
         
         if session is not None:
             session.add(entity)
-            await session.commit()
+            await session.flush()
             await session.refresh(entity)
         else:
             engine = create_engine()
@@ -127,9 +127,9 @@ class TaskDAO:
                 await s.commit()
                 await s.refresh(entity)
             await engine.dispose()
-        
+
         return Task.model_validate(entity)
-    
+
     @staticmethod
     async def get_by_id(
         task_id: UUID,

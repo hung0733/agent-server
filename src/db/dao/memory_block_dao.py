@@ -33,7 +33,7 @@ class MemoryBlockDAO:
 
         if session is not None:
             session.add(entity)
-            await session.commit()
+            await session.flush()
             await session.refresh(entity)
         else:
             from db import create_engine, AsyncSession, async_sessionmaker
@@ -104,19 +104,22 @@ class MemoryBlockDAO:
         dto: MemoryBlockUpdate,
         session: Optional[AsyncSession] = None,
     ) -> Optional[MemoryBlock]:
-        async def _update(s: AsyncSession) -> Optional[MemoryBlockEntity]:
+        async def _update(s: AsyncSession, flush_only: bool = False) -> Optional[MemoryBlockEntity]:
             entity = await s.get(MemoryBlockEntity, dto.id)
             if entity is None:
                 return None
             for field, value in dto.model_dump(exclude_unset=True, exclude={"id"}).items():
                 if hasattr(entity, field):
                     setattr(entity, field, value)
-            await s.commit()
+            if flush_only:
+                await s.flush()
+            else:
+                await s.commit()
             await s.refresh(entity)
             return entity
 
         if session is not None:
-            entity = await _update(session)
+            entity = await _update(session, flush_only=True)
         else:
             from db import create_engine, AsyncSession, async_sessionmaker
             engine = create_engine()

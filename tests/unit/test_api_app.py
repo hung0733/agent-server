@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
@@ -647,6 +647,7 @@ async def test_agents_create_accepts_endpoint_group_and_memory_blocks(monkeypatc
         (),
         {
             "id": agent_id_val,
+            "user_id": user_id,
             "name": "Butler",
             "agent_type_id": agent_type_id,
             "status": "idle",
@@ -661,6 +662,19 @@ async def test_agents_create_accepts_endpoint_group_and_memory_blocks(monkeypatc
     )()
     fake_session = type("Session", (), {"id": uuid4()})()
     fake_block = type("Block", (), {"id": uuid4()})()
+    fake_task = type("Task", (), {"id": uuid4()})()
+    fake_schedule = type("Schedule", (), {"id": uuid4()})()
+
+    # Mock the transaction machinery so no real DB engine is created
+    fake_db_session = MagicMock()
+    fake_db_session.__aenter__ = AsyncMock(return_value=fake_db_session)
+    fake_db_session.__aexit__ = AsyncMock(return_value=False)
+    fake_db_session.begin = MagicMock(return_value=fake_db_session)
+    fake_session_factory = MagicMock(return_value=fake_db_session)
+    fake_engine = MagicMock()
+    fake_engine.dispose = AsyncMock()
+    monkeypatch.setattr("api.app.create_engine", MagicMock(return_value=fake_engine))
+    monkeypatch.setattr("api.app.async_sessionmaker", MagicMock(return_value=fake_session_factory))
 
     monkeypatch.setattr("api.app.AgentTypeDAO.get_by_id", AsyncMock(return_value=fake_type))
     monkeypatch.setattr("api.app.AgentInstanceDAO.create", AsyncMock(return_value=fake_agent))
@@ -671,6 +685,8 @@ async def test_agents_create_accepts_endpoint_group_and_memory_blocks(monkeypatc
     monkeypatch.setattr(
         "api.app.MemoryBlockDAO.get_by_agent_instance_id", AsyncMock(return_value=[])
     )
+    monkeypatch.setattr("api.app.TaskDAO.create", AsyncMock(return_value=fake_task))
+    monkeypatch.setattr("api.app.TaskScheduleDAO.create", AsyncMock(return_value=fake_schedule))
 
     app = create_app(
         _FakeQueue(),

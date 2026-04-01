@@ -6,7 +6,7 @@ import json
 import logging
 from pathlib import Path
 import secrets
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 from uuid import UUID, uuid4
 from datetime import datetime, timezone
 
@@ -41,6 +41,7 @@ from db.dao.task_schedule_dao import TaskScheduleDAO
 from db.dto.task_dto import TaskCreate
 from db.dto.task_schedule_dto import TaskScheduleCreate
 from db.types import CollaborationStatus, TaskStatus, Priority, ScheduleType
+from db import AsyncSession, async_sessionmaker, create_engine
 from scheduler.task_scheduler import calculate_next_run
 
 
@@ -120,7 +121,11 @@ async def _dashboard_agents(request: web.Request) -> web.Response:
     return web.json_response(await provider.get_agents(user_id=auth_context["user_id"]))
 
 
-async def _upsert_memory_blocks(agent_instance_id: UUID, memory_blocks: dict) -> None:
+async def _upsert_memory_blocks(
+    agent_instance_id: UUID,
+    memory_blocks: dict,
+    session: Optional[AsyncSession] = None,
+) -> None:
     """Create or update memory blocks for an agent instance.
 
     Only processes non-empty content values. Matches existing blocks by
@@ -128,14 +133,15 @@ async def _upsert_memory_blocks(agent_instance_id: UUID, memory_blocks: dict) ->
     """
     if not memory_blocks:
         return
-    existing = await MemoryBlockDAO.get_by_agent_instance_id(agent_instance_id)
+    existing = await MemoryBlockDAO.get_by_agent_instance_id(agent_instance_id, session=session)
     existing_by_type = {b.memory_type: b for b in existing}
     for mem_type, content in memory_blocks.items():
         if not content:
             continue
         if mem_type in existing_by_type:
             await MemoryBlockDAO.update(
-                MemoryBlockUpdate(id=existing_by_type[mem_type].id, content=content)
+                MemoryBlockUpdate(id=existing_by_type[mem_type].id, content=content),
+                session=session,
             )
         else:
             await MemoryBlockDAO.create(
@@ -143,7 +149,8 @@ async def _upsert_memory_blocks(agent_instance_id: UUID, memory_blocks: dict) ->
                     agent_instance_id=agent_instance_id,
                     memory_type=mem_type,
                     content=content,
-                )
+                ),
+                session=session,
             )
 
 
@@ -163,47 +170,42 @@ _DEFAULT_SCHEDULES = [
 ]
 
 
-async def _create_default_task_schedules(agent) -> None:
+async def _create_default_task_schedules(agent, session: AsyncSession) -> None:
     """Create default recurring task schedules for a newly created agent."""
     now = datetime.now(timezone.utc)
     for spec in _DEFAULT_SCHEDULES:
-        try:
-            task = await TaskDAO.create(
-                TaskCreate(
-                    user_id=agent.user_id,
-                    agent_id=agent.id,
-                    task_type=spec["task_type"],
-                    status=TaskStatus.pending,
-                    priority=Priority.normal,
-                    payload={
-                        "task_execution_type": "method",
-                        "method_path": spec["method_path"],
-                        "description": _(spec["description"]),
-                    },
-                )
-            )
-            next_run = calculate_next_run(spec["cron"], ScheduleType.cron, now)
-            await TaskScheduleDAO.create(
-                TaskScheduleCreate(
-                    task_template_id=task.id,
-                    schedule_type=ScheduleType.cron,
-                    schedule_expression=spec["cron"],
-                    is_active=True,
-                    next_run_at=next_run,
-                )
-            )
-            logger.info(
-                _("[_create_default_task_schedules] 已建立排程: method=%s cron=%s agent=%s"),
-                spec["method_path"],
-                spec["cron"],
-                agent.id,
-            )
-        except Exception:
-            logger.exception(
-                _("[_create_default_task_schedules] 建立排程失敗: method=%s agent=%s"),
-                spec["method_path"],
-                agent.id,
-            )
+        task = await TaskDAO.create(
+            TaskCreate(
+                user_id=agent.user_id,
+                agent_id=agent.id,
+                task_type=spec["task_type"],
+                status=TaskStatus.pending,
+                priority=Priority.normal,
+                payload={
+                    "task_execution_type": "method",
+                    "method_path": spec["method_path"],
+                    "description": _(spec["description"]),
+                },
+            ),
+            session=session,
+        )
+        next_run = calculate_next_run(spec["cron"], ScheduleType.cron, now)
+        await TaskScheduleDAO.create(
+            TaskScheduleCreate(
+                task_template_id=task.id,
+                schedule_type=ScheduleType.cron,
+                schedule_expression=spec["cron"],
+                is_active=True,
+                next_run_at=next_run,
+            ),
+            session=session,
+        )
+        logger.info(
+            _("[_create_default_task_schedules] 已建立排程: method=%s cron=%s agent=%s"),
+            spec["method_path"],
+            spec["cron"],
+            agent.id,
+        )
 
 
 async def _agents_create(request: web.Request) -> web.Response:
@@ -222,44 +224,52 @@ async def _agents_create(request: web.Request) -> web.Response:
     endpoint_group_id = UUID(raw_endpoint_group_id) if raw_endpoint_group_id else None
 
     uuid_value = uuid4()
+    user_id = auth_context["user_id"]
 
-    agent = await AgentInstanceDAO.create(
-        AgentInstanceCreate(
-            agent_type_id=agent_type_id,
-            user_id=auth_context["user_id"],
-            name=body.get("name"),
-            agent_id=f"agent-{uuid_value}",
-            phone_no=body.get("phoneNo"),
-            whatsapp_key=body.get("whatsappKey"),
-            is_sub_agent=body.get("isSubAgent", False),
-            is_active=body.get("isActive", True),
-            status=body.get("status", "idle"),
-            endpoint_group_id=endpoint_group_id,
-        )
-    )
-
-    await CollaborationSessionDAO.create(
-        CollaborationSessionCreate(
-            user_id=auth_context["user_id"],
-            main_agent_id=agent.id,
-            session_id=f"default-{uuid_value}",
-            name=_("預設對話"),
-            status=CollaborationStatus.active,
-        )
-    )
-
-    await CollaborationSessionDAO.create(
-        CollaborationSessionCreate(
-            user_id=auth_context["user_id"],
-            main_agent_id=agent.id,
-            session_id=f"ghost-{uuid_value}",
-            name=_("心靈對話"),
-            status=CollaborationStatus.active,
-        )
-    )
-
-    await _upsert_memory_blocks(agent.id, body.get("memoryBlocks") or {})
-    await _create_default_task_schedules(agent)
+    engine = create_engine()
+    session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    try:
+        async with session_factory() as s:
+            async with s.begin():
+                agent = await AgentInstanceDAO.create(
+                    AgentInstanceCreate(
+                        agent_type_id=agent_type_id,
+                        user_id=user_id,
+                        name=body.get("name"),
+                        agent_id=f"agent-{uuid_value}",
+                        phone_no=body.get("phoneNo"),
+                        whatsapp_key=body.get("whatsappKey"),
+                        is_sub_agent=body.get("isSubAgent", False),
+                        is_active=body.get("isActive", True),
+                        status=body.get("status", "idle"),
+                        endpoint_group_id=endpoint_group_id,
+                    ),
+                    session=s,
+                )
+                await CollaborationSessionDAO.create(
+                    CollaborationSessionCreate(
+                        user_id=user_id,
+                        main_agent_id=agent.id,
+                        session_id=f"default-{uuid_value}",
+                        name=_("預設對話"),
+                        status=CollaborationStatus.active,
+                    ),
+                    session=s,
+                )
+                await CollaborationSessionDAO.create(
+                    CollaborationSessionCreate(
+                        user_id=user_id,
+                        main_agent_id=agent.id,
+                        session_id=f"ghost-{uuid_value}",
+                        name=_("心靈對話"),
+                        status=CollaborationStatus.active,
+                    ),
+                    session=s,
+                )
+                await _upsert_memory_blocks(agent.id, body.get("memoryBlocks") or {}, session=s)
+                await _create_default_task_schedules(agent, session=s)
+    finally:
+        await engine.dispose()
 
     return web.json_response({"agent": _serialize_agent_instance(agent)}, status=201)
 
