@@ -8,7 +8,7 @@ from pathlib import Path
 import secrets
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
-from datetime import datetime
+from datetime import datetime, timezone
 
 from aiohttp import web
 from sqlalchemy.exc import IntegrityError
@@ -36,7 +36,12 @@ from db.dto.agent_dto import AgentTypeCreate, AgentTypeUpdate, AgentInstanceCrea
 from db.dao.memory_block_dao import MemoryBlockDAO
 from db.dto.memory_block_dto import MemoryBlockCreate, MemoryBlockUpdate
 from db.dto.collaboration_dto import CollaborationSessionCreate
-from db.types import CollaborationStatus
+from db.dao.task_dao import TaskDAO
+from db.dao.task_schedule_dao import TaskScheduleDAO
+from db.dto.task_dto import TaskCreate
+from db.dto.task_schedule_dto import TaskScheduleCreate
+from db.types import CollaborationStatus, TaskStatus, Priority, ScheduleType
+from scheduler.task_scheduler import calculate_next_run
 
 
 def _parse_optional_datetime(value):
@@ -142,6 +147,65 @@ async def _upsert_memory_blocks(agent_instance_id: UUID, memory_blocks: dict) ->
             )
 
 
+_DEFAULT_SCHEDULES = [
+    {
+        "task_type": "scheduled_method",
+        "method_path": "agent.bulter@Bulter.review_ltm",
+        "cron": "0 16 * * *",   # 00:00 UTC+8 daily
+        "description": "Daily Long-Term Memory Review",
+    },
+    {
+        "task_type": "scheduled_method",
+        "method_path": "agent.bulter@Bulter.review_msg",
+        "cron": "0 17 * * *",   # 01:00 UTC+8 daily
+        "description": "Daily Message Memory Review",
+    },
+]
+
+
+async def _create_default_task_schedules(agent) -> None:
+    """Create default recurring task schedules for a newly created agent."""
+    now = datetime.now(timezone.utc)
+    for spec in _DEFAULT_SCHEDULES:
+        try:
+            task = await TaskDAO.create(
+                TaskCreate(
+                    user_id=agent.user_id,
+                    agent_id=agent.id,
+                    task_type=spec["task_type"],
+                    status=TaskStatus.pending,
+                    priority=Priority.normal,
+                    payload={
+                        "task_execution_type": "method",
+                        "method_path": spec["method_path"],
+                        "description": _(spec["description"]),
+                    },
+                )
+            )
+            next_run = calculate_next_run(spec["cron"], ScheduleType.cron, now)
+            await TaskScheduleDAO.create(
+                TaskScheduleCreate(
+                    task_template_id=task.id,
+                    schedule_type=ScheduleType.cron,
+                    schedule_expression=spec["cron"],
+                    is_active=True,
+                    next_run_at=next_run,
+                )
+            )
+            logger.info(
+                _("[_create_default_task_schedules] 已建立排程: method=%s cron=%s agent=%s"),
+                spec["method_path"],
+                spec["cron"],
+                agent.id,
+            )
+        except Exception:
+            logger.exception(
+                _("[_create_default_task_schedules] 建立排程失敗: method=%s agent=%s"),
+                spec["method_path"],
+                agent.id,
+            )
+
+
 async def _agents_create(request: web.Request) -> web.Response:
     auth_context = await _require_auth(request)
     body = await request.json()
@@ -195,6 +259,7 @@ async def _agents_create(request: web.Request) -> web.Response:
     )
 
     await _upsert_memory_blocks(agent.id, body.get("memoryBlocks") or {})
+    await _create_default_task_schedules(agent)
 
     return web.json_response({"agent": _serialize_agent_instance(agent)}, status=201)
 

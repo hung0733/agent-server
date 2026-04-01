@@ -67,7 +67,13 @@ class CollaborationSessionBase(BaseModel):
         description="JSONB field storing shared session context",
     )
     """Shared session context."""
-    
+
+    sender_agent_id: Optional[UUID] = Field(
+        default=None,
+        description="ID of the agent instance that initiated this session (agent-to-agent communication)",
+    )
+    """Initiating agent FK (optional)."""
+
     model_config = ConfigDict(
         extra="ignore",
         json_schema_extra={
@@ -88,18 +94,18 @@ class CollaborationSessionCreate(CollaborationSessionBase):
     Used for input validation when creating collaboration sessions.
     """
     
-    user_id: UUID = Field(
-        ...,
+    user_id: Optional[UUID] = Field(
+        default=None,
         description="ID of the owning user",
     )
     """Foreign key to the owning user."""
-    
+
     main_agent_id: UUID = Field(
         ...,
         description="ID of the main coordinating agent instance",
     )
     """Foreign key to the main agent."""
-    
+
     model_config = ConfigDict(
         extra="ignore",
         json_schema_extra={
@@ -158,7 +164,13 @@ class CollaborationSessionUpdate(BaseModel):
         description="Session end timestamp (UTC)",
     )
     """Session end timestamp."""
-    
+
+    sender_agent_id: Optional[UUID] = Field(
+        default=None,
+        description="ID of the agent instance that initiated this session",
+    )
+    """Initiating agent FK (optional)."""
+
     model_config = ConfigDict(
         extra="ignore",
         json_schema_extra={
@@ -184,18 +196,18 @@ class CollaborationSession(CollaborationSessionBase):
     )
     """Primary key - auto-generated UUID v4."""
     
-    user_id: UUID = Field(
-        ...,
+    user_id: Optional[UUID] = Field(
+        default=None,
         description="ID of the owning user",
     )
     """Foreign key to the owning user."""
-    
+
     main_agent_id: UUID = Field(
         ...,
         description="ID of the main coordinating agent instance",
     )
     """Foreign key to the main agent."""
-    
+
     ended_at: Optional[datetime] = Field(
         default=None,
         description="Session end timestamp (UTC)",

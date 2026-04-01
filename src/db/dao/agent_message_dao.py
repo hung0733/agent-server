@@ -587,6 +587,7 @@ class AgentMessageDAO:
                         or_(
                             CollaborationSessionEntity.session_id.like("session-%"),
                             CollaborationSessionEntity.session_id.like("default-%"),
+                            CollaborationSessionEntity.session_id.like("ghost-%"),
                         ),
                     )
                 )

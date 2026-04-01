@@ -46,6 +46,11 @@ start_frontend_dev() {
 }
 
 run_prod() {
+  printf 'Installing frontend dependencies...\n'
+  (
+    cd "$FRONTEND_DIR"
+    npm install
+  )
   printf 'Building frontend...\n'
   (
     cd "$FRONTEND_DIR"

@@ -1,27 +1,24 @@
 #!/usr/bin/env python3
 """
-Admin Script: Create scheduled LTM review task for an agent.
+Admin Script: Create scheduled review_msg task for an agent.
 
-Creates a method-type task that runs a daily LTM review for a specified agent.
-The review will trigger every day at 00:00 UTC+8 (16:00 UTC) using the review_ltm() method.
+Creates a method-type task that runs daily message memory analysis for a specified agent.
+The task calls Bulter.review_msg() every day at 01:00 UTC+8 (17:00 UTC).
 
 Usage:
-    python scripts/create_ltm_review_schedule.py --agent-id butler-001
-    python scripts/create_ltm_review_schedule.py --agent-id butler-001 --time "0 14 * * *"
+    python scripts/create_review_msg_schedule.py --agent-id otter
+    python scripts/create_review_msg_schedule.py --agent-id otter --time "0 17 * * *"
 
 Arguments:
-    --agent-id: Agent instance agent_id (e.g., 'butler-001')
-    --time: Optional cron expression (default: "0 16 * * *" = 00:00 UTC+8 daily)
+    --agent-id: Agent instance agent_id (e.g., 'otter')
+    --time: Optional cron expression (default: "0 17 * * *" = 01:00 UTC+8 daily)
 
 Example:
-    # Create daily 00:00 UTC+8 LTM review
-    python scripts/create_ltm_review_schedule.py --agent-id butler-001
+    # Create daily 01:00 UTC+8 review_msg schedule
+    python scripts/create_review_msg_schedule.py --agent-id otter
 
-    # Create daily 14:00 UTC LTM review
-    python scripts/create_ltm_review_schedule.py --agent-id butler-001 --time "0 14 * * *"
-
-    # Create weekly (Monday at 00:00 UTC+8) LTM review
-    python scripts/create_ltm_review_schedule.py --agent-id butler-001 --time "0 16 * * 1"
+    # Custom time
+    python scripts/create_review_msg_schedule.py --agent-id otter --time "0 20 * * *"
 """
 
 import asyncio
@@ -47,45 +44,48 @@ from db.dao.task_schedule_dao import TaskScheduleDAO
 from db.dao.agent_instance_dao import AgentInstanceDAO
 from db.dto.task_dto import TaskCreate
 from db.dto.task_schedule_dto import TaskScheduleCreate
-from db.types import TaskStatus, Priority, ScheduleType, TaskExecutionType
+from db.types import TaskStatus, Priority, ScheduleType
 from i18n import _
-from uuid import UUID
 from scheduler.task_scheduler import calculate_next_run
 
 logger = logging.getLogger(__name__)
 
+# 01:00 UTC+8 = 17:00 UTC
+DEFAULT_CRON = "0 17 * * *"
+METHOD_PATH = "agent.bulter@Bulter.review_msg"
 
-async def create_ltm_review_schedule(
+
+async def create_review_msg_schedule(
     agent_id_str: str,
-    cron_expression: str = "0 16 * * *",
+    cron_expression: str = DEFAULT_CRON,
 ) -> bool:
     """
-    Create a daily LTM review scheduled task for an agent.
+    Create a daily review_msg scheduled task for an agent.
 
     Args:
-        agent_id_str: Agent instance agent_id (e.g., 'butler-001')
-        cron_expression: Cron expression for schedule (default: 00:00 UTC+8 daily)
+        agent_id_str: Agent instance agent_id (e.g., 'otter')
+        cron_expression: Cron expression for schedule (default: 01:00 UTC+8 daily)
 
     Returns:
         True if successful, False otherwise
     """
     try:
         logger.info(
-            _("[create_ltm_review_schedule] 開始為 agent 創建 LTM 排程: %s"),
+            _("[create_review_msg_schedule] 開始為 agent 創建 review_msg 排程: %s"),
             agent_id_str,
         )
 
         # 1. Find agent instance
-        agent_instance = await AgentInstanceDAO.get_by_agent_id(agent_id_str) # type: ignore
+        agent_instance = await AgentInstanceDAO.get_by_agent_id(agent_id_str)  # type: ignore
         if not agent_instance:
             logger.error(
-                _("[create_ltm_review_schedule] Agent 不存在: %s"),
+                _("[create_review_msg_schedule] Agent 不存在: %s"),
                 agent_id_str,
             )
             return False
 
         logger.info(
-            _("[create_ltm_review_schedule] ✅ 找到 Agent: %s (%s)"),
+            _("[create_review_msg_schedule] ✅ 找到 Agent: %s (%s)"),
             agent_instance.name or agent_id_str,
             agent_instance.id,
         )
@@ -93,8 +93,8 @@ async def create_ltm_review_schedule(
         # 2. Create task (method type)
         task_payload = {
             "task_execution_type": "method",
-            "method_path": "src.agent.bulter@Bulter.review_ltm",
-            "description": _("Daily Long-Term Memory Review"),
+            "method_path": METHOD_PATH,
+            "description": _("Daily Message Memory Review"),
         }
 
         task = await TaskDAO.create(
@@ -109,7 +109,7 @@ async def create_ltm_review_schedule(
         )
 
         logger.info(
-            _("[create_ltm_review_schedule] ✅ Task 創建成功: %s"),
+            _("[create_review_msg_schedule] ✅ Task 創建成功: %s"),
             task.id,
         )
 
@@ -131,50 +131,47 @@ async def create_ltm_review_schedule(
         )
 
         logger.info(
-            _("[create_ltm_review_schedule] ✅ Schedule 創建成功: %s"),
+            _("[create_review_msg_schedule] ✅ Schedule 創建成功: %s"),
             schedule.id,
         )
 
         # 4. Print summary
         print("\n" + "=" * 70)
-        print(_("✅ LTM Review 排程已成功創建！"))
+        print(_("✅ review_msg 排程已成功創建！"))
         print("=" * 70)
         print(_("📋 詳細信息:"))
         print("")
         print(_("  Agent:"))
-        print(f"    ID:     {agent_instance.id}")
-        print(f"    名稱:   {agent_instance.name or agent_id_str}")
+        print(f"    ID:       {agent_instance.id}")
+        print(f"    名稱:     {agent_instance.name or agent_id_str}")
         print(f"    agent_id: {agent_id_str}")
         print("")
         print(_("  Task:"))
-        print(f"    ID:     {task.id}")
-        print(f"    類型:   {task.task_type}")
-        print(f"    方法:   {task.payload['method_path']}")
+        print(f"    ID:   {task.id}")
+        print(f"    類型: {task.task_type}")
+        print(f"    方法: {task.payload['method_path']}")
         print("")
         print(_("  Schedule:"))
-        print(f"    ID:     {schedule.id}")
-        print(f"    類型:   {schedule.schedule_type}")
-        print(f"    表達式: {schedule.schedule_expression}")
+        print(f"    ID:       {schedule.id}")
+        print(f"    類型:     {schedule.schedule_type}")
+        print(f"    表達式:   {schedule.schedule_expression}")
         print(f"    下次執行: {next_run.isoformat() if next_run else 'N/A'}")
-        print(f"    啟用:   {'✅ 是' if schedule.is_active else '❌ 否'}")
+        print(f"    啟用:     {'✅ 是' if schedule.is_active else '❌ 否'}")
         print("")
-        print(_("  執行頻率: "))
-        if cron_expression == "0 16 * * *":
-            print(_("    ⏰ 每日 00:00 UTC+8 (16:00 UTC)"))
-        elif cron_expression == "0 16 * * 1":
-            print(_("    ⏰ 每週一 00:00 UTC+8 (16:00 UTC)"))
+        if cron_expression == DEFAULT_CRON:
+            print(_("  執行頻率: ⏰ 每日 01:00 UTC+8 (17:00 UTC)"))
         else:
-            print(f"    ⏰ Cron: {cron_expression}")
+            print(f"  執行頻率: ⏰ Cron: {cron_expression}")
         print("")
         print("=" * 70)
         print("")
 
-        logger.info(_("[create_ltm_review_schedule] ✅ 完成！"))
+        logger.info(_("[create_review_msg_schedule] ✅ 完成！"))
         return True
 
     except Exception as e:
         logger.error(
-            _("[create_ltm_review_schedule] ❌ 失敗: %s"),
+            _("[create_review_msg_schedule] ❌ 失敗: %s"),
             str(e),
             exc_info=True,
         )
@@ -189,35 +186,32 @@ async def create_ltm_review_schedule(
 async def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(
-        description=_("為 Agent 創建每日 LTM Review 排程"),
+        description=_("為 Agent 創建每日 review_msg 排程"),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=_("""
 範例:
-  # 創建每日 00:00 UTC+8 的 review
-  python scripts/create_ltm_review_schedule.py --agent-id butler-001
+  # 創建每日 01:00 UTC+8 的 review_msg
+  python scripts/create_review_msg_schedule.py --agent-id otter
 
-  # 創建每日 14:00 UTC 的 review
-  python scripts/create_ltm_review_schedule.py --agent-id butler-001 --time "0 14 * * *"
-
-  # 創建每週一 00:00 UTC+8 的 review
-  python scripts/create_ltm_review_schedule.py --agent-id butler-001 --time "0 16 * * 1"
+  # 自訂時間
+  python scripts/create_review_msg_schedule.py --agent-id otter --time "0 20 * * *"
         """),
     )
 
     parser.add_argument(
         "--agent-id",
         required=True,
-        help=_("Agent instance ID (例如: butler-001)"),
+        help=_("Agent instance ID (例如: otter)"),
     )
     parser.add_argument(
         "--time",
-        default="0 16 * * *",
-        help=_("Cron 表達式 (預設: 每日 00:00 UTC+8 = \"0 16 * * *\")"),
+        default=DEFAULT_CRON,
+        help=_("Cron 表達式 (預設: 每日 01:00 UTC+8 = \"0 17 * * *\")"),
     )
 
     args = parser.parse_args()
 
-    success = await create_ltm_review_schedule(
+    success = await create_review_msg_schedule(
         args.agent_id,
         args.time,
     )

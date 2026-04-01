@@ -19,6 +19,7 @@ describe("AgentCard", () => {
           whatsappKey: null,
           agentTypeId: null,
           agentTypeName: null,
+          endpointGroupId: null,
         }}
       />,
     );

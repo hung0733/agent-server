@@ -65,6 +65,7 @@ export const agents: AgentCardData[] = [
     whatsappKey: null,
     agentTypeId: "type-research",
     agentTypeName: "研究型員工",
+    endpointGroupId: null,
   },
   {
     id: "otter",
@@ -80,6 +81,7 @@ export const agents: AgentCardData[] = [
     whatsappKey: null,
     agentTypeId: "type-assistant",
     agentTypeName: "助理型員工",
+    endpointGroupId: null,
   },
   {
     id: "pandas",
@@ -95,6 +97,7 @@ export const agents: AgentCardData[] = [
     whatsappKey: null,
     agentTypeId: "type-research",
     agentTypeName: "研究型員工",
+    endpointGroupId: null,
   },
 ];
 
