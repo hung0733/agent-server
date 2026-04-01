@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 import secrets
 from typing import TYPE_CHECKING
-from uuid import UUID
+from uuid import UUID, uuid4
 from datetime import datetime
 
 from aiohttp import web
@@ -14,6 +15,9 @@ from sqlalchemy.exc import IntegrityError
 
 from api.auth import DashboardAuthService
 from api.auth import hash_api_key
+from i18n import _
+
+logger = logging.getLogger(__name__)
 from api.dashboard import DashboardDataProvider
 from db.dao.api_key_dao import APIKeyDAO
 from db.dao.agent_instance_dao import AgentInstanceDAO
@@ -27,7 +31,10 @@ from db.dto.llm_endpoint_dto import LLMEndpointCreate, LLMEndpointUpdate, LLMLev
 from db.dto.agent_tool_dto import AgentInstanceToolCreate, AgentInstanceToolUpdate
 from db.dto.user_dto import APIKeyCreate, APIKeyUpdate
 from db.dao.agent_type_dao import AgentTypeDAO
-from db.dto.agent_dto import AgentTypeCreate, AgentTypeUpdate
+from db.dao.collaboration_session_dao import CollaborationSessionDAO
+from db.dto.agent_dto import AgentTypeCreate, AgentTypeUpdate, AgentInstanceCreate
+from db.dto.collaboration_dto import CollaborationSessionCreate
+from db.types import CollaborationStatus
 
 
 def _parse_optional_datetime(value):
@@ -104,6 +111,62 @@ async def _dashboard_agents(request: web.Request) -> web.Response:
     provider = request.app[DASHBOARD_PROVIDER_KEY]
     auth_context = await _require_auth(request)
     return web.json_response(await provider.get_agents(user_id=auth_context["user_id"]))
+
+
+async def _agents_create(request: web.Request) -> web.Response:
+    auth_context = await _require_auth(request)
+    body = await request.json()
+
+    agent_type_id = UUID(body["agentTypeId"])
+    existing_type = await AgentTypeDAO.get_by_id(agent_type_id)
+    if existing_type is None or existing_type.user_id != auth_context["user_id"]:
+        raise web.HTTPNotFound(
+            text=json.dumps({"error": "agent_type_not_found"}),
+            content_type="application/json",
+        )
+
+    # 1. 生成 UUID
+    uuid_value = uuid4()
+
+    # 2. 創建代理實例，設置 agent_id
+    agent = await AgentInstanceDAO.create(
+        AgentInstanceCreate(
+            agent_type_id=agent_type_id,
+            user_id=auth_context["user_id"],
+            name=body.get("name"),
+            agent_id=f"agent-{uuid_value}",
+            phone_no=body.get("phoneNo"),
+            whatsapp_key=body.get("whatsappKey"),
+            is_sub_agent=body.get("isSubAgent", False),
+            is_active=body.get("isActive", True),
+            status=body.get("status", "idle"),
+        )
+    )
+
+    # 3. 創建兩個 session
+    # 3.1. 預設對話
+    await CollaborationSessionDAO.create(
+        CollaborationSessionCreate(
+            user_id=auth_context["user_id"],
+            main_agent_id=agent.id,
+            session_id=f"default-{uuid_value}",
+            name=_("預設對話"),
+            status=CollaborationStatus.active,
+        )
+    )
+
+    # 3.2. 心靈對話
+    await CollaborationSessionDAO.create(
+        CollaborationSessionCreate(
+            user_id=auth_context["user_id"],
+            main_agent_id=agent.id,
+            session_id=f"ghost-{uuid_value}",
+            name=_("心靈對話"),
+            status=CollaborationStatus.active,
+        )
+    )
+
+    return web.json_response({"agent": _serialize_agent_instance(agent)}, status=201)
 
 
 async def _dashboard_tasks(request: web.Request) -> web.Response:
@@ -262,6 +325,21 @@ def _serialize_agent_type(at) -> dict:
         "description": at.description,
         "isActive": at.is_active,
         "createdAt": at.created_at.isoformat() if at.created_at else None,
+    }
+
+
+def _serialize_agent_instance(agent) -> dict:
+    return {
+        "id": str(agent.id),
+        "name": agent.name,
+        "agentTypeId": str(agent.agent_type_id) if agent.agent_type_id else None,
+        "status": agent.status,
+        "phoneNo": agent.phone_no,
+        "whatsappKey": agent.whatsapp_key,
+        "isSubAgent": agent.is_sub_agent,
+        "isActive": agent.is_active,
+        "agentId": agent.agent_id,
+        "createdAt": agent.created_at.isoformat() if agent.created_at else None,
     }
 
 
@@ -487,6 +565,7 @@ def create_app(
     app.router.add_get("/api/dashboard/overview", _dashboard_overview)
     app.router.add_get("/api/dashboard/usage", _dashboard_usage)
     app.router.add_get("/api/dashboard/agents", _dashboard_agents)
+    app.router.add_post("/api/dashboard/agents", _agents_create)
     app.router.add_get("/api/dashboard/tasks", _dashboard_tasks)
     app.router.add_get("/api/dashboard/memory", _dashboard_memory)
     app.router.add_get("/api/dashboard/settings", _dashboard_settings)
