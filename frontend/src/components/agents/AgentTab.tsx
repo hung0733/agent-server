@@ -2,13 +2,20 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   createAgent,
+  fetchAgentMemoryBlocks,
   fetchAgents,
   fetchAgentTypes,
+  fetchSettings,
   updateAgent,
 } from "../../api/dashboard";
 import { useDashboardResource } from "../../hooks/useDashboardResource";
 import { agentTypesPayload } from "../../mock/dashboard";
-import type { AgentCardData, AgentTypeItem, AgentsPayload } from "../../types/dashboard";
+import type {
+  AgentCardData,
+  AgentTypeItem,
+  AgentsPayload,
+  SettingsPayload,
+} from "../../types/dashboard";
 
 const EMPTY_AGENTS_PAYLOAD: AgentsPayload = { agents: [], source: "mock" };
 
@@ -19,6 +26,10 @@ interface FormState {
   whatsappKey: string;
   isActive: boolean;
   isSubAgent: boolean;
+  endpointGroupId: string;
+  soul: string;
+  userProfile: string;
+  identity: string;
 }
 
 const EMPTY_FORM: FormState = {
@@ -28,6 +39,10 @@ const EMPTY_FORM: FormState = {
   whatsappKey: "",
   isActive: true,
   isSubAgent: false,
+  endpointGroupId: "",
+  soul: "",
+  userProfile: "",
+  identity: "",
 };
 
 export default function AgentTab() {
@@ -48,6 +63,14 @@ export default function AgentTab() {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [memoryLoading, setMemoryLoading] = useState(false);
+
+  const { resource: settingsResource } = useDashboardResource(
+    fetchSettings,
+    { locales: [], featureFlags: {}, endpoints: [], groups: [], authKeys: [], source: "mock" } as SettingsPayload,
+    {},
+  );
+  const [endpointGroups, setEndpointGroups] = useState<SettingsPayload["groups"]>([]);
 
   useEffect(() => {
     setItems(resource.agents);
@@ -56,6 +79,10 @@ export default function AgentTab() {
   useEffect(() => {
     setAgentTypes(typesResource.agentTypes);
   }, [typesResource]);
+
+  useEffect(() => {
+    setEndpointGroups(settingsResource.groups);
+  }, [settingsResource]);
 
   function openCreate() {
     setEditing(null);
@@ -73,9 +100,29 @@ export default function AgentTab() {
       whatsappKey: item.whatsappKey ?? "",
       isActive: item.isActive,
       isSubAgent: item.isSubAgent,
+      endpointGroupId: item.endpointGroupId ?? "",
+      soul: "",
+      userProfile: "",
+      identity: "",
     });
     setFormError(null);
     setShowForm(true);
+    setMemoryLoading(true);
+    fetchAgentMemoryBlocks(item.id)
+      .then((blocks) => {
+        setForm((f) => ({
+          ...f,
+          soul: blocks.SOUL ?? "",
+          userProfile: blocks.USER_PROFILE ?? "",
+          identity: blocks.IDENTITY ?? "",
+        }));
+      })
+      .catch(() => {
+        // non-fatal — leave fields empty
+      })
+      .finally(() => {
+        setMemoryLoading(false);
+      });
   }
 
   function closeForm() {
@@ -104,6 +151,12 @@ export default function AgentTab() {
           whatsappKey: form.whatsappKey.trim() || undefined,
           isActive: form.isActive,
           isSubAgent: form.isSubAgent,
+          endpointGroupId: form.endpointGroupId || undefined,
+          memoryBlocks: {
+            SOUL: form.soul || undefined,
+            USER_PROFILE: form.userProfile || undefined,
+            IDENTITY: form.identity || undefined,
+          },
         });
         setItems((prev) => prev.map((i) => (i.id === editing.id ? result.agent : i)));
       } else {
@@ -114,6 +167,12 @@ export default function AgentTab() {
           whatsappKey: form.whatsappKey.trim() || undefined,
           isActive: form.isActive,
           isSubAgent: form.isSubAgent,
+          endpointGroupId: form.endpointGroupId || undefined,
+          memoryBlocks: {
+            SOUL: form.soul || undefined,
+            USER_PROFILE: form.userProfile || undefined,
+            IDENTITY: form.identity || undefined,
+          },
         });
         setItems((prev) => [...prev, result.agent]);
       }
@@ -219,6 +278,21 @@ export default function AgentTab() {
             </label>
 
             <label>
+              LLM Endpoint Group
+              <select
+                value={form.endpointGroupId}
+                onChange={(e) => setForm((f) => ({ ...f, endpointGroupId: e.target.value }))}
+              >
+                <option value="">（不指定）</option>
+                {endpointGroups.map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label>
               {t("agents.agent.phoneNoLabel")}
               <input
                 type="text"
@@ -237,6 +311,43 @@ export default function AgentTab() {
                 onChange={(e) => setForm((f) => ({ ...f, whatsappKey: e.target.value }))}
               />
             </label>
+
+            <fieldset style={{ border: "none", padding: 0, margin: "0.5rem 0" }}>
+              <legend style={{ fontWeight: 600, marginBottom: "0.5rem" }}>Memory Blocks</legend>
+
+              <label>
+                SOUL
+                <textarea
+                  rows={4}
+                  value={form.soul}
+                  disabled={memoryLoading}
+                  placeholder={memoryLoading ? "載入中…" : "人格、價值觀、語氣偏好、行為準則"}
+                  onChange={(e) => setForm((f) => ({ ...f, soul: e.target.value }))}
+                />
+              </label>
+
+              <label>
+                USER_PROFILE
+                <textarea
+                  rows={4}
+                  value={form.userProfile}
+                  disabled={memoryLoading}
+                  placeholder={memoryLoading ? "載入中…" : "使用者偏好、背景、習慣、長期需求"}
+                  onChange={(e) => setForm((f) => ({ ...f, userProfile: e.target.value }))}
+                />
+              </label>
+
+              <label>
+                IDENTITY
+                <textarea
+                  rows={4}
+                  value={form.identity}
+                  disabled={memoryLoading}
+                  placeholder={memoryLoading ? "載入中…" : "Agent 身份標記"}
+                  onChange={(e) => setForm((f) => ({ ...f, identity: e.target.value }))}
+                />
+              </label>
+            </fieldset>
 
             <label>
               <input
