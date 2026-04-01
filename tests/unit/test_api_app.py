@@ -702,3 +702,146 @@ async def test_agents_create_accepts_endpoint_group_and_memory_blocks(monkeypatc
     # Only SOUL was non-empty — MemoryBlockDAO.create called once
     from api.app import MemoryBlockDAO
     assert MemoryBlockDAO.create.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_agents_update_upserts_fields_and_memory_blocks(monkeypatch) -> None:
+    user_id = uuid4()
+    agent_instance_id = uuid4()
+    group_id = uuid4()
+
+    fake_agent_before = type(
+        "Agent",
+        (),
+        {
+            "id": agent_instance_id,
+            "user_id": user_id,
+            "name": "Old Name",
+            "agent_type_id": uuid4(),
+            "status": "idle",
+            "phone_no": None,
+            "whatsapp_key": None,
+            "is_sub_agent": False,
+            "is_active": True,
+            "agent_id": "agent-001",
+            "endpoint_group_id": None,
+            "created_at": None,
+        },
+    )()
+    fake_agent_after = type(
+        "Agent",
+        (),
+        {
+            "id": agent_instance_id,
+            "user_id": user_id,
+            "name": "New Name",
+            "agent_type_id": uuid4(),
+            "status": "idle",
+            "phone_no": None,
+            "whatsapp_key": None,
+            "is_sub_agent": False,
+            "is_active": True,
+            "agent_id": "agent-001",
+            "endpoint_group_id": group_id,
+            "created_at": None,
+        },
+    )()
+    fake_block = type(
+        "Block",
+        (),
+        {"id": uuid4(), "memory_type": "SOUL", "content": "old soul"},
+    )()
+
+    monkeypatch.setattr(
+        "api.app.AgentInstanceDAO.get_by_id", AsyncMock(return_value=fake_agent_before)
+    )
+    monkeypatch.setattr(
+        "api.app.AgentInstanceDAO.update", AsyncMock(return_value=fake_agent_after)
+    )
+    monkeypatch.setattr(
+        "api.app.MemoryBlockDAO.get_by_agent_instance_id",
+        AsyncMock(return_value=[fake_block]),
+    )
+    update_mock = AsyncMock(return_value=fake_block)
+    monkeypatch.setattr("api.app.MemoryBlockDAO.update", update_mock)
+    monkeypatch.setattr("api.app.MemoryBlockDAO.create", AsyncMock(return_value=fake_block))
+
+    app = create_app(
+        _FakeQueue(),
+        _FakeDedup(),
+        dashboard_data_provider=_FakeDashboardProvider(),
+        auth_service=_FakeAuthService(user_id),
+    )
+    server = TestServer(app)
+    client = TestClient(server)
+
+    await client.start_server()
+    try:
+        response = await client.patch(
+            f"/api/dashboard/agents/{agent_instance_id}",
+            headers={"X-API-Key": "good-key"},
+            json={
+                "name": "New Name",
+                "endpointGroupId": str(group_id),
+                "memoryBlocks": {"SOUL": "new soul content"},
+            },
+        )
+        payload = await response.json()
+    finally:
+        await client.close()
+
+    assert response.status == 200
+    assert payload["agent"]["name"] == "New Name"
+    assert payload["agent"]["endpointGroupId"] == str(group_id)
+    # SOUL existed → update called, not create
+    update_mock.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_agents_get_memory_blocks_returns_typed_dict(monkeypatch) -> None:
+    user_id = uuid4()
+    agent_instance_id = uuid4()
+
+    fake_agent = type(
+        "Agent",
+        (),
+        {"id": agent_instance_id, "user_id": user_id},
+    )()
+    soul_block = type(
+        "Block", (), {"memory_type": "SOUL", "content": "我是助手"}
+    )()
+    profile_block = type(
+        "Block", (), {"memory_type": "USER_PROFILE", "content": "用戶喜歡簡短回答"}
+    )()
+
+    monkeypatch.setattr(
+        "api.app.AgentInstanceDAO.get_by_id", AsyncMock(return_value=fake_agent)
+    )
+    monkeypatch.setattr(
+        "api.app.MemoryBlockDAO.get_by_agent_instance_id",
+        AsyncMock(return_value=[soul_block, profile_block]),
+    )
+
+    app = create_app(
+        _FakeQueue(),
+        _FakeDedup(),
+        dashboard_data_provider=_FakeDashboardProvider(),
+        auth_service=_FakeAuthService(user_id),
+    )
+    server = TestServer(app)
+    client = TestClient(server)
+
+    await client.start_server()
+    try:
+        response = await client.get(
+            f"/api/dashboard/agents/{agent_instance_id}/memory-blocks",
+            headers={"X-API-Key": "good-key"},
+        )
+        payload = await response.json()
+    finally:
+        await client.close()
+
+    assert response.status == 200
+    assert payload["SOUL"] == "我是助手"
+    assert payload["USER_PROFILE"] == "用戶喜歡簡短回答"
+    assert payload["IDENTITY"] == ""  # not present → empty string

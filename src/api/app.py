@@ -199,6 +199,67 @@ async def _agents_create(request: web.Request) -> web.Response:
     return web.json_response({"agent": _serialize_agent_instance(agent)}, status=201)
 
 
+async def _agents_update(request: web.Request) -> web.Response:
+    auth_context = await _require_auth(request)
+    agent_instance_id = UUID(request.match_info["agent_id"])
+    body = await request.json()
+
+    existing = await AgentInstanceDAO.get_by_id(agent_instance_id)
+    if existing is None or existing.user_id != auth_context["user_id"]:
+        raise web.HTTPNotFound(
+            text=json.dumps({"error": "agent_not_found"}),
+            content_type="application/json",
+        )
+
+    raw_endpoint_group_id = body.get("endpointGroupId")
+    endpoint_group_id = UUID(raw_endpoint_group_id) if raw_endpoint_group_id else None
+
+    update_kwargs: dict = {"id": agent_instance_id}
+    if "name" in body:
+        update_kwargs["name"] = body["name"]
+    if "phoneNo" in body:
+        update_kwargs["phone_no"] = body["phoneNo"]
+    if "whatsappKey" in body:
+        update_kwargs["whatsapp_key"] = body["whatsappKey"]
+    if "isSubAgent" in body:
+        update_kwargs["is_sub_agent"] = body["isSubAgent"]
+    if "isActive" in body:
+        update_kwargs["is_active"] = body["isActive"]
+    if raw_endpoint_group_id is not None:
+        update_kwargs["endpoint_group_id"] = endpoint_group_id
+
+    updated = await AgentInstanceDAO.update(AgentInstanceUpdate(**update_kwargs))
+    if updated is None:
+        raise web.HTTPNotFound(
+            text=json.dumps({"error": "agent_not_found"}),
+            content_type="application/json",
+        )
+
+    await _upsert_memory_blocks(agent_instance_id, body.get("memoryBlocks") or {})
+
+    return web.json_response({"agent": _serialize_agent_instance(updated)})
+
+
+async def _agents_get_memory_blocks(request: web.Request) -> web.Response:
+    auth_context = await _require_auth(request)
+    agent_instance_id = UUID(request.match_info["agent_id"])
+
+    existing = await AgentInstanceDAO.get_by_id(agent_instance_id)
+    if existing is None or existing.user_id != auth_context["user_id"]:
+        raise web.HTTPNotFound(
+            text=json.dumps({"error": "agent_not_found"}),
+            content_type="application/json",
+        )
+
+    blocks = await MemoryBlockDAO.get_by_agent_instance_id(agent_instance_id)
+    result = {"SOUL": "", "USER_PROFILE": "", "IDENTITY": ""}
+    for block in blocks:
+        if block.memory_type in result:
+            result[block.memory_type] = block.content
+
+    return web.json_response(result)
+
+
 async def _dashboard_tasks(request: web.Request) -> web.Response:
     provider = request.app[DASHBOARD_PROVIDER_KEY]
     auth_context = await _require_auth(request)
@@ -609,6 +670,8 @@ def create_app(
     app.router.add_patch("/api/dashboard/settings/auth-keys/{key_id}", _settings_update_auth_key)
     app.router.add_delete("/api/dashboard/settings/auth-keys/{key_id}", _settings_delete_auth_key)
     app.router.add_post("/api/dashboard/settings/auth-keys/{key_id}/regenerate", _settings_regenerate_auth_key)
+    app.router.add_patch("/api/dashboard/agents/{agent_id}", _agents_update)
+    app.router.add_get("/api/dashboard/agents/{agent_id}/memory-blocks", _agents_get_memory_blocks)
     app.router.add_patch("/api/dashboard/agents/{agent_id}/tools/{tool_id}", _agent_tool_update)
     app.router.add_get("/api/dashboard/agent-types", _agent_types_list)
     app.router.add_post("/api/dashboard/agent-types", _agent_types_create)
