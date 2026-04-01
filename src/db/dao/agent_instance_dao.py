@@ -83,6 +83,7 @@ class AgentInstanceDAO:
             config=dto.config,
             last_heartbeat_at=dto.last_heartbeat_at,
             is_sub_agent=dto.is_sub_agent,
+            endpoint_group_id=dto.endpoint_group_id,
         )
         
         if session is not None:
