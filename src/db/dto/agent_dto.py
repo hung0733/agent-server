@@ -361,6 +361,12 @@ class AgentInstanceUpdate(BaseModel):
     )
     """New sub-agent marker (optional)."""
 
+    is_active: Optional[bool] = Field(
+        default=None,
+        description="New active flag (False = soft-deleted)",
+    )
+    """Soft-delete flag (optional)."""
+
     model_config = ConfigDict(
         extra="ignore",
     )
