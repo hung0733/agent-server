@@ -397,7 +397,7 @@ async def exec_impl(
             stderr=asyncio.subprocess.STDOUT,
             cwd=working_dir,
         )
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        stdout, _stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
         output = stdout.decode(errors="replace")
         return f"{output}\n[exit code: {proc.returncode}]"
     except asyncio.TimeoutError:
