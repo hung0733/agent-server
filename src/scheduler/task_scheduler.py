@@ -67,43 +67,6 @@ def priority_to_int(priority: Priority | None) -> int:
     return priority_map.get(priority, 10)
 
 
-def calculate_retry_delay_seconds(consecutive_failures: int) -> int:
-    """
-    Calculate retry delay in seconds based on consecutive failure count.
-
-    Implements exponential backoff strategy:
-    - 1st failure: 30 seconds
-    - 2nd consecutive failure: 60 seconds (1 minute)
-    - 3rd consecutive failure: 300 seconds (5 minutes)
-    - 4th consecutive failure: 900 seconds (15 minutes)
-    - 5+ consecutive failures: 3600 seconds (60 minutes)
-
-    Args:
-        consecutive_failures: Number of consecutive execution failures
-
-    Returns:
-        Retry delay in seconds
-    """
-    if consecutive_failures == 0:
-        # No failures, no delay
-        return 0
-    elif consecutive_failures == 1:
-        # First failure: retry after 30 seconds
-        return 30
-    elif consecutive_failures == 2:
-        # Second consecutive failure: retry after 60 seconds
-        return 60
-    elif consecutive_failures == 3:
-        # Third consecutive failure: retry after 5 minutes
-        return 300
-    elif consecutive_failures == 4:
-        # Fourth consecutive failure: retry after 15 minutes
-        return 900
-    else:
-        # Fifth and subsequent consecutive failures: retry after 60 minutes
-        return 3600
-
-
 def calculate_next_run(
     schedule_expression: str,
     schedule_type: ScheduleType,
@@ -541,27 +504,12 @@ class TaskScheduler:
                     )
                 )
 
-                # Increment consecutive_failures and calculate retry delay
+                # Reschedule for 1 minute later
                 from datetime import timedelta
-                new_failure_count = schedule.consecutive_failures + 1
-                retry_delay_seconds = calculate_retry_delay_seconds(new_failure_count)
-                next_retry_time = current_time + timedelta(seconds=retry_delay_seconds)
-
-                logger.info(
-                    _(
-                        "[TaskScheduler._execute_schedule] 連續失敗次數: %d，將於 %d 秒後重試 (時間: %s)"
-                    ),
-                    new_failure_count,
-                    retry_delay_seconds,
-                    next_retry_time.isoformat(),
-                )
-
                 await TaskScheduleDAO.update(
                     TaskScheduleUpdate(
                         id=schedule.id,
-                        consecutive_failures=new_failure_count,
-                        last_failure_at=current_time,
-                        next_run_at=next_retry_time,
+                        next_run_at=current_time + timedelta(minutes=1),
                     )
                 )
                 return  # Don't update last_run_at since we're rescheduling
@@ -596,33 +544,7 @@ class TaskScheduler:
                 )
             )
 
-            # Increment consecutive_failures and calculate retry delay
-            from datetime import timedelta
-            new_failure_count = schedule.consecutive_failures + 1
-            retry_delay_seconds = calculate_retry_delay_seconds(new_failure_count)
-            next_retry_time = current_time + timedelta(seconds=retry_delay_seconds)
-
-            logger.info(
-                _(
-                    "[TaskScheduler._execute_schedule] 連續失敗次數: %d，將於 %d 秒後重試 (時間: %s)"
-                ),
-                new_failure_count,
-                retry_delay_seconds,
-                next_retry_time.isoformat(),
-            )
-
-            # Update schedule with failure info (don't update last_run_at - retry instead)
-            await TaskScheduleDAO.update(
-                TaskScheduleUpdate(
-                    id=schedule.id,
-                    consecutive_failures=new_failure_count,
-                    last_failure_at=current_time,
-                    next_run_at=next_retry_time,
-                )
-            )
-            return  # Don't proceed to update last_run_at or calculate next regular run
-
-        # 4. Update schedule's next_run_at (only reached if task succeeded)
+        # 4. Update schedule's next_run_at
         try:
             next_run = calculate_next_run(
                 schedule.schedule_expression,
@@ -630,14 +552,11 @@ class TaskScheduler:
                 current_time,
             )
 
-            # Reset failure tracking on successful execution
             await TaskScheduleDAO.update(
                 TaskScheduleUpdate(
                     id=schedule.id,
                     last_run_at=current_time,
                     next_run_at=next_run,
-                    consecutive_failures=0,
-                    last_failure_at=None,
                 )
             )
 

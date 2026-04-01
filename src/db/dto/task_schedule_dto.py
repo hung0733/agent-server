@@ -173,20 +173,7 @@ class TaskScheduleCreate(TaskScheduleBase):
         description="Last execution timestamp",
     )
     """Last run time."""
-
-    consecutive_failures: int = Field(
-        default=0,
-        ge=0,
-        description="Number of consecutive execution failures",
-    )
-    """Consecutive failure count (reset to 0 on success)."""
-
-    last_failure_at: Optional[datetime] = Field(
-        default=None,
-        description="Timestamp of the last execution failure",
-    )
-    """Last failure timestamp (NULL if never failed or last run succeeded)."""
-
+    
     @model_validator(mode="after")
     def validate_expression_format(self) -> "TaskScheduleCreate":
         """Validate schedule_expression format based on schedule_type."""
@@ -254,20 +241,7 @@ class TaskScheduleUpdate(BaseModel):
         description="Last execution timestamp",
     )
     """Last run time."""
-
-    consecutive_failures: Optional[int] = Field(
-        default=None,
-        ge=0,
-        description="Number of consecutive execution failures",
-    )
-    """Consecutive failure count (reset to 0 on success)."""
-
-    last_failure_at: Optional[datetime] = Field(
-        default=None,
-        description="Timestamp of the last execution failure",
-    )
-    """Last failure timestamp (NULL if never failed or last run succeeded)."""
-
+    
     @model_validator(mode="after")
     def validate_expression_if_provided(self) -> "TaskScheduleUpdate":
         """Validate schedule_expression format if provided."""
@@ -334,20 +308,7 @@ class TaskSchedule(TaskScheduleBase):
         description="Last update timestamp (UTC)",
     )
     """Timestamp when the record was last updated (UTC timezone)."""
-
-    consecutive_failures: int = Field(
-        default=0,
-        ge=0,
-        description="Number of consecutive execution failures",
-    )
-    """Consecutive failure count (reset to 0 on success)."""
-
-    last_failure_at: Optional[datetime] = Field(
-        default=None,
-        description="Timestamp of the last execution failure",
-    )
-    """Last failure timestamp (NULL if never failed or last run succeeded)."""
-
+    
     @model_validator(mode="after")
     def validate_expression_format(self) -> "TaskSchedule":
         """Validate schedule_expression format based on schedule_type."""
