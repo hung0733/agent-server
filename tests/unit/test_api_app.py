@@ -632,3 +632,73 @@ async def test_agent_types_require_auth() -> None:
         response = await client.get("/api/dashboard/agent-types")
 
     assert response.status == 401
+
+
+@pytest.mark.asyncio
+async def test_agents_create_accepts_endpoint_group_and_memory_blocks(monkeypatch) -> None:
+    user_id = uuid4()
+    agent_type_id = uuid4()
+    agent_id_val = uuid4()
+    endpoint_group_id = uuid4()
+
+    fake_type = type("AgentType", (), {"id": agent_type_id, "user_id": user_id})()
+    fake_agent = type(
+        "Agent",
+        (),
+        {
+            "id": agent_id_val,
+            "name": "Butler",
+            "agent_type_id": agent_type_id,
+            "status": "idle",
+            "phone_no": None,
+            "whatsapp_key": None,
+            "is_sub_agent": False,
+            "is_active": True,
+            "agent_id": f"agent-{agent_id_val}",
+            "endpoint_group_id": endpoint_group_id,
+            "created_at": None,
+        },
+    )()
+    fake_session = type("Session", (), {"id": uuid4()})()
+    fake_block = type("Block", (), {"id": uuid4()})()
+
+    monkeypatch.setattr("api.app.AgentTypeDAO.get_by_id", AsyncMock(return_value=fake_type))
+    monkeypatch.setattr("api.app.AgentInstanceDAO.create", AsyncMock(return_value=fake_agent))
+    monkeypatch.setattr(
+        "api.app.CollaborationSessionDAO.create", AsyncMock(return_value=fake_session)
+    )
+    monkeypatch.setattr("api.app.MemoryBlockDAO.create", AsyncMock(return_value=fake_block))
+    monkeypatch.setattr(
+        "api.app.MemoryBlockDAO.get_by_agent_instance_id", AsyncMock(return_value=[])
+    )
+
+    app = create_app(
+        _FakeQueue(),
+        _FakeDedup(),
+        dashboard_data_provider=_FakeDashboardProvider(),
+        auth_service=_FakeAuthService(user_id),
+    )
+    server = TestServer(app)
+    client = TestClient(server)
+
+    await client.start_server()
+    try:
+        response = await client.post(
+            "/api/dashboard/agents",
+            headers={"X-API-Key": "good-key"},
+            json={
+                "name": "Butler",
+                "agentTypeId": str(agent_type_id),
+                "endpointGroupId": str(endpoint_group_id),
+                "memoryBlocks": {"SOUL": "你是一個友善的助手", "USER_PROFILE": "", "IDENTITY": ""},
+            },
+        )
+        payload = await response.json()
+    finally:
+        await client.close()
+
+    assert response.status == 201
+    assert payload["agent"]["endpointGroupId"] == str(endpoint_group_id)
+    # Only SOUL was non-empty — MemoryBlockDAO.create called once
+    from api.app import MemoryBlockDAO
+    assert MemoryBlockDAO.create.call_count == 1

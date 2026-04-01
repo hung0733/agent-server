@@ -32,7 +32,9 @@ from db.dto.agent_tool_dto import AgentInstanceToolCreate, AgentInstanceToolUpda
 from db.dto.user_dto import APIKeyCreate, APIKeyUpdate
 from db.dao.agent_type_dao import AgentTypeDAO
 from db.dao.collaboration_session_dao import CollaborationSessionDAO
-from db.dto.agent_dto import AgentTypeCreate, AgentTypeUpdate, AgentInstanceCreate
+from db.dto.agent_dto import AgentTypeCreate, AgentTypeUpdate, AgentInstanceCreate, AgentInstanceUpdate
+from db.dao.memory_block_dao import MemoryBlockDAO
+from db.dto.memory_block_dto import MemoryBlockCreate, MemoryBlockUpdate
 from db.dto.collaboration_dto import CollaborationSessionCreate
 from db.types import CollaborationStatus
 
@@ -113,6 +115,33 @@ async def _dashboard_agents(request: web.Request) -> web.Response:
     return web.json_response(await provider.get_agents(user_id=auth_context["user_id"]))
 
 
+async def _upsert_memory_blocks(agent_instance_id: UUID, memory_blocks: dict) -> None:
+    """Create or update memory blocks for an agent instance.
+
+    Only processes non-empty content values. Matches existing blocks by
+    memory_type and updates them; creates new blocks when none exist.
+    """
+    if not memory_blocks:
+        return
+    existing = await MemoryBlockDAO.get_by_agent_instance_id(agent_instance_id)
+    existing_by_type = {b.memory_type: b for b in existing}
+    for mem_type, content in memory_blocks.items():
+        if not content:
+            continue
+        if mem_type in existing_by_type:
+            await MemoryBlockDAO.update(
+                MemoryBlockUpdate(id=existing_by_type[mem_type].id, content=content)
+            )
+        else:
+            await MemoryBlockDAO.create(
+                MemoryBlockCreate(
+                    agent_instance_id=agent_instance_id,
+                    memory_type=mem_type,
+                    content=content,
+                )
+            )
+
+
 async def _agents_create(request: web.Request) -> web.Response:
     auth_context = await _require_auth(request)
     body = await request.json()
@@ -125,10 +154,11 @@ async def _agents_create(request: web.Request) -> web.Response:
             content_type="application/json",
         )
 
-    # 1. 生成 UUID
+    raw_endpoint_group_id = body.get("endpointGroupId")
+    endpoint_group_id = UUID(raw_endpoint_group_id) if raw_endpoint_group_id else None
+
     uuid_value = uuid4()
 
-    # 2. 創建代理實例，設置 agent_id
     agent = await AgentInstanceDAO.create(
         AgentInstanceCreate(
             agent_type_id=agent_type_id,
@@ -140,11 +170,10 @@ async def _agents_create(request: web.Request) -> web.Response:
             is_sub_agent=body.get("isSubAgent", False),
             is_active=body.get("isActive", True),
             status=body.get("status", "idle"),
+            endpoint_group_id=endpoint_group_id,
         )
     )
 
-    # 3. 創建兩個 session
-    # 3.1. 預設對話
     await CollaborationSessionDAO.create(
         CollaborationSessionCreate(
             user_id=auth_context["user_id"],
@@ -155,7 +184,6 @@ async def _agents_create(request: web.Request) -> web.Response:
         )
     )
 
-    # 3.2. 心靈對話
     await CollaborationSessionDAO.create(
         CollaborationSessionCreate(
             user_id=auth_context["user_id"],
@@ -165,6 +193,8 @@ async def _agents_create(request: web.Request) -> web.Response:
             status=CollaborationStatus.active,
         )
     )
+
+    await _upsert_memory_blocks(agent.id, body.get("memoryBlocks") or {})
 
     return web.json_response({"agent": _serialize_agent_instance(agent)}, status=201)
 
@@ -339,6 +369,7 @@ def _serialize_agent_instance(agent) -> dict:
         "isSubAgent": agent.is_sub_agent,
         "isActive": agent.is_active,
         "agentId": agent.agent_id,
+        "endpointGroupId": str(agent.endpoint_group_id) if agent.endpoint_group_id else None,
         "createdAt": agent.created_at.isoformat() if agent.created_at else None,
     }
 

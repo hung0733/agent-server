@@ -447,6 +447,7 @@ class DashboardDataProvider:
                     "whatsappKey": row.whatsapp_key,
                     "agentTypeId": type_id,
                     "agentTypeName": type_name_lookup.get(type_id),
+                    "endpointGroupId": str(row.endpoint_group_id) if row.endpoint_group_id else None,
                 }
             )
 
