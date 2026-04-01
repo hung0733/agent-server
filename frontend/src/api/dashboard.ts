@@ -7,6 +7,7 @@ import {
   AgentTypesPayload,
   AgentUpdateBody,
   AgentsPayload,
+  MemoryBlocksInput,
   MemoryPayload,
   OverviewPayload,
   SettingsPayload,
@@ -89,6 +90,10 @@ export function fetchSettings(): Promise<SettingsPayload> {
 
 export function fetchAgentTools(): Promise<AgentToolsPayload> {
   return requestJson<AgentToolsPayload>("/api/dashboard/agents/tools");
+}
+
+export function fetchAgentMemoryBlocks(id: string): Promise<MemoryBlocksInput> {
+  return requestJson<MemoryBlocksInput>(`/api/dashboard/agents/${id}/memory-blocks`);
 }
 
 export function updateAgentTool(
