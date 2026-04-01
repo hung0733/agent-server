@@ -20,6 +20,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    Integer,
     String,
     Text,
     UniqueConstraint,
@@ -126,7 +127,21 @@ class TaskSchedule(Base):
         onupdate=now_utc,
     )
     """Last update timestamp (UTC)."""
-    
+
+    consecutive_failures: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+    """Number of consecutive execution failures (reset to 0 on success)."""
+
+    last_failure_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    """Timestamp of the last execution failure (NULL if never failed or last run succeeded)."""
+
     __table_args__ = (
         CheckConstraint(
             "schedule_type IN ('once', 'interval', 'cron')",
