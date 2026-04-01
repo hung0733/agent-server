@@ -32,6 +32,7 @@ export interface AgentCardData extends AgentSummary {
   whatsappKey: string | null;
   agentTypeId: string | null;
   agentTypeName: string | null;
+  endpointGroupId: string | null;
 }
 
 export interface AgentCreateBody {
@@ -41,6 +42,8 @@ export interface AgentCreateBody {
   whatsappKey?: string;
   isActive?: boolean;
   isSubAgent?: boolean;
+  endpointGroupId?: string;
+  memoryBlocks?: MemoryBlocksInput;
 }
 
 export interface AgentUpdateBody {
@@ -50,6 +53,14 @@ export interface AgentUpdateBody {
   whatsappKey?: string;
   isActive?: boolean;
   isSubAgent?: boolean;
+  endpointGroupId?: string;
+  memoryBlocks?: MemoryBlocksInput;
+}
+
+export interface MemoryBlocksInput {
+  SOUL?: string;
+  USER_PROFILE?: string;
+  IDENTITY?: string;
 }
 
 export interface TimelineItem {
