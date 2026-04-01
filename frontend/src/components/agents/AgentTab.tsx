@@ -278,12 +278,12 @@ export default function AgentTab() {
             </label>
 
             <label>
-              LLM Endpoint Group
+              {t("agents.agent.endpointGroupLabel")}
               <select
                 value={form.endpointGroupId}
                 onChange={(e) => setForm((f) => ({ ...f, endpointGroupId: e.target.value }))}
               >
-                <option value="">（不指定）</option>
+                <option value="">{t("agents.agent.endpointGroupPlaceholder")}</option>
                 {endpointGroups.map((g) => (
                   <option key={g.id} value={g.id}>
                     {g.name}
@@ -313,37 +313,37 @@ export default function AgentTab() {
             </label>
 
             <fieldset style={{ border: "none", padding: 0, margin: "0.5rem 0" }}>
-              <legend style={{ fontWeight: 600, marginBottom: "0.5rem" }}>Memory Blocks</legend>
+              <legend style={{ fontWeight: 600, marginBottom: "0.5rem" }}>{t("agents.agent.memoryBlocksLegend")}</legend>
 
               <label>
-                SOUL
+                {t("agents.agent.memorySoulLabel")}
                 <textarea
                   rows={4}
                   value={form.soul}
                   disabled={memoryLoading}
-                  placeholder={memoryLoading ? "載入中…" : "人格、價值觀、語氣偏好、行為準則"}
+                  placeholder={memoryLoading ? t("agents.agent.memoryLoadingPlaceholder") : t("agents.agent.memorySoulPlaceholder")}
                   onChange={(e) => setForm((f) => ({ ...f, soul: e.target.value }))}
                 />
               </label>
 
               <label>
-                USER_PROFILE
+                {t("agents.agent.memoryUserProfileLabel")}
                 <textarea
                   rows={4}
                   value={form.userProfile}
                   disabled={memoryLoading}
-                  placeholder={memoryLoading ? "載入中…" : "使用者偏好、背景、習慣、長期需求"}
+                  placeholder={memoryLoading ? t("agents.agent.memoryLoadingPlaceholder") : t("agents.agent.memoryUserProfilePlaceholder")}
                   onChange={(e) => setForm((f) => ({ ...f, userProfile: e.target.value }))}
                 />
               </label>
 
               <label>
-                IDENTITY
+                {t("agents.agent.memoryIdentityLabel")}
                 <textarea
                   rows={4}
                   value={form.identity}
                   disabled={memoryLoading}
-                  placeholder={memoryLoading ? "載入中…" : "Agent 身份標記"}
+                  placeholder={memoryLoading ? t("agents.agent.memoryLoadingPlaceholder") : t("agents.agent.memoryIdentityPlaceholder")}
                   onChange={(e) => setForm((f) => ({ ...f, identity: e.target.value }))}
                 />
               </label>
