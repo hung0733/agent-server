@@ -211,6 +211,8 @@ export const agentToolUpdatePayload: AgentToolUpdatePayload = {
 export const tasksPayload: TasksPayload = {
   items: taskTimeline,
   source: "mock",
+  hasMore: false,
+  nextCursor: null,
 };
 
 export const memoryPayload: MemoryPayload = {

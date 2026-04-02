@@ -76,8 +76,11 @@ export function fetchAgents(): Promise<AgentsPayload> {
   return requestJson<AgentsPayload>("/api/dashboard/agents");
 }
 
-export function fetchTasks(): Promise<TasksPayload> {
-  return requestJson<TasksPayload>("/api/dashboard/tasks");
+export function fetchTasks(before?: string): Promise<TasksPayload> {
+  const url = before 
+    ? `/api/dashboard/tasks?before=${encodeURIComponent(before)}`
+    : "/api/dashboard/tasks";
+  return requestJson<TasksPayload>(url);
 }
 
 export function fetchMemory(): Promise<MemoryPayload> {

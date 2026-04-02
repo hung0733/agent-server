@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from typing import Any
+from typing import Any, Optional
 
 from db.dao.agent_instance_dao import AgentInstanceDAO
 from db.dao.agent_type_dao import AgentTypeDAO
@@ -60,13 +60,13 @@ def _truncate_text(value: str, limit: int = 120) -> str:
 def _extract_message_content(content: Any) -> str:
     """Extract full message content without truncation."""
     if isinstance(content, str):
-        return " ".join(content.split())
+        return content.strip()
 
     if isinstance(content, dict):
         for key in ("summary", "content", "message", "text"):
             value = content.get(key)
             if isinstance(value, str) and value.strip():
-                return " ".join(value.split())
+                return value.strip()
 
         for value in content.values():
             extracted = _extract_message_content(value)
@@ -273,16 +273,34 @@ class DashboardDataProvider:
     async def get_agents(self, user_id=None) -> dict[str, Any]:
         return {"agents": await self._get_agents(limit=8, user_id=user_id), "source": "mixed"}
 
-    async def get_tasks(self, user_id=None) -> dict[str, Any]:
+    async def get_tasks(self, user_id=None, before: Optional[datetime] = None) -> dict[str, Any]:
         agent_lookup = await self._get_agent_name_lookup(user_id=user_id)
         agent_ids = set(agent_lookup)
-        task_rows = await self._get_user_scoped_task_rows(agent_ids=agent_ids, limit=8)
-        message_rows = await self._get_user_scoped_message_rows(agent_ids=agent_ids, limit=8)
+        
+        now = datetime.now(UTC)
+        if before is None:
+            end_time = now
+            start_time = now - timedelta(hours=24)
+        else:
+            end_time = before
+            start_time = before - timedelta(hours=24)
+        
+        task_rows = await self._get_user_scoped_task_rows(
+            agent_ids=agent_ids, 
+            limit=100,
+            start_time=start_time,
+            end_time=end_time,
+        )
+        message_rows = await self._get_user_scoped_message_rows(
+            agent_ids=agent_ids,
+            limit=100,
+            start_time=start_time,
+            end_time=end_time,
+        )
         items = []
 
         for task in task_rows:
             context = task.result_json if isinstance(task.result_json, dict) else {}
-            # Convert timestamp to server timezone
             timestamp = to_server_tz(task.queued_at).isoformat() if task.queued_at else _iso_now()
 
             items.append(
@@ -303,10 +321,8 @@ class DashboardDataProvider:
             )
 
         for message, session_id in message_rows:
-            # Get full content without truncation for frontend display
             full_content = _extract_message_content(message.content_json) or "最近消息已記錄。"
 
-            # Determine sourceAgent and targetAgent based on session_id and message_type
             source_agent, target_agent = _determine_agent_display(
                 session_id=session_id,
                 message_type=getattr(message, "message_type", "request"),
@@ -315,7 +331,6 @@ class DashboardDataProvider:
                 agent_lookup=agent_lookup,
             )
 
-            # Convert timestamp to server timezone
             timestamp = to_server_tz(message.created_at).isoformat() if message.created_at else _iso_now()
 
             items.append(
@@ -336,10 +351,18 @@ class DashboardDataProvider:
             )
 
         items.sort(key=lambda item: item["timestamp"], reverse=True)
-        if not items:
-            return {"items": [], "source": "mixed"}
-
-        return {"items": items[:8], "source": "mixed"}
+        
+        has_more = await self._has_more_messages(
+            agent_ids=agent_ids,
+            before=start_time,
+        )
+        
+        return {
+            "items": items,
+            "source": "mixed",
+            "hasMore": has_more,
+            "nextCursor": start_time.isoformat() if has_more else None,
+        }
 
     async def get_memory(self, user_id=None) -> dict[str, Any]:
         agent_lookup = await self._get_agent_name_lookup(user_id=user_id)
@@ -603,7 +626,13 @@ class DashboardDataProvider:
             for row in rows
         }
 
-    async def _get_user_scoped_task_rows(self, agent_ids: set[Any], limit: int) -> list[Any]:
+    async def _get_user_scoped_task_rows(
+        self, 
+        agent_ids: set[Any], 
+        limit: int,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
+    ) -> list[Any]:
         if not agent_ids:
             return []
 
@@ -611,7 +640,12 @@ class DashboardDataProvider:
         offset = 0
         batch_size = max(limit, 8)
         while len(rows) < limit:
-            batch = await self._get_task_rows(limit=batch_size, offset=offset)
+            batch = await self._get_task_rows(
+                limit=batch_size, 
+                offset=offset,
+                start_time=start_time,
+                end_time=end_time,
+            )
             if not batch:
                 break
 
@@ -622,12 +656,20 @@ class DashboardDataProvider:
 
         return rows[:limit]
 
-    async def _get_user_scoped_message_rows(self, agent_ids: set[Any], limit: int) -> list[tuple[Any, str]]:
+    async def _get_user_scoped_message_rows(
+        self, 
+        agent_ids: set[Any], 
+        limit: int,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
+    ) -> list[tuple[Any, str]]:
         """Get user-scoped message rows with session_id.
 
         Args:
             agent_ids: Set of agent IDs to filter by.
             limit: Maximum number of rows to return.
+            start_time: Optional start time for filtering.
+            end_time: Optional end time for filtering.
 
         Returns:
             List of tuples: (message, session_id).
@@ -639,7 +681,12 @@ class DashboardDataProvider:
         offset = 0
         batch_size = max(limit, 8)
         while len(rows) < limit:
-            batch = await self._get_message_rows(limit=batch_size, offset=offset)
+            batch = await self._get_message_rows(
+                limit=batch_size, 
+                offset=offset,
+                start_time=start_time,
+                end_time=end_time,
+            )
             if not batch:
                 break
 
@@ -712,14 +759,66 @@ class DashboardDataProvider:
         except Exception:
             return 0
 
-    async def _get_task_rows(self, limit: int, offset: int = 0):
+    async def _get_task_rows(
+        self, 
+        limit: int, 
+        offset: int = 0,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
+    ):
         try:
+            if start_time or end_time:
+                return await TaskQueueDAO.get_all_with_time_range(
+                    limit=limit,
+                    offset=offset,
+                    start_time=start_time,
+                    end_time=end_time,
+                )
             return await TaskQueueDAO.get_all(limit=limit, offset=offset)
         except Exception:
             return []
 
-    async def _get_message_rows(self, limit: int, offset: int = 0):
+    async def _get_message_rows(
+        self, 
+        limit: int, 
+        offset: int = 0,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
+    ):
         try:
+            if start_time or end_time:
+                return await AgentMessageDAO.get_all_with_session_id_and_time_range(
+                    limit=limit,
+                    offset=offset,
+                    start_time=start_time,
+                    end_time=end_time,
+                )
             return await AgentMessageDAO.get_all_with_session_id(limit=limit, offset=offset)
         except Exception:
             return []
+
+    async def _has_more_messages(
+        self,
+        agent_ids: set[Any],
+        before: datetime,
+    ) -> bool:
+        """Check if there are more messages before the given timestamp."""
+        if not agent_ids:
+            return False
+        
+        try:
+            older_messages = await self._get_user_scoped_message_rows(
+                agent_ids=agent_ids,
+                limit=1,
+                start_time=None,
+                end_time=before,
+            )
+            older_tasks = await self._get_user_scoped_task_rows(
+                agent_ids=agent_ids,
+                limit=1,
+                start_time=None,
+                end_time=before,
+            )
+            return len(older_messages) > 0 or len(older_tasks) > 0
+        except Exception:
+            return False

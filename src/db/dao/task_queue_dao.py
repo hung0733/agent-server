@@ -10,6 +10,7 @@ Import path: db.dao.task_queue_dao
 """
 from __future__ import annotations
 
+from datetime import datetime
 from typing import List, Optional
 from uuid import UUID
 
@@ -251,7 +252,63 @@ class TaskQueueDAO:
             await engine.dispose()
         
         return [TaskQueue.model_validate(e) for e in entities]
-    
+
+    @staticmethod
+    async def get_all_with_time_range(
+        limit: int = 100,
+        offset: int = 0,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
+        status: Optional[TaskStatus] = None,
+        session: Optional[AsyncSession] = None,
+    ) -> List[TaskQueue]:
+        """Retrieve queue entries within a time range.
+
+        Args:
+            limit: Maximum number of records to return.
+            offset: Number of records to skip.
+            start_time: Optional start time for queued_at (inclusive).
+            end_time: Optional end time for queued_at (exclusive).
+            status: Optional status filter.
+            session: Optional async session for transaction control.
+
+        Returns:
+            List of TaskQueue DTOs.
+        """
+        async def _query(s: AsyncSession) -> List[TaskQueueEntity]:
+            query = select(TaskQueueEntity)
+
+            if start_time is not None:
+                query = query.where(TaskQueueEntity.queued_at >= start_time)
+            if end_time is not None:
+                query = query.where(TaskQueueEntity.queued_at < end_time)
+            if status is not None:
+                query = query.where(TaskQueueEntity.status == status)
+                if status == TaskStatus.pending:
+                    query = query.order_by(
+                        desc(TaskQueueEntity.priority),
+                        TaskQueueEntity.scheduled_at.asc()
+                    )
+                else:
+                    query = query.order_by(desc(TaskQueueEntity.created_at))
+            else:
+                query = query.order_by(desc(TaskQueueEntity.queued_at))
+
+            query = query.limit(limit).offset(offset)
+            result = await s.execute(query)
+            return list(result.scalars().all())
+
+        if session is not None:
+            entities = await _query(session)
+        else:
+            engine = create_engine()
+            async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+            async with async_session() as s:
+                entities = await _query(s)
+            await engine.dispose()
+
+        return [TaskQueue.model_validate(e) for e in entities]
+
     @staticmethod
     async def update(
         dto: TaskQueueUpdate,

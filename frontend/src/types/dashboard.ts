@@ -125,6 +125,8 @@ export interface AgentsPayload {
 export interface TasksPayload {
   items: TimelineItem[];
   source: string;
+  hasMore: boolean;
+  nextCursor: string | null;
 }
 
 export interface MemoryPayload {

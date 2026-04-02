@@ -1115,7 +1115,18 @@ textarea {
   color: #ffffff;
   line-height: 1.6;
   white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow: hidden;
+  max-height: calc(1.6em * 4);
   margin-bottom: 8px;
+  position: relative;
+}
+
+.timeline-item__content-full {
+  color: #ffffff;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-wrap: break-word;
 }
 
 .timeline-item__expand-btn {
@@ -1432,4 +1443,27 @@ textarea {
   .overview-hero {
     justify-items: start;
   }
+}
+
+.loading-more-indicator,
+.no-more-indicator,
+.error-indicator {
+  text-align: center;
+  padding: 1.5rem 1rem;
+  margin-top: 1rem;
+}
+
+.loading-more-indicator {
+  color: var(--text-2);
+}
+
+.no-more-indicator {
+  color: var(--text-3);
+  font-size: 0.875rem;
+}
+
+.error-indicator {
+  color: #ff6b6b;
+  background-color: rgba(255, 107, 107, 0.1);
+  border: 1px solid rgba(255, 107, 107, 0.2);
 }

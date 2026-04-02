@@ -518,6 +518,61 @@ class AgentMessageDAO:
             return results
 
     @staticmethod
+    async def get_all_with_session_id_and_time_range(
+        limit: int = 100,
+        offset: int = 0,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
+        message_type: Optional[MessageType] = None,
+        session: Optional[AsyncSession] = None,
+    ) -> List[tuple[AgentMessage, str]]:
+        """Retrieve agent messages within a time range with session_id.
+
+        Args:
+            limit: Maximum number of records to return.
+            offset: Number of records to skip.
+            start_time: Optional start time (inclusive).
+            end_time: Optional end time (exclusive).
+            message_type: Optional message type filter.
+            session: Optional async session for transaction control.
+
+        Returns:
+            List of tuples: (AgentMessage DTO, session_id string).
+        """
+        async def _query(s: AsyncSession) -> List[tuple[AgentMessage, str]]:
+            query = (
+                select(AgentMessageEntity, CollaborationSessionEntity.session_id)
+                .join(
+                    CollaborationSessionEntity,
+                    AgentMessageEntity.collaboration_id == CollaborationSessionEntity.id,
+                )
+            )
+            if start_time is not None:
+                query = query.where(AgentMessageEntity.created_at >= start_time)
+            if end_time is not None:
+                query = query.where(AgentMessageEntity.created_at < end_time)
+            if message_type is not None:
+                query = query.where(AgentMessageEntity.message_type == message_type)
+            query = query.order_by(AgentMessageEntity.created_at.desc())
+            query = query.limit(limit).offset(offset)
+            result = await s.execute(query)
+            rows = result.all()
+            return [
+                (AgentMessage.model_validate(entity), session_id)
+                for entity, session_id in rows
+            ]
+
+        if session is not None:
+            return await _query(session)
+        else:
+            engine = create_engine()
+            async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+            async with async_session() as s:
+                results = await _query(s)
+            await engine.dispose()
+            return results
+
+    @staticmethod
     async def get_unsummarized_messages_grouped(
         agent_id: str,
         before_date: datetime,

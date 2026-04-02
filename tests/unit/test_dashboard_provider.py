@@ -139,21 +139,23 @@ async def test_get_tasks_merges_user_queue_and_messages_sorted_newest_first(monk
         assert user_id_value == user_id
         return user_agents
 
-    async def fake_get_tasks(limit=8, offset=0, status=None):
-        assert limit == 8
-        assert offset == 0
+    async def fake_get_tasks(limit=100, offset=0, status=None, start_time=None, end_time=None):
         return task_rows
 
-    async def fake_get_messages(limit=8, offset=0, message_type=None, session=None):
-        assert limit == 8
-        return message_rows
+    async def fake_get_messages(limit=100, offset=0, message_type=None, session=None, start_time=None, end_time=None):
+        return [(m, "session-1") for m in message_rows]
 
     monkeypatch.setattr(dashboard_module.AgentInstanceDAO, "get_by_user_id", fake_get_agents)
     monkeypatch.setattr(dashboard_module.TaskQueueDAO, "get_all", fake_get_tasks)
+    monkeypatch.setattr(dashboard_module.TaskQueueDAO, "get_all_with_time_range", fake_get_tasks)
     monkeypatch.setattr(
         dashboard_module,
         "AgentMessageDAO",
-        SimpleNamespace(get_all=fake_get_messages),
+        SimpleNamespace(
+            get_all=fake_get_messages,
+            get_all_with_session_id=fake_get_messages,
+            get_all_with_session_id_and_time_range=fake_get_messages,
+        ),
         raising=False,
     )
 
@@ -182,25 +184,32 @@ async def test_get_tasks_returns_empty_items_without_user_scoped_activity(monkey
         assert user_id_value == user_id
         return [_agent(agent_id=user_agent, user_id=user_id, name="Owner")]
 
-    async def fake_get_tasks(limit=8, offset=0, status=None):
-        assert offset == 0
+    async def fake_get_tasks(limit=100, offset=0, status=None, start_time=None, end_time=None):
         return [_task(queue_id=uuid4(), task_id=uuid4(), claimed_by=outsider, queued_at=now)]
 
-    async def fake_get_messages(limit=8, offset=0, message_type=None, session=None):
-        return [_message(message_id=uuid4(), created_at=now, sender_agent_id=outsider)]
+    async def fake_get_messages(limit=100, offset=0, message_type=None, session=None, start_time=None, end_time=None):
+        return [(_message(message_id=uuid4(), created_at=now, sender_agent_id=outsider), "session-1")]
 
     monkeypatch.setattr(dashboard_module.AgentInstanceDAO, "get_by_user_id", fake_get_agents)
     monkeypatch.setattr(dashboard_module.TaskQueueDAO, "get_all", fake_get_tasks)
+    monkeypatch.setattr(dashboard_module.TaskQueueDAO, "get_all_with_time_range", fake_get_tasks)
     monkeypatch.setattr(
         dashboard_module,
         "AgentMessageDAO",
-        SimpleNamespace(get_all=fake_get_messages),
+        SimpleNamespace(
+            get_all=fake_get_messages,
+            get_all_with_session_id=fake_get_messages,
+            get_all_with_session_id_and_time_range=fake_get_messages,
+        ),
         raising=False,
     )
 
     payload = await provider.get_tasks(user_id=user_id)
 
-    assert payload == {"items": [], "source": "mixed"}
+    assert payload["items"] == []
+    assert payload["source"] == "mixed"
+    assert payload["hasMore"] is False
+    assert payload["nextCursor"] is None
 
 
 @pytest.mark.asyncio
@@ -562,3 +571,121 @@ async def test_get_agent_tools_returns_effective_tool_state(monkeypatch) -> None
     assert payload["agents"][0]["tools"][0]["isEnabled"] is True
     assert payload["agents"][0]["tools"][1]["isEnabled"] is False
     assert payload["agents"][0]["tools"][1]["source"] == "override"
+
+
+@pytest.mark.asyncio
+async def test_get_tasks_returns_has_more_and_next_cursor_for_infinite_scroll(monkeypatch) -> None:
+    provider = DashboardDataProvider(queue=object(), dedup=object())
+    user_id = uuid4()
+    user_agent = uuid4()
+    now = datetime.now(UTC)
+
+    user_agents = [_agent(agent_id=user_agent, user_id=user_id, name="Alpha")]
+    
+    recent_message = _message(
+        message_id=uuid4(),
+        created_at=now - timedelta(hours=1),
+        sender_agent_id=user_agent,
+        content_json={"content": "Recent message"},
+    )
+    
+    older_message = _message(
+        message_id=uuid4(),
+        created_at=now - timedelta(hours=48),
+        sender_agent_id=user_agent,
+        content_json={"content": "Older message"},
+    )
+
+    async def fake_get_agents(user_id_value, limit=100):
+        return user_agents
+
+    async def fake_get_tasks(limit=100, offset=0, status=None, start_time=None, end_time=None):
+        return []
+
+    async def fake_get_messages(limit=100, offset=0, message_type=None, session=None, start_time=None, end_time=None):
+        messages = [(recent_message, "session-1"), (older_message, "session-1")]
+        if start_time and end_time:
+            return [(m, sid) for m, sid in messages if start_time <= m.created_at < end_time]
+        elif end_time:
+            return [(m, sid) for m, sid in messages if m.created_at < end_time]
+        elif start_time:
+            return [(m, sid) for m, sid in messages if m.created_at >= start_time]
+        return messages[:1]
+
+    monkeypatch.setattr(dashboard_module.AgentInstanceDAO, "get_by_user_id", fake_get_agents)
+    monkeypatch.setattr(dashboard_module.TaskQueueDAO, "get_all", fake_get_tasks)
+    monkeypatch.setattr(
+        dashboard_module,
+        "AgentMessageDAO",
+        SimpleNamespace(
+            get_all=fake_get_messages,
+            get_all_with_session_id=fake_get_messages,
+            get_all_with_session_id_and_time_range=fake_get_messages,
+        ),
+        raising=False,
+    )
+
+    payload = await provider.get_tasks(user_id=user_id)
+
+    assert "hasMore" in payload
+    assert "nextCursor" in payload
+    assert payload["hasMore"] is True
+    assert payload["nextCursor"] is not None
+    assert len(payload["items"]) >= 1
+
+
+@pytest.mark.asyncio
+async def test_get_tasks_with_before_parameter_returns_previous_24_hours(monkeypatch) -> None:
+    provider = DashboardDataProvider(queue=object(), dedup=object())
+    user_id = uuid4()
+    user_agent = uuid4()
+    now = datetime.now(UTC)
+    before_time = now - timedelta(hours=24)
+
+    user_agents = [_agent(agent_id=user_agent, user_id=user_id, name="Alpha")]
+    
+    older_message = _message(
+        message_id=uuid4(),
+        created_at=now - timedelta(hours=48),
+        sender_agent_id=user_agent,
+        content_json={"content": "Older message"},
+    )
+    
+    very_old_message = _message(
+        message_id=uuid4(),
+        created_at=now - timedelta(hours=72),
+        sender_agent_id=user_agent,
+        content_json={"content": "Very old message"},
+    )
+
+    async def fake_get_agents(user_id_value, limit=100):
+        return user_agents
+
+    async def fake_get_tasks(limit=100, offset=0, status=None, start_time=None, end_time=None):
+        return []
+
+    async def fake_get_messages(limit=100, offset=0, message_type=None, session=None, start_time=None, end_time=None):
+        messages = [(older_message, "session-1"), (very_old_message, "session-1")]
+        if start_time and end_time:
+            return [(m, sid) for m, sid in messages if start_time <= m.created_at < end_time]
+        return messages
+
+    monkeypatch.setattr(dashboard_module.AgentInstanceDAO, "get_by_user_id", fake_get_agents)
+    monkeypatch.setattr(dashboard_module.TaskQueueDAO, "get_all", fake_get_tasks)
+    monkeypatch.setattr(dashboard_module.TaskQueueDAO, "get_all_with_time_range", fake_get_tasks)
+    monkeypatch.setattr(
+        dashboard_module,
+        "AgentMessageDAO",
+        SimpleNamespace(
+            get_all=fake_get_messages,
+            get_all_with_session_id=fake_get_messages,
+            get_all_with_session_id_and_time_range=fake_get_messages,
+        ),
+        raising=False,
+    )
+
+    payload = await provider.get_tasks(user_id=user_id, before=before_time)
+
+    assert len(payload["items"]) >= 1
+    older_items = [item for item in payload["items"] if "Older" in item.get("summary", "") or "Very old" in item.get("summary", "")]
+    assert len(older_items) >= 1
