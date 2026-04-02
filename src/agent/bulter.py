@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 import logging
 import time
 from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
-from uuid import UUID
+from uuid import UUID, uuid4
 from langchain_core.messages import (
     AIMessageChunk,
     BaseMessage,
@@ -13,8 +13,9 @@ from langchain_core.messages import (
 
 from agent.agent import Agent
 from db.dao.agent_message_dao import AgentMessageDAO
+from db.dao.collaboration_session_dao import CollaborationSessionDAO
 from db.dao.llm_level_endpoint_dao import LLMLevelEndpointDAO
-from db.dto.collaboration_dto import AgentMessage
+from db.dto.collaboration_dto import AgentMessage, CollaborationSessionCreate
 from db.types import MessageType
 from graph.graph_node import GraphNode
 from graph.graph_store import GraphStore
@@ -546,12 +547,19 @@ class Bulter(Agent):
             if memory_type not in parsed:
                 raise ValueError(_("分析結果缺少欄位: %s") % memory_type)
             block = parsed[memory_type]
-            if not isinstance(block, dict):
+
+            # Support both formats:
+            # 1. Standard: {"SOUL": {"updated_data": "..."}}
+            # 2. Simplified: {"SOUL": "..."}
+            if isinstance(block, dict):
+                updated_data = block.get("updated_data")
+                if not isinstance(updated_data, str):
+                    raise ValueError(_("updated_data 無效: %s") % memory_type)
+                result[memory_type] = updated_data
+            elif isinstance(block, str):
+                result[memory_type] = block
+            else:
                 raise ValueError(_("分析結果欄位格式錯誤: %s") % memory_type)
-            updated_data = block.get("updated_data")
-            if not isinstance(updated_data, str):
-                raise ValueError(_("updated_data 無效: %s") % memory_type)
-            result[memory_type] = updated_data
 
         return result
 
@@ -622,7 +630,17 @@ class Bulter(Agent):
                     )
 
                     content_parts: List[str] = []
-                    analysis_session_id = f"review-msg-{session_id}"
+                    analysis_session_id = f"review_msg-{uuid4()}"
+                    
+                    CollaborationSessionDAO().create(
+                        CollaborationSessionCreate(
+                            main_agent_id=agent_instance.id,
+                            user_id=agent_instance.user_id,
+                            name=f"Review {date_str} {session_id}",
+                            session_id=analysis_session_id
+                        )
+                    )
+                    
                     async for chunk in MsgQueueHandler.create_msg_queue(
                         agent_id=agent_id,
                         session_id=session_id,
