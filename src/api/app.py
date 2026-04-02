@@ -273,7 +273,9 @@ async def _agents_create(request: web.Request) -> web.Response:
     finally:
         await engine.dispose()
 
-    return web.json_response({"agent": _serialize_agent_instance(agent)}, status=201)
+    agent_type = await AgentTypeDAO.get_by_id(agent.agent_type_id)
+    agent_type_name = agent_type.name if agent_type else None
+    return web.json_response({"agent": _serialize_agent_instance(agent, agent_type_name)}, status=201)
 
 
 async def _agents_update(request: web.Request) -> web.Response:
@@ -314,7 +316,9 @@ async def _agents_update(request: web.Request) -> web.Response:
 
     await _upsert_memory_blocks(agent_instance_id, body.get("memoryBlocks") or {})
 
-    return web.json_response({"agent": _serialize_agent_instance(updated)})
+    agent_type = await AgentTypeDAO.get_by_id(updated.agent_type_id)
+    agent_type_name = agent_type.name if agent_type else None
+    return web.json_response({"agent": _serialize_agent_instance(updated, agent_type_name)})
 
 
 async def _agents_get_memory_blocks(request: web.Request) -> web.Response:
@@ -496,11 +500,12 @@ def _serialize_agent_type(at) -> dict:
     }
 
 
-def _serialize_agent_instance(agent) -> dict:
+def _serialize_agent_instance(agent, agent_type_name: str | None = None) -> dict:
     return {
         "id": str(agent.id),
         "name": agent.name,
         "agentTypeId": str(agent.agent_type_id) if agent.agent_type_id else None,
+        "agentTypeName": agent_type_name,
         "status": agent.status,
         "phoneNo": agent.phone_no,
         "whatsappKey": agent.whatsapp_key,

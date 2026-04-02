@@ -641,7 +641,7 @@ async def test_agents_create_accepts_endpoint_group_and_memory_blocks(monkeypatc
     agent_id_val = uuid4()
     endpoint_group_id = uuid4()
 
-    fake_type = type("AgentType", (), {"id": agent_type_id, "user_id": user_id})()
+    fake_type = type("AgentType", (), {"id": agent_type_id, "user_id": user_id, "name": "Test Type"})()
     fake_agent = type(
         "Agent",
         (),
