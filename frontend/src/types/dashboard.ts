@@ -149,6 +149,39 @@ export interface MemoryPayload {
   source: string;
 }
 
+export interface STMEntry {
+  id: string;
+  kind: "stm";
+  agent: string;
+  timestamp: string;
+  summary: string;
+  sessionId: string;
+  sessionName: string;
+  status: SystemStatus;
+}
+
+export interface LTMEntry {
+  id: string;
+  kind: "ltm";
+  agent: string;
+  timestamp: string;
+  summary: string;
+  status: SystemStatus;
+}
+
+export interface STMPayload {
+  entries: STMEntry[];
+  hasMore: false;
+  source: string;
+}
+
+export interface LTMPayload {
+  entries: LTMEntry[];
+  hasMore: boolean;
+  nextCursor: string | null;
+  source: string;
+}
+
 export interface SettingsPayload {
   locales: string[];
   featureFlags: Record<string, boolean>;

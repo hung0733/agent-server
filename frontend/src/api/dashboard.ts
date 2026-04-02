@@ -7,10 +7,12 @@ import {
   AgentTypesPayload,
   AgentUpdateBody,
   AgentsPayload,
+  LTMPayload,
   MemoryBlocksInput,
   MemoryPayload,
   OverviewPayload,
   SettingsPayload,
+  STMPayload,
   TasksPayload,
   UsagePayload,
 } from "../types/dashboard";
@@ -85,6 +87,17 @@ export function fetchTasks(before?: string): Promise<TasksPayload> {
 
 export function fetchMemory(): Promise<MemoryPayload> {
   return requestJson<MemoryPayload>("/api/dashboard/memory");
+}
+
+export function fetchSTM(): Promise<STMPayload> {
+  return requestJson<STMPayload>("/api/dashboard/stm");
+}
+
+export function fetchLTM(cursor?: string): Promise<LTMPayload> {
+  const url = cursor 
+    ? `/api/dashboard/ltm?cursor=${encodeURIComponent(cursor)}`
+    : "/api/dashboard/ltm";
+  return requestJson<LTMPayload>(url);
 }
 
 export function fetchSettings(): Promise<SettingsPayload> {

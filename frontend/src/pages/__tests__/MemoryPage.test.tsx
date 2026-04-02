@@ -1,113 +1,88 @@
-import { renderWithRouter, screen } from "../../test/render";
-import { MemoryPayload } from "../../types/dashboard";
 import { vi } from "vitest";
-
+import { waitFor, screen } from "@testing-library/react";
+import { renderWithRouter } from "../../test/render";
 import MemoryPage from "../MemoryPage";
-import { useDashboardResource } from "../../hooks/useDashboardResource";
+import { fetchSTM, fetchLTM } from "../../api/dashboard";
 
-vi.mock("../../hooks/useDashboardResource", () => ({
-  useDashboardResource: vi.fn(),
-}));
+vi.mock("../../api/dashboard");
 
-const memoryFixture: MemoryPayload = {
-  stats: {
-    agents: 2,
-    tasks: 1,
-    messages: 1,
+const mockSTMEntries = [
+  {
+    id: "checkpoint-001-bullet-1",
+    kind: "stm" as const,
+    agent: "Otter",
+    timestamp: "2026-04-03T14:00:00Z",
+    summary: "Alice 於 2025-11-15T14:30:00 提議...",
+    sessionId: "session-test-123",
+    sessionName: "session-test-123",
+    status: "healthy" as const,
   },
-  health: {
-    status: "healthy",
-    summary: "最近 2 項用戶活動可歸因。",
+];
+
+const mockLTMEntries = [
+  {
+    id: "entry-001",
+    kind: "ltm" as const,
+    agent: "Pandas",
+    timestamp: "2026-04-03T15:00:00Z",
+    summary: "部署事故跟進已補寫長期記憶。",
+    status: "healthy" as const,
   },
-  recentEntries: [
-    {
-      kind: "message",
-      agent: "Beta",
-      summary: "2 分鐘前完成摘要",
-      timestamp: "2026-03-29T10:00:00+08:00",
-      status: "healthy",
-    },
-    {
-      kind: "task",
-      agent: "Alpha",
-      summary: "11 分鐘前補寫長期記憶",
-      timestamp: "2026-03-29T09:51:00+08:00",
-      status: "warning",
-    },
-  ],
-  source: "test",
-};
+];
 
 describe("MemoryPage", () => {
-  it("renders backend memory health, counts, and recent entries", () => {
-    vi.mocked(useDashboardResource).mockReturnValue({
-      isLoading: false,
-      resource: memoryFixture,
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(fetchSTM).mockResolvedValue({
+      entries: mockSTMEntries,
+      hasMore: false,
+      source: "langgraph",
     });
-
-    renderWithRouter(<MemoryPage />);
-
-    expect(screen.getByText("最近 2 項用戶活動可歸因。")).toBeInTheDocument();
-    expect(screen.getByText("2")).toBeInTheDocument();
-    expect(screen.getAllByText("1")).toHaveLength(2);
-    expect(screen.getByText(/Beta/)).toBeInTheDocument();
-    expect(screen.getByText("2026-03-29 10:00:00")).toBeInTheDocument();
-    expect(screen.getByText("2 分鐘前完成摘要")).toBeInTheDocument();
-    expect(screen.getByText(/Alpha/)).toBeInTheDocument();
-    expect(screen.getByText("2026-03-29 09:51:00")).toBeInTheDocument();
-    expect(screen.getByText("11 分鐘前補寫長期記憶")).toBeInTheDocument();
+    vi.mocked(fetchLTM).mockResolvedValue({
+      entries: mockLTMEntries,
+      hasMore: false,
+      nextCursor: null,
+      source: "qdrant",
+    });
   });
 
-  it("uses an empty payload fallback instead of mock memory content", () => {
-    vi.mocked(useDashboardResource).mockReturnValue({
-      isLoading: false,
-      resource: memoryFixture,
-    });
-
+  test("renders merged STM and LTM entries sorted by timestamp", async () => {
     renderWithRouter(<MemoryPage />);
 
-    expect(vi.mocked(useDashboardResource)).toHaveBeenCalledWith(
-      expect.any(Function),
-      {
-        stats: {
-          agents: 0,
-          tasks: 0,
-          messages: 0,
-        },
-        health: {
-          status: "idle",
-          summary: "",
-        },
-        recentEntries: [],
-        source: "empty",
-      },
-      {
-        blockOnFirstLoad: true,
-      },
-    );
+    await waitFor(() => {
+      expect(screen.getByText("部署事故跟進已補寫長期記憶。")).toBeInTheDocument();
+    });
+
+    const entries = screen.getAllByRole("article");
+    expect(entries[0]).toHaveTextContent("Pandas");
+    expect(entries[1]).toHaveTextContent("Otter");
   });
 
-  it("renders empty state when there is no memory activity", () => {
-    vi.mocked(useDashboardResource).mockReturnValue({
-      isLoading: false,
-      resource: {
-        ...memoryFixture,
-        stats: {
-          agents: 0,
-          tasks: 0,
-          messages: 0,
-        },
-        health: {
-          status: "idle",
-          summary: "",
-        },
-        recentEntries: [],
-      },
+  test("shows STM session name in timeline", async () => {
+    renderWithRouter(<MemoryPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("STM - session-test-123")).toBeInTheDocument();
+    });
+  });
+
+  test("shows empty state when no entries", async () => {
+    vi.mocked(fetchSTM).mockResolvedValue({
+      entries: [],
+      hasMore: false,
+      source: "langgraph",
+    });
+    vi.mocked(fetchLTM).mockResolvedValue({
+      entries: [],
+      hasMore: false,
+      nextCursor: null,
+      source: "qdrant",
     });
 
     renderWithRouter(<MemoryPage />);
 
-    expect(screen.getByText("最近記憶寫入穩定")).toBeInTheDocument();
-    expect(screen.getByText("今日未見記憶堆積，摘要與整理節奏正常。")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText("最近記憶寫入穩定")).toBeInTheDocument();
+    });
   });
 });

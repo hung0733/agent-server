@@ -1,61 +1,100 @@
 import { useTranslation } from "react-i18next";
-import { fetchMemory } from "../api/dashboard";
+import { useState, useEffect, useRef } from "react";
+import { fetchSTM, fetchLTM } from "../api/dashboard";
 import EmptyState from "../components/ui/EmptyState";
 import SectionHeader from "../components/ui/SectionHeader";
-import StatCard from "../components/ui/StatCard";
-import { useDashboardResource } from "../hooks/useDashboardResource";
-import { MemoryPayload } from "../types/dashboard";
+import { STMEntry, LTMEntry } from "../types/dashboard";
 import { formatServerTimestamp } from "../utils/format";
 
-const emptyMemoryPayload: MemoryPayload = {
-  stats: {
-    agents: 0,
-    tasks: 0,
-    messages: 0,
-  },
-  health: {
-    status: "idle",
-    summary: "",
-  },
-  recentEntries: [],
-  source: "empty",
-};
+type MemoryEntry = STMEntry | LTMEntry;
+
+function useMemoryEntries() {
+  const [stmEntries, setStmEntries] = useState<STMEntry[]>([]);
+  const [ltmEntries, setLtmEntries] = useState<LTMEntry[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function loadInitial() {
+      setIsLoading(true);
+      try {
+        const stmPayload = await fetchSTM();
+        const ltmPayload = await fetchLTM();
+        
+        setStmEntries(stmPayload.entries);
+        setLtmEntries(ltmPayload.entries);
+        setHasMore(ltmPayload.hasMore);
+        setNextCursor(ltmPayload.nextCursor);
+      } catch (error) {
+        console.error("Failed to load memory entries:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+    loadInitial();
+  }, []);
+
+  async function loadMore() {
+    if (!hasMore || isLoadingMore || !nextCursor) return;
+
+    setIsLoadingMore(true);
+    try {
+      const ltmPayload = await fetchLTM(nextCursor);
+      
+      setLtmEntries(prev => [...prev, ...ltmPayload.entries]);
+      setHasMore(ltmPayload.hasMore);
+      setNextCursor(ltmPayload.nextCursor);
+    } catch (error) {
+      console.error("Failed to load more LTM entries:", error);
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }
+
+  const mergedEntries = [...stmEntries, ...ltmEntries]
+    .sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+
+  return {
+    entries: mergedEntries,
+    isLoading,
+    isLoadingMore,
+    hasMore,
+    loadMore
+  };
+}
 
 export default function MemoryPage() {
   const { t } = useTranslation();
-  const { isLoading, resource: payload } = useDashboardResource(fetchMemory, emptyMemoryPayload, {
-    blockOnFirstLoad: true,
-  });
-  const emptyTitle = t("memory.emptyTitle");
-  const emptyBody = t("memory.emptyBody");
-  const hasActivity = payload.stats.tasks > 0 || payload.stats.messages > 0 || payload.recentEntries.length > 0;
-  const stats = [
-    {
-      title: t("memory.stats.agents"),
-      value: payload.stats.agents,
-      note: t("memory.stats.agentsNote"),
-    },
-    {
-      title: t("memory.stats.tasks"),
-      value: payload.stats.tasks,
-      note: t("memory.stats.tasksNote"),
-    },
-    {
-      title: t("memory.stats.messages"),
-      value: payload.stats.messages,
-      note: t("memory.stats.messagesNote"),
-    },
-  ];
+  const { entries, isLoading, isLoadingMore, hasMore, loadMore } = useMemoryEntries();
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!bottomRef.current || !hasMore) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          loadMore();
+        }
+      },
+      { threshold: 0.1 }
+    );
+
+    observer.observe(bottomRef.current);
+    return () => observer.disconnect();
+  }, [hasMore, loadMore]);
 
   if (isLoading) {
     return <section className="card dashboard-loading">正在載入控制台...</section>;
   }
 
-  if (!hasActivity) {
+  if (entries.length === 0) {
     return (
       <section>
         <SectionHeader title={t("memory.title")} subtitle={t("memory.subtitle")} />
-        <EmptyState title={emptyTitle} body={emptyBody} />
+        <EmptyState title={t("memory.emptyTitle")} body={t("memory.emptyBody")} />
       </section>
     );
   }
@@ -63,39 +102,33 @@ export default function MemoryPage() {
   return (
     <section>
       <SectionHeader title={t("memory.title")} subtitle={t("memory.subtitle")} />
-      <section className="card">
-        <h3>{t(`common.status.${payload.health.status}`)}</h3>
-        <p>{payload.health.summary}</p>
-      </section>
-
-      <section className="overview-kpis">
-        {stats.map((stat) => (
-          <StatCard
-            key={stat.title}
-            title={stat.title}
-            value={stat.value}
-            note={stat.note}
-            status={payload.health.status === "idle" ? "healthy" : payload.health.status}
-          />
-        ))}
-      </section>
 
       <section className="timeline">
-        {payload.recentEntries.map((entry) => (
+        {entries.map((entry) => (
           <article
-            key={`${entry.kind}-${entry.agent}-${entry.timestamp}`}
+            key={`${entry.kind}-${entry.id}`}
             className="card timeline-item"
           >
             <div className="timeline-item__header">
               <div>
                 <h3>{entry.agent}</h3>
-                <p>{t(`memory.entry.${entry.kind}`)}</p>
+                <p>
+                  {entry.kind === "stm" 
+                    ? `STM - ${entry.sessionName}` 
+                    : "LTM"}
+                </p>
               </div>
               <p>{formatServerTimestamp(entry.timestamp)}</p>
             </div>
             <p className="timeline-item__summary">{entry.summary}</p>
           </article>
         ))}
+
+        {hasMore && (
+          <div ref={bottomRef} className="timeline-loader">
+            {isLoadingMore ? "載入更多..." : "下拉載入更多"}
+          </div>
+        )}
       </section>
     </section>
   );
