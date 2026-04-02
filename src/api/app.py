@@ -361,6 +361,14 @@ async def _dashboard_stm(request: web.Request) -> web.Response:
     return web.json_response(await provider.get_stm(user_id=auth_context["user_id"]))
 
 
+async def _dashboard_ltm(request: web.Request) -> web.Response:
+    """Handle GET /api/dashboard/ltm - return LTM entries."""
+    from api.dashboard_ltm import LTMDataProvider
+    provider = LTMDataProvider()
+    auth_context = await _require_auth(request)
+    return web.json_response(await provider.get_ltm(user_id=auth_context["user_id"]))
+
+
 async def _dashboard_settings(request: web.Request) -> web.Response:
     provider = request.app[DASHBOARD_PROVIDER_KEY]
     auth_context = await _require_auth(request)
@@ -751,6 +759,7 @@ def create_app(
     app.router.add_get("/api/dashboard/tasks", _dashboard_tasks)
     app.router.add_get("/api/dashboard/memory", _dashboard_memory)
     app.router.add_get("/api/dashboard/stm", _dashboard_stm)
+    app.router.add_get("/api/dashboard/ltm", _dashboard_ltm)
     app.router.add_get("/api/dashboard/settings", _dashboard_settings)
     app.router.add_get("/api/dashboard/agents/tools", _dashboard_agent_tools)
     app.router.add_post("/api/dashboard/settings/endpoints", _settings_create_endpoint)
