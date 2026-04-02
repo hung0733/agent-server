@@ -353,6 +353,14 @@ async def _dashboard_memory(request: web.Request) -> web.Response:
     return web.json_response(await provider.get_memory(user_id=auth_context["user_id"]))
 
 
+async def _dashboard_stm(request: web.Request) -> web.Response:
+    """Handle GET /api/dashboard/stm - return STM entries."""
+    from api.dashboard_stm import STMDataProvider
+    provider = STMDataProvider()
+    auth_context = await _require_auth(request)
+    return web.json_response(await provider.get_stm(user_id=auth_context["user_id"]))
+
+
 async def _dashboard_settings(request: web.Request) -> web.Response:
     provider = request.app[DASHBOARD_PROVIDER_KEY]
     auth_context = await _require_auth(request)
@@ -742,6 +750,7 @@ def create_app(
     app.router.add_post("/api/dashboard/agents", _agents_create)
     app.router.add_get("/api/dashboard/tasks", _dashboard_tasks)
     app.router.add_get("/api/dashboard/memory", _dashboard_memory)
+    app.router.add_get("/api/dashboard/stm", _dashboard_stm)
     app.router.add_get("/api/dashboard/settings", _dashboard_settings)
     app.router.add_get("/api/dashboard/agents/tools", _dashboard_agent_tools)
     app.router.add_post("/api/dashboard/settings/endpoints", _settings_create_endpoint)
