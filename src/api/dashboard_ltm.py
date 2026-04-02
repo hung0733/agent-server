@@ -70,22 +70,19 @@ class LTMDataProvider:
                 port=ltm_config.QDRANT_PORT,
             )
             
-            entries = []
+            entries = QdrantVectorStore.query_multi_agent(
+                client=client,
+                agent_ids=agent_ids,
+                collection_name=ltm_config.QDRANT_COLLECTION_NAME,
+                limit=50
+            )
             
-            for agent_id in agent_ids:
-                store = QdrantVectorStore(
-                    client=client,
-                    agent_id=agent_id,
-                    collection_name=ltm_config.QDRANT_COLLECTION_NAME,
-                )
-                
-                agent_entries = store.get_all_entries()
-                
-                for entry in agent_entries:
-                    entries.append(self._format_entry(entry, agent_id))
+            formatted_entries = []
+            for entry in entries:
+                formatted_entries.append(self._format_entry(entry, entry.agent_id or ""))
             
-            entries.sort(key=lambda x: x["timestamp"], reverse=True)
-            return entries[:50]
+            formatted_entries.sort(key=lambda x: x["timestamp"], reverse=True)
+            return formatted_entries[:50]
         
         except Exception as e:
             import logging
