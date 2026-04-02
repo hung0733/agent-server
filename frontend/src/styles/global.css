@@ -1097,6 +1097,42 @@ textarea {
   color: var(--text-2);
 }
 
+/* Content display with collapse/expand */
+.timeline-item__content {
+  margin-top: 14px;
+}
+
+.timeline-item__content-summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.timeline-item__content-summary::-webkit-details-marker {
+  display: none;
+}
+
+.timeline-item__content-preview {
+  color: #ffffff;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  margin-bottom: 8px;
+}
+
+.timeline-item__expand-btn {
+  background: none;
+  border: none;
+  color: var(--primary);
+  font-size: 0.85rem;
+  margin-top: 8px;
+  padding: 4px 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.timeline-item__expand-btn:hover {
+  text-decoration: underline;
+}
+
 .usage-legend {
   display: grid;
   grid-template-columns: 320px minmax(0, 1fr);

@@ -57,6 +57,31 @@ def _truncate_text(value: str, limit: int = 120) -> str:
     return f"{text[: limit - 3].rstrip()}..."
 
 
+def _extract_message_content(content: Any) -> str:
+    """Extract full message content without truncation."""
+    if isinstance(content, str):
+        return " ".join(content.split())
+
+    if isinstance(content, dict):
+        for key in ("summary", "content", "message", "text"):
+            value = content.get(key)
+            if isinstance(value, str) and value.strip():
+                return " ".join(value.split())
+
+        for value in content.values():
+            extracted = _extract_message_content(value)
+            if extracted:
+                return extracted
+
+    if isinstance(content, list):
+        for item in content:
+            extracted = _extract_message_content(item)
+            if extracted:
+                return extracted
+
+    return ""
+
+
 def _summarize_message_content(content: Any) -> str:
     if isinstance(content, str):
         return _truncate_text(content)
@@ -278,7 +303,8 @@ class DashboardDataProvider:
             )
 
         for message, session_id in message_rows:
-            snippet = _summarize_message_content(message.content_json) or "最近消息已記錄。"
+            # Get full content without truncation for frontend display
+            full_content = _extract_message_content(message.content_json) or "最近消息已記錄。"
 
             # Determine sourceAgent and targetAgent based on session_id and message_type
             source_agent, target_agent = _determine_agent_display(
@@ -299,13 +325,13 @@ class DashboardDataProvider:
                     "sourceAgent": source_agent,
                     "targetAgent": target_agent,
                     "title": "代理消息",
-                    "summary": snippet,
+                    "summary": full_content,
                     "timestamp": timestamp,
                     "status": "healthy",
                     "group": None,
                     "origin": "message",
                     "relatedTaskId": None,
-                    "messageSnippet": snippet,
+                    "messageSnippet": full_content,
                 }
             )
 
