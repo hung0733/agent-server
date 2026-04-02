@@ -79,6 +79,7 @@ class AgentInstanceDAO:
             agent_type_id=dto.agent_type_id,
             user_id=dto.user_id,
             name=dto.name,
+            agent_id=dto.agent_id,
             status=dto.status,
             config=dto.config,
             last_heartbeat_at=dto.last_heartbeat_at,
