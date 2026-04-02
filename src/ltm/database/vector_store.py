@@ -449,7 +449,70 @@ class QdrantVectorStore:
         """
         print("ℹ️  Qdrant handles optimization automatically")
         pass
+    
+    @staticmethod
+    def query_multi_agent(
+        client: QdrantClient,
+        agent_ids: List[str],
+        collection_name: str = None,
+        limit: int = 100
+    ) -> List[MemoryEntry]:
+        """
+        Query entries across multiple agents (for dashboard/aggregation).
+        
+        Args:
+            client: QdrantClient instance
+            agent_ids: List of agent IDs to query
+            collection_name: Collection name (default from config)
+            limit: Maximum entries per agent
+            
+        Returns:
+            List of MemoryEntry across all specified agents
+        """
+        if not agent_ids:
+            return []
+        
+        collection_name = collection_name or config.QDRANT_COLLECTION_NAME
+        all_entries = []
+        
+        for agent_id in agent_ids:
+            try:
+                results, _ = client.scroll(
+                    collection_name=collection_name,
+                    scroll_filter=Filter(
+                        must=[
+                            FieldCondition(
+                                key="agent_id",
+                                match=MatchValue(value=agent_id)
+                            )
+                        ]
+                    ),
+                    limit=limit,
+                    with_payload=True,
+                    with_vectors=False
+                )
+                
+                for point in results:
+                    payload = point.payload
+                    entry = MemoryEntry(
+                        entry_id=payload["entry_id"],
+                        agent_id=payload.get("agent_id"),
+                        session_id=payload.get("session_id"),
+                        lossless_restatement=payload["lossless_restatement"],
+                        keywords=payload.get("keywords", []),
+                        timestamp=payload.get("timestamp") or None,
+                        location=payload.get("location") or None,
+                        persons=payload.get("persons", []),
+                        entities=payload.get("entities", []),
+                        topic=payload.get("topic") or None
+                    )
+                    all_entries.append(entry)
+            
+            except Exception as e:
+                print(f"⚠️  Error querying agent {agent_id}: {e}")
+                continue
+        
+        return all_entries
 
 
-# Backward compatibility alias
 VectorStore = QdrantVectorStore
