@@ -104,6 +104,8 @@
   "agents.agent.namePlaceholder": "員工名稱",
   "agents.agent.agentTypeLabel": "員工類型",
   "agents.agent.agentTypeSelectPlaceholder": "選擇員工類型",
+  "agents.agent.agentIdLabel": "Agent ID",
+  "agents.agent.agentIdPlaceholder": "留空自動生成（例如：otter）",
   "agents.agent.phoneNoLabel": "電話號碼",
   "agents.agent.phoneNoPlaceholder": "+852 xxxx xxxx",
   "agents.agent.whatsappKeyLabel": "WhatsApp Key",

@@ -225,6 +225,8 @@ async def _agents_create(request: web.Request) -> web.Response:
 
     uuid_value = uuid4()
     user_id = auth_context["user_id"]
+    agent_id_input = body.get("agentId")
+    agent_id_value = agent_id_input if agent_id_input else f"agent-{uuid_value}"
 
     engine = create_engine()
     session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
@@ -236,7 +238,7 @@ async def _agents_create(request: web.Request) -> web.Response:
                         agent_type_id=agent_type_id,
                         user_id=user_id,
                         name=body.get("name"),
-                        agent_id=f"agent-{uuid_value}",
+                        agent_id=agent_id_value,
                         phone_no=body.get("phoneNo"),
                         whatsapp_key=body.get("whatsappKey"),
                         is_sub_agent=body.get("isSubAgent", False),

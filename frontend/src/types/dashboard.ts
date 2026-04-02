@@ -38,6 +38,7 @@ export interface AgentCardData extends AgentSummary {
 export interface AgentCreateBody {
   name: string;
   agentTypeId: string;
+  agentId?: string;
   phoneNo?: string;
   whatsappKey?: string;
   isActive?: boolean;

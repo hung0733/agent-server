@@ -22,6 +22,7 @@ const EMPTY_AGENTS_PAYLOAD: AgentsPayload = { agents: [], source: "mock" };
 interface FormState {
   name: string;
   agentTypeId: string;
+  agentId: string;
   phoneNo: string;
   whatsappKey: string;
   isActive: boolean;
@@ -35,6 +36,7 @@ interface FormState {
 const EMPTY_FORM: FormState = {
   name: "",
   agentTypeId: "",
+  agentId: "",
   phoneNo: "",
   whatsappKey: "",
   isActive: true,
@@ -163,6 +165,7 @@ export default function AgentTab() {
         const result = await createAgent({
           name: form.name.trim(),
           agentTypeId: form.agentTypeId,
+          agentId: form.agentId.trim() || undefined,
           phoneNo: form.phoneNo.trim() || undefined,
           whatsappKey: form.whatsappKey.trim() || undefined,
           isActive: form.isActive,
@@ -275,6 +278,16 @@ export default function AgentTab() {
                   </option>
                 ))}
               </select>
+            </label>
+
+            <label>
+              {t("agents.agent.agentIdLabel")}
+              <input
+                type="text"
+                placeholder={t("agents.agent.agentIdPlaceholder")}
+                value={form.agentId}
+                onChange={(e) => setForm((f) => ({ ...f, agentId: e.target.value }))}
+              />
             </label>
 
             <label>

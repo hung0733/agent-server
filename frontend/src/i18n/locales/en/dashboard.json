@@ -104,6 +104,8 @@
   "agents.agent.namePlaceholder": "Agent name",
   "agents.agent.agentTypeLabel": "Agent Type",
   "agents.agent.agentTypeSelectPlaceholder": "Select agent type",
+  "agents.agent.agentIdLabel": "Agent ID",
+  "agents.agent.agentIdPlaceholder": "Leave blank to auto-generate (e.g. otter)",
   "agents.agent.phoneNoLabel": "Phone No.",
   "agents.agent.phoneNoPlaceholder": "+852 xxxx xxxx",
   "agents.agent.whatsappKeyLabel": "WhatsApp Key",
