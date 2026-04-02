@@ -35,6 +35,34 @@
 - Any SQL using `public`, `langgraph`, `audit`, or `simpleme` must be rewritten to the corresponding `test_*` schema during test execution.
 - Test scripts must live under `tests/` (for manual scripts, place them under `tests/manual/`).
 
+### 🚨 CRITICAL WARNING: Backup Before Testing
+
+**MANDATORY: You MUST backup production database BEFORE running ANY pytest:**
+
+```bash
+# Step 1: ALWAYS backup first (MANDATORY)
+python scripts/backup_production_data.py
+
+# Step 2: Verify backup was created
+ls -lht backups/ | head -5
+
+# Step 3: Only then run tests
+python -m pytest tests/test_schema_guard.py -v
+python -m pytest tests/ -v
+```
+
+**⚠️ Known Issue:**
+- The test schema isolation has a critical bug
+- SQLAlchemy `delete()` statements without explicit schema prefixes bypass schema rewriting
+- Test fixtures can accidentally DELETE FROM production tables
+- This has caused complete data loss in the past
+
+**Emergency Recovery:**
+1. If data is deleted, immediately check `backups/` directory
+2. Stop all running processes
+3. Use `scripts/restore_production_data.py` to restore
+4. DO NOT run any more database operations until restored
+
 ## Code Quality / Linting Commands
 - **Linting**: `flake8 src/ --show-source` (when flake8 is configured)
 - **Formatting**: `black src/ tests/` (when black is configured)

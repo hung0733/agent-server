@@ -47,6 +47,29 @@ alembic revision --autogenerate -m "message"
 - Any SQL using `public`, `langgraph`, `audit`, or `simpleme` must be rewritten to the corresponding `test_*` schema during test execution.
 - Test scripts must live under `tests/` (for manual scripts, place them under `tests/manual/`).
 
+### ⚠️ CRITICAL: Database Backup Before Testing
+
+**BEFORE running ANY pytest command, you MUST backup the production database:**
+
+```bash
+# MANDATORY step before pytest
+python scripts/backup_production_data.py
+
+# Then run tests
+python -m pytest tests/test_schema_guard.py -v
+```
+
+**Why this is critical:**
+- The test schema isolation mechanism has known limitations
+- SQLAlchemy ORM operations without explicit schema prefixes may bypass schema rewriting
+- Test fixtures with `delete()` statements can accidentally target production tables
+- Always verify backups exist before running integration/db tests
+
+**If you accidentally delete production data:**
+1. DO NOT run more commands
+2. Check `backups/` directory for recent backups
+3. Use `scripts/restore_production_data.py` to restore
+
 ## Architecture
 
 **Agent Server** is a multi-tenant agent orchestration platform built on Python 3.12, LangGraph, PostgreSQL, and Qdrant.

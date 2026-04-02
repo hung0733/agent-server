@@ -20,6 +20,7 @@ from db.dao.task_queue_dao import TaskQueueDAO
 from db.dao.task_schedule_dao import TaskScheduleDAO
 from db.dao.token_usage_dao import TokenUsageDAO
 from db.types import TaskStatus
+from utils.timezone import to_server_tz
 
 
 def _iso_now() -> str:
@@ -82,6 +83,73 @@ def _summarize_message_content(content: Any) -> str:
 
 def _agent_display_name(agent: Any) -> str:
     return agent.name or agent.agent_id or f"agent-{str(agent.id)[:8]}"
+
+
+def _determine_agent_display(
+    session_id: str,
+    message_type: str,
+    sender_agent_id: Any,
+    receiver_agent_id: Any,
+    agent_lookup: dict[Any, str],
+) -> tuple[str, str]:
+    """Determine sourceAgent and targetAgent display names based on session_id and message_type.
+
+    Rules:
+    - session-*/default-* + request: User Name -> Receiver Agent Name
+    - session-*/default-* + response: Agent Name -> Receiver User Name
+    - ghost-* + request: System -> Receiver Agent Name
+    - ghost-* + response: Receiver Agent Name -> System
+    - sender_agent_id not null + request: Sender Agent Name -> Receiver Agent Name
+    - sender_agent_id not null + response: Receiver Agent Name -> Sender Agent Name
+
+    Args:
+        session_id: The collaboration session_id string.
+        message_type: The message type (request/response).
+        sender_agent_id: The sender agent ID (may be None).
+        receiver_agent_id: The receiver agent ID (may be None).
+        agent_lookup: Mapping from agent ID to agent display name.
+
+    Returns:
+        Tuple of (sourceAgent, targetAgent) display names.
+    """
+    is_request = message_type == "request"
+
+    # Check session_id prefix
+    if session_id.startswith("session-") or session_id.startswith("default-"):
+        if is_request:
+            # User -> Receiver Agent
+            receiver_name = agent_lookup.get(receiver_agent_id, "system")
+            return ("User", receiver_name)
+        else:
+            # Agent -> User
+            sender_name = agent_lookup.get(sender_agent_id, "system")
+            return (sender_name, "User")
+
+    elif session_id.startswith("ghost-"):
+        if is_request:
+            # System -> Receiver Agent
+            receiver_name = agent_lookup.get(receiver_agent_id, "system")
+            return ("System", receiver_name)
+        else:
+            # Receiver Agent -> System
+            receiver_name = agent_lookup.get(receiver_agent_id, "system")
+            return (receiver_name, "System")
+
+    # Agent-to-agent communication (sender_agent_id is not null)
+    if sender_agent_id is not None:
+        sender_name = agent_lookup.get(sender_agent_id, "system")
+        receiver_name = agent_lookup.get(receiver_agent_id, "system")
+        if is_request:
+            # Sender Agent -> Receiver Agent
+            return (sender_name, receiver_name)
+        else:
+            # Receiver Agent -> Sender Agent
+            return (receiver_name, sender_name)
+
+    # Fallback to original logic
+    sender_name = agent_lookup.get(sender_agent_id, "system")
+    receiver_name = agent_lookup.get(receiver_agent_id, "queue")
+    return (sender_name, receiver_name)
 
 
 @dataclass(slots=True)
@@ -189,6 +257,9 @@ class DashboardDataProvider:
 
         for task in task_rows:
             context = task.result_json if isinstance(task.result_json, dict) else {}
+            # Convert timestamp to server timezone
+            timestamp = to_server_tz(task.queued_at).isoformat() if task.queued_at else _iso_now()
+
             items.append(
                 {
                     "id": str(task.id),
@@ -197,9 +268,8 @@ class DashboardDataProvider:
                     "targetAgent": "queue",
                     "title": f"任務 {task.status}",
                     "summary": task.error_message or "系統任務狀態已同步。",
-                    "timestamp": task.queued_at.isoformat() if task.queued_at else _iso_now(),
+                    "timestamp": timestamp,
                     "status": _map_task_status(task.status),
-                    "technicalDetails": str(task.task_id),
                     "group": context.get("group"),
                     "origin": context.get("origin"),
                     "relatedTaskId": context.get("relatedTaskId"),
@@ -207,19 +277,31 @@ class DashboardDataProvider:
                 }
             )
 
-        for message in message_rows:
+        for message, session_id in message_rows:
             snippet = _summarize_message_content(message.content_json) or "最近消息已記錄。"
+
+            # Determine sourceAgent and targetAgent based on session_id and message_type
+            source_agent, target_agent = _determine_agent_display(
+                session_id=session_id,
+                message_type=getattr(message, "message_type", "request"),
+                sender_agent_id=message.sender_agent_id,
+                receiver_agent_id=message.receiver_agent_id,
+                agent_lookup=agent_lookup,
+            )
+
+            # Convert timestamp to server timezone
+            timestamp = to_server_tz(message.created_at).isoformat() if message.created_at else _iso_now()
+
             items.append(
                 {
                     "id": str(message.id),
                     "type": "message",
-                    "sourceAgent": agent_lookup.get(message.sender_agent_id, "system"),
-                    "targetAgent": agent_lookup.get(message.receiver_agent_id, "queue"),
+                    "sourceAgent": source_agent,
+                    "targetAgent": target_agent,
                     "title": "代理消息",
                     "summary": snippet,
-                    "timestamp": message.created_at.isoformat() if message.created_at else _iso_now(),
+                    "timestamp": timestamp,
                     "status": "healthy",
-                    "technicalDetails": getattr(message, "message_type", "message"),
                     "group": None,
                     "origin": "message",
                     "relatedTaskId": None,
@@ -241,22 +323,36 @@ class DashboardDataProvider:
 
         recent_entries = []
         for task in task_rows:
+            # Convert timestamp to server timezone
+            timestamp = to_server_tz(task.queued_at).isoformat() if task.queued_at else _iso_now()
             recent_entries.append(
                 {
                     "kind": "task",
-                    "timestamp": task.queued_at.isoformat() if task.queued_at else _iso_now(),
+                    "timestamp": timestamp,
                     "agent": agent_lookup.get(task.claimed_by, "system"),
                     "summary": task.error_message or f"任務 {task.status}",
                     "status": _map_task_status(task.status),
                 }
             )
 
-        for message in message_rows:
+        for message, session_id in message_rows:
+            # Convert timestamp to server timezone
+            timestamp = to_server_tz(message.created_at).isoformat() if message.created_at else _iso_now()
+
+            # Determine agent display name based on session_id and message_type
+            source_agent, _ = _determine_agent_display(
+                session_id=session_id,
+                message_type=getattr(message, "message_type", "request"),
+                sender_agent_id=message.sender_agent_id,
+                receiver_agent_id=message.receiver_agent_id,
+                agent_lookup=agent_lookup,
+            )
+
             recent_entries.append(
                 {
                     "kind": "message",
-                    "timestamp": message.created_at.isoformat() if message.created_at else _iso_now(),
-                    "agent": agent_lookup.get(message.sender_agent_id, "system"),
+                    "timestamp": timestamp,
+                    "agent": source_agent,
                     "summary": _summarize_message_content(message.content_json) or "最近消息已記錄。",
                     "status": "healthy",
                 }
@@ -360,6 +456,7 @@ class DashboardDataProvider:
 
     async def get_agent_tools(self, user_id=None) -> dict[str, Any]:
         agent_rows = await self._get_user_agents(user_id=user_id, limit=100)
+        type_name_lookup = await self._get_agent_type_name_lookup()
         try:
             tool_rows = await ToolDAO.get_active()
         except Exception:
@@ -410,11 +507,12 @@ class DashboardDataProvider:
                     }
                 )
 
+            type_id = str(row.agent_type_id) if row.agent_type_id else None
             agents.append(
                 {
                     "id": str(row.id),
                     "name": _agent_display_name(row),
-                    "role": "主控與協調" if not row.is_sub_agent else "協作子代理",
+                    "role": type_name_lookup.get(type_id, "未知類型"),
                     "status": _map_agent_status(row.status),
                     "tools": tools,
                 }
@@ -436,7 +534,7 @@ class DashboardDataProvider:
                 {
                     "id": str(row.id),
                     "name": _agent_display_name(row),
-                    "role": "主控與協調" if not row.is_sub_agent else "協作子代理",
+                    "role": type_name_lookup.get(type_id, "未知類型"),
                     "status": _map_agent_status(row.status),
                     "currentTask": "等待後端聚合輸出",
                     "latestOutput": "最近輸出會在後續版本接入真實聚合。",
@@ -498,7 +596,16 @@ class DashboardDataProvider:
 
         return rows[:limit]
 
-    async def _get_user_scoped_message_rows(self, agent_ids: set[Any], limit: int) -> list[Any]:
+    async def _get_user_scoped_message_rows(self, agent_ids: set[Any], limit: int) -> list[tuple[Any, str]]:
+        """Get user-scoped message rows with session_id.
+
+        Args:
+            agent_ids: Set of agent IDs to filter by.
+            limit: Maximum number of rows to return.
+
+        Returns:
+            List of tuples: (message, session_id).
+        """
         if not agent_ids:
             return []
 
@@ -511,8 +618,8 @@ class DashboardDataProvider:
                 break
 
             rows.extend(
-                message
-                for message in batch
+                (message, session_id)
+                for message, session_id in batch
                 if message.sender_agent_id in agent_ids or message.receiver_agent_id in agent_ids
             )
             offset += len(batch)
@@ -587,6 +694,6 @@ class DashboardDataProvider:
 
     async def _get_message_rows(self, limit: int, offset: int = 0):
         try:
-            return await AgentMessageDAO.get_all(limit=limit, offset=offset)
+            return await AgentMessageDAO.get_all_with_session_id(limit=limit, offset=offset)
         except Exception:
             return []

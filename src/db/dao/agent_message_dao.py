@@ -467,6 +467,57 @@ class AgentMessageDAO:
             return count
 
     @staticmethod
+    async def get_all_with_session_id(
+        limit: int = 100,
+        offset: int = 0,
+        message_type: Optional[MessageType] = None,
+        session: Optional[AsyncSession] = None,
+    ) -> List[tuple[AgentMessage, str]]:
+        """Retrieve all agent messages with their session_id.
+
+        This method joins with CollaborationSession to include the session_id
+        string in the results, which is needed for determining display names
+        in the dashboard.
+
+        Args:
+            limit: Maximum number of records to return.
+            offset: Number of records to skip.
+            message_type: Optional message type filter.
+            session: Optional async session for transaction control.
+
+        Returns:
+            List of tuples: (AgentMessage DTO, session_id string).
+        """
+        async def _query(s: AsyncSession) -> List[tuple[AgentMessage, str]]:
+            query = (
+                select(AgentMessageEntity, CollaborationSessionEntity.session_id)
+                .join(
+                    CollaborationSessionEntity,
+                    AgentMessageEntity.collaboration_id == CollaborationSessionEntity.id,
+                )
+            )
+            if message_type is not None:
+                query = query.where(AgentMessageEntity.message_type == message_type)
+            query = query.order_by(AgentMessageEntity.created_at.desc())
+            query = query.limit(limit).offset(offset)
+            result = await s.execute(query)
+            rows = result.all()
+            return [
+                (AgentMessage.model_validate(entity), session_id)
+                for entity, session_id in rows
+            ]
+
+        if session is not None:
+            return await _query(session)
+        else:
+            engine = create_engine()
+            async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+            async with async_session() as s:
+                results = await _query(s)
+            await engine.dispose()
+            return results
+
+    @staticmethod
     async def get_unsummarized_messages_grouped(
         agent_id: str,
         before_date: datetime,
