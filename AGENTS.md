@@ -144,3 +144,52 @@ Use blank lines to separate these groups.
 - If environment variables are missing, raise/throw appropriate exceptions
 - Ensure environment validation at application startup to prevent runtime issues
 - Document all required environment variables for each deployment environment
+
+## Dashboard Memory Endpoints
+
+### STM Endpoint (Short-Term Memory)
+- **Path**: `/api/dashboard/stm`
+- **Method**: GET
+- **Headers**: X-API-Key (required)
+- **Response**: STMPayload with bullet point entries from current-day summaries
+- **Source**: LangGraph checkpoints (langgraph schema)
+- **Purpose**: Display recent conversation summaries compressed by `review_stm()`
+
+### LTM Endpoint (Long-Term Memory)
+- **Path**: `/api/dashboard/ltm`
+- **Method**: GET
+- **Headers**: X-API-Key (required)
+- **Query Params**: 
+  - `cursor` (optional): ISO timestamp for pagination
+  - `limit` (optional): Number of entries per page (default: 20)
+- **Response**: LTMPayload with paginated memory entries from Qdrant
+- **Source**: Qdrant vector database
+- **Purpose**: Display long-term memories compressed by `review_ltm()`
+
+### Memory Page Refactor
+- MemoryPage now displays STM + LTM in merged timeline
+- STM: bullet point summaries from LangGraph checkpoints (current day only)
+- LTM: long-term memory entries from Qdrant (paginated, lazy loading)
+- Lazy loading for LTM using IntersectionObserver
+
+### Testing Memory Endpoints
+
+**Backend Tests:**
+```bash
+# STM endpoint tests
+python -m pytest tests/unit/test_dashboard_stm.py -v
+
+# LTM endpoint tests  
+python -m pytest tests/unit/test_dashboard_ltm.py -v
+```
+
+**Frontend Tests:**
+```bash
+# MemoryPage hook tests
+cd frontend && npm test -- MemoryPage.test.tsx
+```
+
+**Integration Tests:**
+1. Run `review_stm()` to generate STM, verify shows in UI
+2. Run `review_ltm()` to generate LTM, verify shows in UI
+3. Scroll to bottom in MemoryPage, verify lazy loading
