@@ -23,6 +23,7 @@ from uuid import UUID
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field, create_model
 
+from db.dao.agent_instance_dao import AgentInstanceDAO
 from db.dao.agent_tool_dao import AgentInstanceToolDAO
 from db.dao.tool_dao import ToolDAO
 from db.dao.tool_version_dao import ToolVersionDAO
@@ -81,13 +82,14 @@ def _make_executor(
     new tools registered in the DB do not require a server restart.
 
     The wrapped function receives the tool arguments as keyword arguments plus
-    ``_config`` containing the merged tool + instance configuration.
+    ``_config`` containing the merged tool + instance configuration (which
+    includes ``user_id`` for path security validation).
     If the target function accepts ``agent_db_id``, it is injected automatically.
 
     Args:
         implementation_ref: ``"module.path:function_name"`` string.
         merged_config: Tool-level config_json merged with instance config_override
-            (instance values take precedence).
+            (instance values take precedence). Contains ``user_id`` for path security.
         agent_db_id: Agent instance UUID to inject into tools that accept it.
 
     Returns:
@@ -129,6 +131,10 @@ async def get_tools(agent_db_id: str) -> List[StructuredTool]:
     """
     instance_id = UUID(agent_db_id)
 
+    # Fetch the agent instance to get user_id for path security
+    agent_instance = await AgentInstanceDAO.get_by_id(instance_id)
+    user_id = str(agent_instance.user_id) if agent_instance else ""
+
     tool_ids = await AgentInstanceToolDAO.get_effective_tools(instance_id)
     overrides = await AgentInstanceToolDAO.get_overrides_for_instance(instance_id)
     override_map: dict[UUID, dict[str, Any]] = {
@@ -150,9 +156,11 @@ async def get_tools(agent_db_id: str) -> List[StructuredTool]:
             )
             continue
 
+        # Merge config and inject user_id for path security
         merged_config: dict[str, Any] = {
             **(version.config_json or {}),
             **override_map.get(tool_id, {}),
+            "user_id": user_id,  # Inject user_id for path security in system tools
         }
         args_schema = _build_args_schema(tool_dto.name, version.input_schema)
         executor = _make_executor(version.implementation_ref, merged_config, agent_db_id)

@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any
 
 from i18n import _
+from tools.path_security import PathSecurityError, resolve_safe_path
 
 logger = logging.getLogger(__name__)
 
@@ -45,11 +46,29 @@ _PROCESSES: dict[str, asyncio.subprocess.Process] = {}
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _resolve_path(path: str, base_dir: str | None) -> Path:
-    p = Path(path)
-    if not p.is_absolute() and base_dir:
-        p = Path(base_dir) / p
-    return p.resolve()
+def _resolve_path(path: str, base_dir: str | None, user_id: str = "") -> Path:
+    """Resolve a path with optional security validation.
+
+    Args:
+        path: Absolute or relative file path.
+        base_dir: Optional base directory from tool config.
+        user_id: User ID for path security validation (if provided).
+
+    Returns:
+        Resolved Path object.
+
+    Raises:
+        PathSecurityError: If user_id is provided and path is outside sandbox.
+    """
+    if user_id:
+        # Use secure path resolution
+        return resolve_safe_path(path, user_id, base_dir)
+    else:
+        # Legacy behavior for backward compatibility
+        p = Path(path)
+        if not p.is_absolute() and base_dir:
+            p = Path(base_dir) / p
+        return p.resolve()
 
 
 # ---------------------------------------------------------------------------
@@ -68,13 +87,18 @@ async def read_impl(
         path: Absolute or relative file path.
         encoding: Text encoding (default: utf-8).
         agent_db_id: Auto-injected agent ID.
-        _config: Tool config with optional ``base_dir``.
+        _config: Tool config with optional ``base_dir`` and ``user_id`` (for path security).
 
     Returns:
         File contents as a string, or an error message.
     """
     _config = _config or {}
-    resolved = _resolve_path(path, _config.get("base_dir"))
+    user_id = _config.get("user_id", "")
+    try:
+        resolved = _resolve_path(path, _config.get("base_dir"), user_id)
+    except PathSecurityError as exc:
+        logger.warning(_("[read] 🚫 路徑安全檢查失敗: %s"), exc)
+        return _("🚫 拒絕存取: %s") % str(exc)
 
     logger.info(_("[read] 讀取檔案: %s"), resolved)
     try:
@@ -102,13 +126,18 @@ async def write_impl(
         content: Text content to write.
         encoding: Text encoding (default: utf-8).
         agent_db_id: Auto-injected agent ID.
-        _config: Tool config with optional ``base_dir``.
+        _config: Tool config with optional ``base_dir`` and ``user_id`` (for path security).
 
     Returns:
         Success or error message.
     """
     _config = _config or {}
-    resolved = _resolve_path(path, _config.get("base_dir"))
+    user_id = _config.get("user_id", "")
+    try:
+        resolved = _resolve_path(path, _config.get("base_dir"), user_id)
+    except PathSecurityError as exc:
+        logger.warning(_("[write] 🚫 路徑安全檢查失敗: %s"), exc)
+        return _("🚫 拒絕存取: %s") % str(exc)
 
     logger.info(_("[write] 寫入檔案: %s (%d bytes)"), resolved, len(content))
     try:
@@ -142,13 +171,18 @@ async def edit_impl(
         replace_all: If True, replace every occurrence; otherwise only the first.
         encoding: Text encoding (default: utf-8).
         agent_db_id: Auto-injected agent ID.
-        _config: Tool config with optional ``base_dir``.
+        _config: Tool config with optional ``base_dir`` and ``user_id`` (for path security).
 
     Returns:
         Success message with replacement count, or an error message.
     """
     _config = _config or {}
-    resolved = _resolve_path(path, _config.get("base_dir"))
+    user_id = _config.get("user_id", "")
+    try:
+        resolved = _resolve_path(path, _config.get("base_dir"), user_id)
+    except PathSecurityError as exc:
+        logger.warning(_("[edit] 🚫 路徑安全檢查失敗: %s"), exc)
+        return _("🚫 拒絕存取: %s") % str(exc)
 
     logger.info(_("[edit] 編輯檔案: %s"), resolved)
     try:
@@ -239,13 +273,18 @@ async def grep_impl(
         include: Glob pattern to filter filenames (e.g. ``*.py``).
         max_results: Maximum number of matching lines to return.
         agent_db_id: Auto-injected agent ID.
-        _config: Tool config with optional ``base_dir``.
+        _config: Tool config with optional ``base_dir`` and ``user_id`` (for path security).
 
     Returns:
         Matching lines formatted as ``file:line:content``.
     """
     _config = _config or {}
-    resolved = _resolve_path(path, _config.get("base_dir"))
+    user_id = _config.get("user_id", "")
+    try:
+        resolved = _resolve_path(path, _config.get("base_dir"), user_id)
+    except PathSecurityError as exc:
+        logger.warning(_("[grep] 🚫 路徑安全檢查失敗: %s"), exc)
+        return _("🚫 拒絕存取: %s") % str(exc)
 
     flags = re.IGNORECASE if ignore_case else 0
     try:
@@ -303,13 +342,18 @@ async def find_impl(
         path: Root directory to search from.
         max_results: Maximum number of results to return.
         agent_db_id: Auto-injected agent ID.
-        _config: Tool config with optional ``base_dir``.
+        _config: Tool config with optional ``base_dir`` and ``user_id`` (for path security).
 
     Returns:
         Newline-separated list of matching file paths.
     """
     _config = _config or {}
-    root = _resolve_path(path, _config.get("base_dir"))
+    user_id = _config.get("user_id", "")
+    try:
+        root = _resolve_path(path, _config.get("base_dir"), user_id)
+    except PathSecurityError as exc:
+        logger.warning(_("[find] 🚫 路徑安全檢查失敗: %s"), exc)
+        return _("🚫 拒絕存取: %s") % str(exc)
 
     logger.info(_("[find] 搜索: %s in %s"), pattern, root)
     try:
@@ -338,13 +382,18 @@ async def ls_impl(
         path: Directory path to list.
         show_hidden: Include hidden (dot-prefixed) entries.
         agent_db_id: Auto-injected agent ID.
-        _config: Tool config with optional ``base_dir``.
+        _config: Tool config with optional ``base_dir`` and ``user_id`` (for path security).
 
     Returns:
         Formatted directory listing.
     """
     _config = _config or {}
-    resolved = _resolve_path(path, _config.get("base_dir"))
+    user_id = _config.get("user_id", "")
+    try:
+        resolved = _resolve_path(path, _config.get("base_dir"), user_id)
+    except PathSecurityError as exc:
+        logger.warning(_("[ls] 🚫 路徑安全檢查失敗: %s"), exc)
+        return _("🚫 拒絕存取: %s") % str(exc)
 
     logger.info(_("[ls] 列出目錄: %s"), resolved)
     try:
@@ -380,14 +429,35 @@ async def exec_impl(
         cwd: Working directory (defaults to ``base_dir`` config or cwd).
         timeout: Timeout in seconds (max 300, default 60).
         agent_db_id: Auto-injected agent ID.
-        _config: Tool config with optional ``base_dir``.
+        _config: Tool config with optional ``base_dir`` and ``user_id`` (for path security).
 
     Returns:
         Combined stdout + stderr, with exit code appended.
     """
     _config = _config or {}
-    working_dir = cwd or _config.get("base_dir") or os.getcwd()
+    user_id = _config.get("user_id", "")
     timeout = min(timeout, 300)
+
+    # Determine working directory and validate if user_id is set
+    if cwd:
+        try:
+            working_dir_path = _resolve_path(cwd, _config.get("base_dir"), user_id)
+            working_dir = str(working_dir_path)
+        except PathSecurityError as exc:
+            logger.warning(_("[exec] 🚫 路徑安全檢查失敗: %s"), exc)
+            return _("🚫 拒絕存取: %s") % str(exc)
+    else:
+        # Use base_dir or default, but validate if user_id is set
+        base_dir = _config.get("base_dir")
+        if base_dir:
+            try:
+                working_dir_path = _resolve_path(".", base_dir, user_id)
+                working_dir = str(working_dir_path)
+            except PathSecurityError as exc:
+                logger.warning(_("[exec] 🚫 路徑安全檢查失敗: %s"), exc)
+                return _("🚫 拒絕存取: %s") % str(exc)
+        else:
+            working_dir = os.getcwd()
 
     logger.info(_("[exec] 執行命令: %s (cwd=%s)"), command, working_dir)
     try:
@@ -427,17 +497,38 @@ async def process_impl(
         handle: Process handle returned by ``start`` (required for ``status``/``kill``).
         cwd: Working directory for ``start``.
         agent_db_id: Auto-injected agent ID.
-        _config: Tool config with optional ``base_dir``.
+        _config: Tool config with optional ``base_dir`` and ``user_id`` (for path security).
 
     Returns:
         Result message.
     """
     _config = _config or {}
+    user_id = _config.get("user_id", "")
 
     if action == "start":
         if not command:
             return _("❌ action=start 需要提供 command")
-        working_dir = cwd or _config.get("base_dir") or os.getcwd()
+
+        # Determine and validate working directory
+        if cwd:
+            try:
+                working_dir_path = _resolve_path(cwd, _config.get("base_dir"), user_id)
+                working_dir = str(working_dir_path)
+            except PathSecurityError as exc:
+                logger.warning(_("[process] 🚫 路徑安全檢查失敗: %s"), exc)
+                return _("🚫 拒絕存取: %s") % str(exc)
+        else:
+            base_dir = _config.get("base_dir")
+            if base_dir:
+                try:
+                    working_dir_path = _resolve_path(".", base_dir, user_id)
+                    working_dir = str(working_dir_path)
+                except PathSecurityError as exc:
+                    logger.warning(_("[process] 🚫 路徑安全檢查失敗: %s"), exc)
+                    return _("🚫 拒絕存取: %s") % str(exc)
+            else:
+                working_dir = os.getcwd()
+
         key = f"{agent_db_id}:{command[:40]}"
         try:
             proc = await asyncio.create_subprocess_shell(
