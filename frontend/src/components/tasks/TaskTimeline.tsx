@@ -17,6 +17,15 @@ function TimelineItemCard({ item }: { item: TimelineItem }) {
   const [needsExpand, setNeedsExpand] = useState(false);
   const previewRef = useState<HTMLDivElement | null>(null)[0];
 
+  // Format summary: add line breaks after certain patterns
+  const formattedSummary = item.summary
+    // Add line break after "。 **" pattern (before new section headings)
+    .replace(/。\s*\*\*/g, '。\n\n**')
+    // Add line break after bullet points that start with "* **"
+    .replace(/\*\s+\*\*/g, '\n* **')
+    // Ensure numbered lists have line breaks (e.g., "1. xxx 2. yyy" -> "1. xxx\n2. yyy")
+    .replace(/(\d+\.\s+[^\n]+?)\s+(\d+\.)/g, '$1\n$2');
+
   // Check if content is actually truncated
   const handlePreviewRef = (element: HTMLDivElement | null) => {
     if (element) {
@@ -44,17 +53,8 @@ function TimelineItemCard({ item }: { item: TimelineItem }) {
             <div
               ref={handlePreviewRef}
               className="timeline-item__content-preview"
-              style={{
-                display: '-webkit-box',
-                WebkitLineClamp: 4,
-                WebkitBoxOrient: 'vertical',
-                overflow: 'hidden',
-                color: '#ffffff',
-                lineHeight: 1.6,
-                whiteSpace: 'pre-wrap'
-              }}
             >
-              {item.summary}
+              {formattedSummary}
             </div>
             {needsExpand && (
               <button
@@ -66,15 +66,8 @@ function TimelineItemCard({ item }: { item: TimelineItem }) {
             )}
           </>
         ) : (
-          <div
-            className="timeline-item__content-full"
-            style={{
-              color: '#ffffff',
-              lineHeight: 1.6,
-              whiteSpace: 'pre-wrap'
-            }}
-          >
-            {item.summary}
+          <div className="timeline-item__content-full">
+            {formattedSummary}
           </div>
         )}
       </div>
