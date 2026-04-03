@@ -55,7 +55,7 @@ class LTMDataProvider:
         Query Qdrant for entries across multiple agents.
         
         Args:
-            agent_ids: List of agent IDs to query
+            agent_ids: List of agent IDs to query (DB format without 'agent-' prefix)
             
         Returns:
             List of formatted entries
@@ -70,9 +70,12 @@ class LTMDataProvider:
                 port=ltm_config.QDRANT_PORT,
             )
             
+            # Add 'agent-' prefix to match Qdrant payload format
+            qdrant_agent_ids = [f"agent-{aid}" if not aid.startswith("agent-") else aid for aid in agent_ids]
+            
             entries = QdrantVectorStore.query_multi_agent(
                 client=client,
-                agent_ids=agent_ids,
+                agent_ids=qdrant_agent_ids,
                 collection_name=ltm_config.QDRANT_COLLECTION_NAME,
                 limit=50
             )
