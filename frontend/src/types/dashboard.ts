@@ -234,6 +234,7 @@ export interface AgentToolsAgent extends AgentSummary {
 
 export interface AgentToolsPayload {
   agents: AgentToolsAgent[];
+  agentTypes: AgentToolsAgent[];
   availableTools: AgentToolDefinition[];
   source: string;
 }
@@ -245,6 +246,15 @@ export interface AgentToolUpdatePayload {
     toolId: string;
     isEnabled: boolean;
     configOverride: Record<string, unknown> | null;
+  };
+}
+
+export interface AgentTypeToolUpdatePayload {
+  tool: {
+    id: string;
+    agentTypeId: string;
+    toolId: string;
+    isActive: boolean;
   };
 }
 

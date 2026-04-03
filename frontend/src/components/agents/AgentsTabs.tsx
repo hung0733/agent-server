@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 
-type AgentTabKey = "agent" | "agent-type" | "schedule" | "tools";
+type AgentTabKey = "agent" | "agent-type" | "schedule" | "agent-tools" | "agent-type-tools";
 
 interface AgentsTabsProps {
   activeTab: AgentTabKey;
@@ -11,7 +11,8 @@ const tabs: Array<{ key: AgentTabKey; labelKey: string }> = [
   { key: "agent", labelKey: "agents.tabs.agent" },
   { key: "agent-type", labelKey: "agents.tabs.agentType" },
   { key: "schedule", labelKey: "agents.tabs.schedule" },
-  { key: "tools", labelKey: "agents.tabs.tools" },
+  { key: "agent-tools", labelKey: "agents.tabs.agentTools" },
+  { key: "agent-type-tools", labelKey: "agents.tabs.agentTypeTools" },
 ];
 
 export type { AgentTabKey };

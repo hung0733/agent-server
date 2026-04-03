@@ -19,6 +19,15 @@ import type {
 
 const EMPTY_AGENTS_PAYLOAD: AgentsPayload = { agents: [], source: "mock" };
 
+const EMPTY_SETTINGS_PAYLOAD: SettingsPayload = {
+  locales: [],
+  featureFlags: {},
+  endpoints: [],
+  groups: [],
+  authKeys: [],
+  source: "mock",
+};
+
 interface FormState {
   name: string;
   agentTypeId: string;
@@ -67,7 +76,7 @@ export default function AgentTab() {
 
   const { resource: settingsResource } = useDashboardResource(
     fetchSettings,
-    { locales: [], featureFlags: {}, endpoints: [], groups: [], authKeys: [], source: "mock" } as SettingsPayload,
+    EMPTY_SETTINGS_PAYLOAD,
     {},
   );
   const [endpointGroups, setEndpointGroups] = useState<SettingsPayload["groups"]>([]);

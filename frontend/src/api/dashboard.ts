@@ -4,6 +4,7 @@ import {
   AgentToolUpdatePayload,
   AgentToolsPayload,
   AgentTypeItem,
+  AgentTypeToolUpdatePayload,
   AgentTypesPayload,
   AgentUpdateBody,
   AgentsPayload,
@@ -118,6 +119,14 @@ export function updateAgentTool(
   body: unknown,
 ): Promise<AgentToolUpdatePayload> {
   return mutateJson(`/api/dashboard/agents/${agentId}/tools/${toolId}`, "PATCH", body);
+}
+
+export function updateAgentTypeTool(
+  agentTypeId: string,
+  toolId: string,
+  body: unknown,
+): Promise<AgentTypeToolUpdatePayload> {
+  return mutateJson(`/api/dashboard/agent-types/${agentTypeId}/tools/${toolId}`, "PATCH", body);
 }
 
 export function createSettingsEndpoint(body: unknown): Promise<{ endpoint: SettingsPayload["endpoints"][number] }> {

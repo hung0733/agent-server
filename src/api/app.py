@@ -21,14 +21,14 @@ logger = logging.getLogger(__name__)
 from api.dashboard import DashboardDataProvider
 from db.dao.api_key_dao import APIKeyDAO
 from db.dao.agent_instance_dao import AgentInstanceDAO
-from db.dao.agent_tool_dao import AgentInstanceToolDAO
+from db.dao.agent_tool_dao import AgentInstanceToolDAO, AgentTypeToolDAO
 from db.crypto import CryptoManager
 from db.dao.llm_endpoint_dao import LLMEndpointDAO
 from db.dao.llm_endpoint_group_dao import LLMEndpointGroupDAO
 from db.dao.llm_level_endpoint_dao import LLMLevelEndpointDAO
 from db.dao.tool_dao import ToolDAO
 from db.dto.llm_endpoint_dto import LLMEndpointCreate, LLMEndpointUpdate, LLMLevelEndpointCreate
-from db.dto.agent_tool_dto import AgentInstanceToolCreate, AgentInstanceToolUpdate
+from db.dto.agent_tool_dto import AgentInstanceToolCreate, AgentInstanceToolUpdate, AgentTypeToolCreate, AgentTypeToolUpdate
 from db.dto.user_dto import APIKeyCreate, APIKeyUpdate
 from db.dao.agent_type_dao import AgentTypeDAO
 from db.dao.collaboration_session_dao import CollaborationSessionDAO
@@ -716,6 +716,54 @@ async def _agent_tool_update(request: web.Request) -> web.Response:
     )
 
 
+async def _agent_type_tool_update(request: web.Request) -> web.Response:
+    """PATCH /api/dashboard/agent-types/{agent_type_id}/tools/{tool_id}"""
+    auth_context = await _require_auth(request)
+    agent_type_id = UUID(request.match_info["agent_type_id"])
+    tool_id = UUID(request.match_info["tool_id"])
+
+    agent_type = await AgentTypeDAO.get_by_id(agent_type_id)
+    if agent_type is None or agent_type.user_id != auth_context["user_id"]:
+        raise web.HTTPNotFound()
+
+    tool = await ToolDAO.get_by_id(tool_id)
+    if tool is None:
+        raise web.HTTPNotFound()
+
+    body = await request.json()
+    is_active = bool(body.get("isActive", True))
+
+    type_tools = await AgentTypeToolDAO.get_tools_for_type(agent_type_id)
+    existing = next((tt for tt in type_tools if tt.tool_id == tool_id), None)
+
+    if existing is None:
+        updated = await AgentTypeToolDAO.assign(
+            AgentTypeToolCreate(
+                agent_type_id=agent_type_id,
+                tool_id=tool_id,
+                is_active=is_active,
+            )
+        )
+    else:
+        updated = await AgentTypeToolDAO.update(
+            AgentTypeToolUpdate(id=existing.id, is_active=is_active)
+        )
+
+    if updated is None:
+        raise web.HTTPNotFound()
+
+    return web.json_response(
+        {
+            "tool": {
+                "id": str(updated.id),
+                "agentTypeId": str(updated.agent_type_id),
+                "toolId": str(updated.tool_id),
+                "isActive": updated.is_active,
+            }
+        }
+    )
+
+
 def _default_frontend_dist() -> Path:
     return Path(__file__).resolve().parents[2] / "frontend" / "dist"
 
@@ -777,6 +825,7 @@ def create_app(
     app.router.add_post("/api/dashboard/agent-types", _agent_types_create)
     app.router.add_patch("/api/dashboard/agent-types/{agent_type_id}", _agent_types_update)
     app.router.add_delete("/api/dashboard/agent-types/{agent_type_id}", _agent_types_delete)
+    app.router.add_patch("/api/dashboard/agent-types/{agent_type_id}/tools/{tool_id}", _agent_type_tool_update)
 
     dist_path = frontend_dist or _default_frontend_dist()
     if dist_path.exists():

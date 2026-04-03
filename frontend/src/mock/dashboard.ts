@@ -194,6 +194,38 @@ export const agentToolsPayload: AgentToolsPayload = {
       ],
     },
   ],
+  agentTypes: [
+    {
+      id: "type-butler",
+      name: "管家",
+      role: "管家",
+      status: "idle",
+      tools: [
+        { ...availableTools[0], isEnabled: true, source: "type" },
+        { ...availableTools[1], isEnabled: false, source: "inactive" },
+      ],
+    },
+    {
+      id: "type-architect",
+      name: "系統架構師",
+      role: "系統架構師",
+      status: "idle",
+      tools: [
+        { ...availableTools[0], isEnabled: false, source: "inactive" },
+        { ...availableTools[1], isEnabled: true, source: "type" },
+      ],
+    },
+    {
+      id: "type-fullstack",
+      name: "全棧工程師",
+      role: "全棧工程師",
+      status: "idle",
+      tools: [
+        { ...availableTools[0], isEnabled: true, source: "type" },
+        { ...availableTools[1], isEnabled: true, source: "type" },
+      ],
+    },
+  ],
   availableTools,
   source: "mock",
 };

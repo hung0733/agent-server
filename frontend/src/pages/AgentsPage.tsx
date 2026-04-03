@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import AgentTab from "../components/agents/AgentTab";
 import AgentToolsTab from "../components/agents/AgentToolsTab";
+import AgentTypeToolsTab from "../components/agents/AgentTypeToolsTab";
 import AgentTypesTab from "../components/agents/AgentTypesTab";
 import AgentsTabs, { type AgentTabKey } from "../components/agents/AgentsTabs";
 import SectionHeader from "../components/ui/SectionHeader";
@@ -26,7 +27,9 @@ export default function AgentsPage() {
         </article>
       ) : null}
 
-      {activeTab === "tools" ? <AgentToolsTab /> : null}
+      {activeTab === "agent-tools" ? <AgentToolsTab /> : null}
+
+      {activeTab === "agent-type-tools" ? <AgentTypeToolsTab /> : null}
     </section>
   );
 }

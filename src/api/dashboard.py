@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Optional
 
+logger = logging.getLogger(__name__)
+
 from db.dao.agent_instance_dao import AgentInstanceDAO
 from db.dao.agent_type_dao import AgentTypeDAO
-from db.dao.agent_tool_dao import AgentInstanceToolDAO
+from db.dao.agent_tool_dao import AgentInstanceToolDAO, AgentTypeToolDAO
 from db.dao.agent_message_dao import AgentMessageDAO
 from db.dao.api_key_dao import APIKeyDAO
 from db.dao.llm_endpoint_dao import LLMEndpointDAO
@@ -567,8 +570,52 @@ class DashboardDataProvider:
                 }
             )
 
+        # Build agentTypes list
+        agent_types = []
+        try:
+            type_rows = await AgentTypeDAO.get_all(limit=100, user_id=user_id)
+            logger.info(f"[get_agent_tools] user_id={user_id}, fetched {len(type_rows)} agent types")
+        except Exception as e:
+            logger.error(f"[get_agent_tools] Failed to fetch agent types: {e}")
+            type_rows = []
+
+        for type_row in type_rows:
+            try:
+                type_tool_records = await AgentTypeToolDAO.get_tools_for_type(type_row.id, active_only=False)
+            except Exception:
+                type_tool_records = []
+
+            type_tool_map = {tt.tool_id: tt for tt in type_tool_records}
+            type_tools = []
+            for tool in tool_rows:
+                type_tool = type_tool_map.get(tool.id)
+                is_enabled = type_tool is not None and type_tool.is_active
+                source = "type" if is_enabled else "inactive"
+
+                type_tools.append(
+                    {
+                        "id": str(tool.id),
+                        "name": tool.name,
+                        "description": tool.description,
+                        "isActive": tool.is_active,
+                        "isEnabled": is_enabled,
+                        "source": source,
+                    }
+                )
+
+            agent_types.append(
+                {
+                    "id": str(type_row.id),
+                    "name": type_row.name,
+                    "role": type_row.name,
+                    "status": "idle",
+                    "tools": type_tools,
+                }
+            )
+
         return {
             "agents": agents,
+            "agentTypes": agent_types,
             "availableTools": available_tools,
             "source": "mixed",
         }
