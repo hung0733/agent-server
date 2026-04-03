@@ -80,9 +80,15 @@ class LTMDataProvider:
                 limit=50
             )
             
+            # Build agent name lookup
+            agent_name_lookup = await self._get_agent_name_lookup(agent_ids)
+            
             formatted_entries = []
             for entry in entries:
-                formatted_entries.append(self._format_entry(entry, entry.agent_id or ""))
+                # Map agent_id to name
+                agent_id_raw = entry.agent_id.replace("agent-", "") if entry.agent_id else ""
+                agent_name = agent_name_lookup.get(agent_id_raw, entry.agent_id or "Unknown")
+                formatted_entries.append(self._format_entry(entry, agent_name))
             
             formatted_entries.sort(key=lambda x: x["timestamp"], reverse=True)
             return formatted_entries[:50]
@@ -92,6 +98,29 @@ class LTMDataProvider:
             logger = logging.getLogger(__name__)
             logger.error(f"Qdrant multi-agent query failed: {e}", exc_info=True)
             return []
+    
+    async def _get_agent_name_lookup(self, agent_ids: list[str]) -> dict[str, str]:
+        """
+        Build lookup mapping agent ID to display name.
+        
+        Args:
+            agent_ids: List of agent IDs (DB format without 'agent-' prefix)
+            
+        Returns:
+            Dict mapping agent_id -> agent_name
+        """
+        try:
+            from uuid import UUID
+            lookup = {}
+            for aid in agent_ids:
+                try:
+                    agent = await AgentInstanceDAO.get_by_id(UUID(aid))
+                    lookup[aid] = _agent_display_name(agent) if agent else aid
+                except Exception:
+                    lookup[aid] = aid
+            return lookup
+        except Exception:
+            return {}
     
     def _format_entry(self, entry: MemoryEntry, agent_id: str) -> dict:
         """
