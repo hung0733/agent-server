@@ -39,6 +39,18 @@ def now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def seconds_until_next_minute_boundary(current_time: Optional[datetime] = None) -> float:
+    """Return seconds until the next :00 second boundary."""
+    if current_time is None:
+        current_time = now_utc()
+
+    elapsed_in_minute = current_time.second + (current_time.microsecond / 1_000_000)
+    remaining = 60 - elapsed_in_minute
+    if remaining <= 0:
+        return 0.0
+    return remaining
+
+
 def priority_to_int(priority: Priority | None) -> int:
     """
     Convert Priority enum to integer value for task queue.
@@ -212,8 +224,8 @@ class TaskScheduler:
                     # Continue running even if one tick fails
                     pass
 
-                # Sleep before next tick
-                await asyncio.sleep(self.interval)
+                # Sleep until the next minute boundary so scans happen on :00 seconds.
+                await asyncio.sleep(seconds_until_next_minute_boundary())
 
         except Exception as e:
             logger.error(
@@ -589,12 +601,15 @@ class TaskScheduler:
                     )
                 )
 
-                # Reschedule for 1 minute later
-                from datetime import timedelta
+                next_run = calculate_next_run(
+                    schedule.schedule_expression,
+                    schedule.schedule_type,
+                    current_time,
+                )
                 await TaskScheduleDAO.update(
                     TaskScheduleUpdate(
                         id=schedule.id,
-                        next_run_at=current_time + timedelta(minutes=1),
+                        next_run_at=next_run,
                     )
                 )
                 return  # Don't update last_run_at since we're rescheduling

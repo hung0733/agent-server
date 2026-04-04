@@ -601,127 +601,138 @@ class Bulter(Agent):
         if agent_instance is None:
             raise ValueError(_("Agent not found: %s") % agent_id)
 
-        existing_blocks = await MemoryBlockDAO.get_by_agent_instance_id(agent_instance.id)
-        memory_by_type = {
-            block.memory_type: block
-            for block in existing_blocks
-            if block.memory_type in Bulter._REVIEW_MEMORY_TYPES
-        }
-
         analysis_prompt = Bulter._build_review_msg_system_prompt()
 
         for date_str, session_groups in grouped_messages.items():
             for session_id, messages in session_groups.items():
                 stats["total_groups"] += 1
+                chunks = Bulter._split_messages_by_tokens(messages, max_tokens=2000)
 
                 try:
-                    current_memory = {
-                        memory_type: (
-                            memory_by_type.get(memory_type).content
-                            if memory_by_type.get(memory_type)
-                            else None
+                    for chunk_idx, message_chunk in enumerate(chunks, start=1):
+                        current_blocks = await MemoryBlockDAO.get_by_agent_instance_id(
+                            agent_instance.id
                         )
-                        for memory_type in Bulter._REVIEW_MEMORY_TYPES
-                    }
+                        memory_by_type = {
+                            block.memory_type: block
+                            for block in current_blocks
+                            if block.memory_type in Bulter._REVIEW_MEMORY_TYPES
+                        }
+                        current_memory = {
+                            memory_type: (
+                                memory_by_type.get(memory_type).content
+                                if memory_by_type.get(memory_type)
+                                else None
+                            )
+                            for memory_type in Bulter._REVIEW_MEMORY_TYPES
+                        }
 
-                    user_message = Bulter._build_review_msg_user_message(
-                        messages=messages,
-                        current_memory=current_memory,
-                    )
-
-                    content_parts: List[str] = []
-                    analysis_session_id = f"review_msg-{uuid4()}"
-                    
-                    CollaborationSessionDAO().create(
-                        CollaborationSessionCreate(
-                            main_agent_id=agent_instance.id,
-                            user_id=agent_instance.user_id,
-                            name=f"Review {date_str} {session_id}",
-                            session_id=analysis_session_id
+                        user_message = Bulter._build_review_msg_user_message(
+                            messages=message_chunk,
+                            current_memory=current_memory,
                         )
-                    )
-                    
-                    async for chunk in MsgQueueHandler.create_msg_queue(
-                        agent_id=agent_id,
-                        session_id=session_id,
-                        message=user_message,
-                        system_prompt=analysis_prompt,
-                        think_mode=False,
-                        priority=QueueTaskPriority.NORMAL,
-                        metadata={
-                            "source": "review_msg",
-                            "review_type": "memory_analysis",
-                            "thread_id_override": analysis_session_id,
-                        },
-                    ):
-                        if chunk.chunk_type == "content" and chunk.content:
-                            content_parts.append(chunk.content)
 
-                    parsed_result = Bulter._parse_review_msg_output("".join(content_parts))
+                        content_parts: List[str] = []
+                        analysis_session_id = f"review_msg-{uuid4()}"
 
-                    group_changed: List[Dict[str, Any]] = []
+                        await CollaborationSessionDAO().create(
+                            CollaborationSessionCreate(
+                                main_agent_id=agent_instance.id,
+                                user_id=agent_instance.user_id,
+                                name=f"Review {date_str} {session_id} chunk {chunk_idx}",
+                                session_id=analysis_session_id,
+                            )
+                        )
 
-                    for memory_type in Bulter._REVIEW_MEMORY_TYPES:
-                        updated_data = parsed_result[memory_type]
-                        existing = memory_by_type.get(memory_type)
-                        orig_data = existing.content if existing else None
-
-                        if (
-                            Bulter._normalize_text(orig_data)
-                            == Bulter._normalize_text(updated_data)
+                        async for analysis_chunk in MsgQueueHandler.create_msg_queue(
+                            agent_id=agent_id,
+                            session_id=session_id,
+                            message=user_message,
+                            system_prompt=analysis_prompt,
+                            think_mode=False,
+                            priority=QueueTaskPriority.NORMAL,
+                            metadata={
+                                "source": "review_msg",
+                                "review_type": "memory_analysis",
+                                "thread_id_override": analysis_session_id,
+                            },
                         ):
-                            continue
+                            if (
+                                analysis_chunk.chunk_type == "content"
+                                and analysis_chunk.content
+                            ):
+                                content_parts.append(analysis_chunk.content)
 
-                        if existing is not None:
-                            updated = await MemoryBlockDAO.update(
-                                MemoryBlockUpdate(
-                                    id=existing.id,
-                                    content=updated_data,
-                                    version=existing.version + 1,
-                                )
-                            )
-                            if updated is None:
-                                raise RuntimeError(
-                                    _("更新 memory block 失敗: %s") % memory_type
-                                )
-                            memory_by_type[memory_type] = updated
-                        else:
-                            created = await MemoryBlockDAO.create(
-                                MemoryBlockCreate(
-                                    agent_instance_id=agent_instance.id,
-                                    memory_type=memory_type,
-                                    content=updated_data,
-                                    version=1,
-                                    is_active=True,
-                                )
-                            )
-                            memory_by_type[memory_type] = created
-
-                        group_changed.append(
-                            {
-                                "memory_type": memory_type,
-                                "orig_data": orig_data,
-                                "updated_data": updated_data,
-                            }
+                        parsed_result = Bulter._parse_review_msg_output(
+                            "".join(content_parts)
                         )
 
-                    message_ids = [msg.id for msg in messages]
-                    marked_count = await AgentMessageDAO.batch_update_is_analyzed(
-                        message_ids=message_ids,
-                        is_analyzed=True,
-                    )
+                        chunk_changed: List[Dict[str, Any]] = []
 
-                    stats["messages_marked_analyzed"] += marked_count
+                        for memory_type in Bulter._REVIEW_MEMORY_TYPES:
+                            updated_data = parsed_result[memory_type]
+                            existing = memory_by_type.get(memory_type)
+                            orig_data = existing.content if existing else None
+
+                            if (
+                                Bulter._normalize_text(orig_data)
+                                == Bulter._normalize_text(updated_data)
+                            ):
+                                continue
+
+                            if existing is not None:
+                                updated = await MemoryBlockDAO.update(
+                                    MemoryBlockUpdate(
+                                        id=existing.id,
+                                        content=updated_data,
+                                        version=existing.version + 1,
+                                    )
+                                )
+                                if updated is None:
+                                    raise RuntimeError(
+                                        _("更新 memory block 失敗: %s") % memory_type
+                                    )
+                            else:
+                                updated = await MemoryBlockDAO.create(
+                                    MemoryBlockCreate(
+                                        agent_instance_id=agent_instance.id,
+                                        memory_type=memory_type,
+                                        content=updated_data,
+                                        version=1,
+                                        is_active=True,
+                                    )
+                                )
+
+                            chunk_changed.append(
+                                {
+                                    "memory_type": memory_type,
+                                    "orig_data": orig_data,
+                                    "updated_data": updated_data,
+                                }
+                            )
+
+                        message_ids = [msg.id for msg in message_chunk]
+                        marked_count = await AgentMessageDAO.batch_update_is_analyzed(
+                            message_ids=message_ids,
+                            is_analyzed=True,
+                        )
+
+                        stats["messages_marked_analyzed"] += marked_count
+                        stats["changed_blocks"].extend(chunk_changed)
+
+                        logger.info(
+                            _(
+                                "✅ review_msg chunk 完成，日期=%s session=%s chunk=%d/%d changed=%d marked=%d"
+                            ),
+                            date_str,
+                            session_id,
+                            chunk_idx,
+                            len(chunks),
+                            len(chunk_changed),
+                            marked_count,
+                        )
+
                     stats["processed_groups"] += 1
-                    stats["changed_blocks"].extend(group_changed)
-
-                    logger.info(
-                        _("✅ review_msg 完成，日期=%s session=%s changed=%d marked=%d"),
-                        date_str,
-                        session_id,
-                        len(group_changed),
-                        marked_count,
-                    )
 
                 except Exception as exc:
                     stats["failed_groups"] += 1

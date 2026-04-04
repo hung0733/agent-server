@@ -31,6 +31,10 @@ from i18n import _
 logger = logging.getLogger(__name__)
 
 
+async def _wait_for_background_tasks() -> None:
+    await Tools.wait_task_comp()
+
+
 async def main() -> None:
     api_runner: web.AppRunner | None = None
     from utils.db_pool import configure_pool, close_pool
@@ -127,7 +131,7 @@ async def main() -> None:
         )
 
     qm.stop()
-    Tools.wait_task_comp()
+    await _wait_for_background_tasks()
     if api_runner is not None:
         await api_runner.cleanup()
     await lg_pool.close()

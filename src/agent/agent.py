@@ -1,5 +1,5 @@
 import logging
-from typing import Any, List
+from typing import Any, ClassVar, List, Set
 
 from langchain_core.messages import RemoveMessage, HumanMessage
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 class Agent:
+    _active_stm_reviews: ClassVar[Set[str]] = set()
     agent_db_id: str
     session_db_id: str
 
@@ -104,6 +105,14 @@ class Agent:
         return prompt
 
     async def _proc_review_stm(self, graph: Any, model_set: LLMSet):
+        if self.session_id in Agent._active_stm_reviews:
+            logger.debug(
+                _("⏭️ 背景任務：session %s 已有 review_stm 執行中，跳過重覆請求"),
+                self.session_id,
+            )
+            return
+
+        Agent._active_stm_reviews.add(self.session_id)
         try:
             config = {"configurable": {"thread_id": self.session_id}}
             state = await graph.aget_state(config)
@@ -279,3 +288,5 @@ class Agent:
                         )
         except Exception as e:
             logger.error(_("❌ 背景壓縮記憶失敗：%s"), e)
+        finally:
+            Agent._active_stm_reviews.discard(self.session_id)

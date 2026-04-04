@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 SUMMARY_TRIGGER_TOKEN = 10000
 SUMMARY_USAGE_TOKEN = 5000
 CONFIDENCE_THRESHOLD = 0.8
+MODEL_INPUT_TOKEN_BUDGET = 20000
 
 # 定義「提交答案」嘅 System Tool (用嚟攞信心評分)
 SUBMIT_TOOL = {
@@ -39,6 +40,85 @@ SUBMIT_TOOL = {
         "required": ["answer", "confidence_score"],
     },
 }
+
+
+def _message_token_count(message: BaseMessage) -> int:
+    return Tools.get_token_count(message.content) + 16
+
+
+def _build_messages_with_token_budget(
+    sys_prompt: str,
+    summary: str,
+    messages: Sequence[BaseMessage],
+    max_tokens: int = MODEL_INPUT_TOKEN_BUDGET,
+    assistant_prefill: BaseMessage | None = None,
+    label: str = "prompt",
+) -> list[BaseMessage]:
+    messages_to_send: list[BaseMessage] = [SystemMessage(content=sys_prompt)]
+    used_tokens = _message_token_count(messages_to_send[0])
+    summary_included = False
+    prefill_included = False
+
+    if summary:
+        summary_message = AIMessage(
+            content=_("以下是過去對話的重點總結，請作為背景記憶參考：\n%s") % summary
+        )
+        summary_tokens = _message_token_count(summary_message)
+        if used_tokens + summary_tokens <= max_tokens:
+            messages_to_send.append(summary_message)
+            used_tokens += summary_tokens
+            summary_included = True
+        else:
+            logger.warning(
+                _("摘要過長，已略過以保留對話上下文: tokens=%d budget=%d"),
+                summary_tokens,
+                max_tokens,
+            )
+
+    filtered_messages = [m for m in messages if not isinstance(m, RemoveMessage)]
+    original_message_count = len(filtered_messages)
+    estimated_tokens_before_trim = used_tokens + sum(
+        _message_token_count(message) for message in filtered_messages
+    )
+    selected_messages: list[BaseMessage] = []
+    for message in reversed(filtered_messages):
+        message_tokens = _message_token_count(message)
+        if used_tokens + message_tokens > max_tokens:
+            continue
+        selected_messages.append(message)
+        used_tokens += message_tokens
+
+    messages_to_send.extend(reversed(selected_messages))
+
+    if assistant_prefill is not None:
+        prefill_tokens = _message_token_count(assistant_prefill)
+        if used_tokens + prefill_tokens <= max_tokens:
+            messages_to_send.append(assistant_prefill)
+            used_tokens += prefill_tokens
+            prefill_included = True
+        else:
+            logger.warning(
+                _("assistant prefill 超出 token budget，已略過: tokens=%d budget=%d"),
+                prefill_tokens,
+                max_tokens,
+            )
+
+    logger.debug(
+        _(
+            "Prompt budget [%s]: budget=%d estimated_before=%d estimated_after=%d original_messages=%d sent_messages=%d trimmed_messages=%d summary_included=%s assistant_prefill_included=%s"
+        ),
+        label,
+        max_tokens,
+        estimated_tokens_before_trim,
+        used_tokens,
+        original_message_count,
+        len(selected_messages),
+        original_message_count - len(selected_messages),
+        summary_included,
+        prefill_included,
+    )
+
+    return messages_to_send
 
 
 # ==========================================
@@ -71,10 +151,8 @@ async def router_node(
         config, False
     )
 
-    messages_to_send: list[BaseMessage] = []
-    messages_to_send.append(
-        SystemMessage(
-            content="""You are a routing classifier. Output ONLY a single line of JSON. No explanations, no markdown, no extra text.
+    messages_to_send = _build_messages_with_token_budget(
+        sys_prompt="""You are a routing classifier. Output ONLY a single line of JSON. No explanations, no markdown, no extra text.
 
 Format: {"level": 1, "think": false}
 
@@ -98,24 +176,12 @@ User: "推導一下黑洞事件視界邊緣嘅霍金輻射方程式。"
 {"level": 3, "think": true}
 
 CRITICAL: Your entire response must be ONLY the JSON object. Nothing else.
-"""
-        )
+""",
+        summary=state.get("summary", ""),
+        messages=state["messages"],
+        assistant_prefill=AIMessage(content='{"level":'),
+        label="router",
     )
-
-    summary = state.get("summary", "")
-    if summary:
-        messages_to_send.append(
-            AIMessage(
-                content=_("以下是過去對話的重點總結，請作為背景記憶參考：\n%s")
-                % summary
-            )
-        )
-
-    messages_to_send += [m for m in state["messages"] if not isinstance(m, RemoveMessage)]
-
-    # Add assistant message prefix to force JSON format
-    # This is a powerful technique called "prefill" to make LLM follow format
-    messages_to_send.append(AIMessage(content='{"level":'))
 
     model: BaseChatModel = models.rte_model
     temperature = 0.0
@@ -220,19 +286,12 @@ async def level_1_node(
         [t.name for t in db_tools] if db_tools else "無",
     )
 
-    messages_to_send: list[BaseMessage] = []
-    messages_to_send.append(SystemMessage(content=sys_prompt))
-
-    summary = state.get("summary", "")
-    if summary:
-        messages_to_send.append(
-            AIMessage(
-                content=_("以下是過去對話的重點總結，請作為背景記憶參考：\n%s")
-                % summary
-            )
-        )
-
-    messages_to_send += [m for m in state["messages"] if not isinstance(m, RemoveMessage)]
+    messages_to_send = _build_messages_with_token_budget(
+        sys_prompt=sys_prompt,
+        summary=state.get("summary", ""),
+        messages=state["messages"],
+        label="level_1",
+    )
 
     models = model_set.level[1]
     logger.debug(_("[Level 1] 找到 %d 個可用模型"), len(models))
@@ -321,19 +380,12 @@ async def level_2_node(
         [t.name for t in db_tools] if db_tools else "無",
     )
 
-    messages_to_send: list[BaseMessage] = []
-    messages_to_send.append(SystemMessage(content=sys_prompt))
-
-    summary = state.get("summary", "")
-    if summary:
-        messages_to_send.append(
-            AIMessage(
-                content=_("以下是過去對話的重點總結，請作為背景記憶參考：\n%s")
-                % summary
-            )
-        )
-
-    messages_to_send += [m for m in state["messages"] if not isinstance(m, RemoveMessage)]
+    messages_to_send = _build_messages_with_token_budget(
+        sys_prompt=sys_prompt,
+        summary=state.get("summary", ""),
+        messages=state["messages"],
+        label="level_2",
+    )
 
     models = model_set.level[2]
     logger.debug(_("[Level 2] 找到 %d 個可用模型"), len(models))
@@ -422,19 +474,12 @@ async def level_3_node(
         [t.name for t in db_tools] if db_tools else "無",
     )
 
-    messages_to_send: list[BaseMessage] = []
-    messages_to_send.append(SystemMessage(content=sys_prompt))
-
-    summary = state.get("summary", "")
-    if summary:
-        messages_to_send.append(
-            AIMessage(
-                content=_("以下是過去對話的重點總結，請作為背景記憶參考：\n%s")
-                % summary
-            )
-        )
-
-    messages_to_send += [m for m in state["messages"] if not isinstance(m, RemoveMessage)]
+    messages_to_send = _build_messages_with_token_budget(
+        sys_prompt=sys_prompt,
+        summary=state.get("summary", ""),
+        messages=state["messages"],
+        label="level_3",
+    )
 
     models = model_set.level[3]
     logger.debug(_("[Level 3] 找到 %d 個可用模型"), len(models))

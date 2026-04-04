@@ -255,7 +255,7 @@ class TestBulterReviewMsg:
             }
         }
 
-        agent_instance = SimpleNamespace(id=uuid4())
+        agent_instance = SimpleNamespace(id=uuid4(), user_id=uuid4())
         existing_blocks = [
             MemoryBlock(
                 id=uuid4(),
@@ -322,6 +322,11 @@ class TestBulterReviewMsg:
             "db.dao.memory_block_dao.MemoryBlockDAO.create",
             AsyncMock(),
         )
+        create_session_mock = AsyncMock()
+        monkeypatch.setattr(
+            "db.dao.collaboration_session_dao.CollaborationSessionDAO.create",
+            create_session_mock,
+        )
 
         captured = {}
 
@@ -345,7 +350,8 @@ class TestBulterReviewMsg:
             "USER_PROFILE",
         }
         assert captured["session_id"] == "session-1"
-        assert captured["metadata"]["thread_id_override"].startswith("review-msg-")
+        assert captured["metadata"]["thread_id_override"].startswith("review_msg-")
+        assert create_session_mock.await_count == 1
 
     async def test_review_msg_returns_empty_when_no_messages(self, monkeypatch):
         monkeypatch.setattr(
@@ -362,3 +368,229 @@ class TestBulterReviewMsg:
             "messages_marked_analyzed": 0,
             "changed_blocks": [],
         }
+
+    async def test_review_msg_processes_session_in_token_chunks(self, monkeypatch):
+        now = datetime.now(timezone.utc)
+        msg1 = SimpleNamespace(
+            id=uuid4(),
+            message_type=MessageType.request,
+            content_json={"content": "m1"},
+            created_at=now - timedelta(minutes=40),
+        )
+        msg2 = SimpleNamespace(
+            id=uuid4(),
+            message_type=MessageType.response,
+            content_json={"content": "m2"},
+            created_at=now - timedelta(minutes=39),
+        )
+        msg3 = SimpleNamespace(
+            id=uuid4(),
+            message_type=MessageType.request,
+            content_json={"content": "m3"},
+            created_at=now - timedelta(minutes=5),
+        )
+        msg4 = SimpleNamespace(
+            id=uuid4(),
+            message_type=MessageType.response,
+            content_json={"content": "m4"},
+            created_at=now - timedelta(minutes=4),
+        )
+        grouped = {
+            "2026-03-28": {
+                "session-1": [msg1, msg2, msg3, msg4],
+            }
+        }
+
+        agent_instance = SimpleNamespace(id=uuid4(), user_id=uuid4())
+        original_soul = MemoryBlock(
+            id=uuid4(),
+            agent_instance_id=agent_instance.id,
+            memory_type="SOUL",
+            content="original soul",
+            version=1,
+            is_active=True,
+            created_at=now,
+            updated_at=now,
+        )
+        chunk1_soul = original_soul.model_copy(update={"content": "chunk1 soul", "version": 2})
+        chunk2_soul = original_soul.model_copy(update={"content": "chunk2 soul", "version": 3})
+
+        monkeypatch.setattr(
+            "agent.bulter.Tools.get_token_count",
+            lambda content_json: 1000 if content_json.get("content") in {"m1", "m2", "m3", "m4"} else 0,
+        )
+        monkeypatch.setattr(
+            "db.dao.agent_message_dao.AgentMessageDAO.get_unanalyzed_messages_grouped",
+            AsyncMock(return_value=grouped),
+        )
+        monkeypatch.setattr(
+            "db.dao.agent_instance_dao.AgentInstanceDAO.get_by_agent_id",
+            AsyncMock(return_value=agent_instance),
+        )
+        monkeypatch.setattr(
+            "db.dao.memory_block_dao.MemoryBlockDAO.get_by_agent_instance_id",
+            AsyncMock(side_effect=[[original_soul], [chunk1_soul]]),
+        )
+        monkeypatch.setattr(
+            "db.dao.memory_block_dao.MemoryBlockDAO.update",
+            AsyncMock(side_effect=[chunk1_soul, chunk2_soul]),
+        )
+        monkeypatch.setattr(
+            "db.dao.memory_block_dao.MemoryBlockDAO.create",
+            AsyncMock(),
+        )
+        mark_mock = AsyncMock(side_effect=[2, 2])
+        monkeypatch.setattr(
+            "db.dao.agent_message_dao.AgentMessageDAO.batch_update_is_analyzed",
+            mark_mock,
+        )
+        create_session_mock = AsyncMock()
+        monkeypatch.setattr(
+            "db.dao.collaboration_session_dao.CollaborationSessionDAO.create",
+            create_session_mock,
+        )
+
+        model_outputs = [
+            '{"SOUL":{"updated_data":"chunk1 soul"},"IDENTITY":{"updated_data":""},"USER_PROFILE":{"updated_data":""}}',
+            '{"SOUL":{"updated_data":"chunk2 soul"},"IDENTITY":{"updated_data":""},"USER_PROFILE":{"updated_data":""}}',
+        ]
+        captured_messages = []
+
+        def _fake_create_msg_queue(**kwargs):
+            captured_messages.append(kwargs["message"])
+
+            async def _stream():
+                yield StreamChunk(
+                    chunk_type="content",
+                    content=model_outputs[len(captured_messages) - 1],
+                )
+                yield StreamChunk(chunk_type="done")
+
+            return _stream()
+
+        monkeypatch.setattr(
+            "msg_queue.handler.MsgQueueHandler.create_msg_queue",
+            _fake_create_msg_queue,
+        )
+
+        result = await Bulter.review_msg("agent-001")
+
+        assert len(captured_messages) == 2
+        assert "[SOUL]\noriginal soul" in captured_messages[0]
+        assert "[SOUL]\nchunk1 soul" in captured_messages[1]
+        assert mark_mock.await_count == 2
+        assert create_session_mock.await_count == 2
+        assert result["processed_groups"] == 1
+        assert result["failed_groups"] == 0
+        assert result["messages_marked_analyzed"] == 4
+
+    async def test_review_msg_keeps_completed_chunks_when_later_chunk_fails(self, monkeypatch):
+        now = datetime.now(timezone.utc)
+        msg1 = SimpleNamespace(
+            id=uuid4(),
+            message_type=MessageType.request,
+            content_json={"content": "m1"},
+            created_at=now - timedelta(minutes=40),
+        )
+        msg2 = SimpleNamespace(
+            id=uuid4(),
+            message_type=MessageType.response,
+            content_json={"content": "m2"},
+            created_at=now - timedelta(minutes=39),
+        )
+        msg3 = SimpleNamespace(
+            id=uuid4(),
+            message_type=MessageType.request,
+            content_json={"content": "m3"},
+            created_at=now - timedelta(minutes=5),
+        )
+        msg4 = SimpleNamespace(
+            id=uuid4(),
+            message_type=MessageType.response,
+            content_json={"content": "m4"},
+            created_at=now - timedelta(minutes=4),
+        )
+        grouped = {
+            "2026-03-28": {
+                "session-1": [msg1, msg2, msg3, msg4],
+            }
+        }
+
+        agent_instance = SimpleNamespace(id=uuid4(), user_id=uuid4())
+        original_soul = MemoryBlock(
+            id=uuid4(),
+            agent_instance_id=agent_instance.id,
+            memory_type="SOUL",
+            content="original soul",
+            version=1,
+            is_active=True,
+            created_at=now,
+            updated_at=now,
+        )
+        chunk1_soul = original_soul.model_copy(update={"content": "chunk1 soul", "version": 2})
+
+        monkeypatch.setattr(
+            "agent.bulter.Tools.get_token_count",
+            lambda content_json: 1000 if content_json.get("content") in {"m1", "m2", "m3", "m4"} else 0,
+        )
+        monkeypatch.setattr(
+            "db.dao.agent_message_dao.AgentMessageDAO.get_unanalyzed_messages_grouped",
+            AsyncMock(return_value=grouped),
+        )
+        monkeypatch.setattr(
+            "db.dao.agent_instance_dao.AgentInstanceDAO.get_by_agent_id",
+            AsyncMock(return_value=agent_instance),
+        )
+        monkeypatch.setattr(
+            "db.dao.memory_block_dao.MemoryBlockDAO.get_by_agent_instance_id",
+            AsyncMock(side_effect=[[original_soul], [chunk1_soul]]),
+        )
+        monkeypatch.setattr(
+            "db.dao.memory_block_dao.MemoryBlockDAO.update",
+            AsyncMock(return_value=chunk1_soul),
+        )
+        monkeypatch.setattr(
+            "db.dao.memory_block_dao.MemoryBlockDAO.create",
+            AsyncMock(),
+        )
+        mark_mock = AsyncMock(side_effect=[2])
+        monkeypatch.setattr(
+            "db.dao.agent_message_dao.AgentMessageDAO.batch_update_is_analyzed",
+            mark_mock,
+        )
+        create_session_mock = AsyncMock()
+        monkeypatch.setattr(
+            "db.dao.collaboration_session_dao.CollaborationSessionDAO.create",
+            create_session_mock,
+        )
+
+        call_count = 0
+
+        def _fake_create_msg_queue(**_kwargs):
+            async def _stream():
+                nonlocal call_count
+                call_count += 1
+                if call_count == 1:
+                    yield StreamChunk(
+                        chunk_type="content",
+                        content='{"SOUL":{"updated_data":"chunk1 soul"},"IDENTITY":{"updated_data":""},"USER_PROFILE":{"updated_data":""}}',
+                    )
+                    yield StreamChunk(chunk_type="done")
+                    return
+                raise RuntimeError("llm failed")
+
+            return _stream()
+
+        monkeypatch.setattr(
+            "msg_queue.handler.MsgQueueHandler.create_msg_queue",
+            _fake_create_msg_queue,
+        )
+
+        result = await Bulter.review_msg("agent-001")
+
+        assert call_count == 2
+        assert result["processed_groups"] == 0
+        assert result["failed_groups"] == 1
+        assert result["messages_marked_analyzed"] == 2
+        assert mark_mock.await_count == 1
+        assert create_session_mock.await_count == 2
