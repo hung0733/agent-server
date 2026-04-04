@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from croniter import croniter
@@ -27,7 +27,7 @@ from db.dao.task_dependency_dao import TaskDependencyDAO
 from db.dto.task_schedule_dto import TaskScheduleUpdate
 from db.dto.task_dto import TaskUpdate
 from db.dto.task_queue_dto import TaskQueueCreate, TaskQueueUpdate
-from db.types import TaskStatus, ScheduleType, TaskExecutionType, Priority
+from db.types import TaskStatus, ScheduleType, Priority
 from i18n import _
 from scheduler.task_executor import TaskExecutor
 
@@ -77,6 +77,19 @@ def priority_to_int(priority: Priority | None) -> int:
     }
 
     return priority_map.get(priority, 10)
+
+
+def calculate_retry_delay(retry_count: int) -> timedelta:
+    """Return the retry backoff delay for the given failure count."""
+    if retry_count <= 1:
+        return timedelta(seconds=30)
+    if retry_count == 2:
+        return timedelta(seconds=60)
+    if retry_count == 3:
+        return timedelta(seconds=300)
+    if retry_count == 4:
+        return timedelta(seconds=600)
+    return timedelta(minutes=60)
 
 
 def calculate_next_run(
@@ -321,12 +334,20 @@ class TaskScheduler:
             )
 
     async def _process_pending_queue_entries(self, current_time: datetime) -> None:
-        pending_entries = await TaskQueueDAO.get_all(limit=50, status=TaskStatus.pending)
+        pending_entries = await TaskQueueDAO.get_all(
+            limit=50,
+            status=TaskStatus.pending,
+            available_at=current_time,
+        )
         if not pending_entries:
             return
 
         for queue_entry in pending_entries:
             try:
+                scheduled_at = getattr(queue_entry, "scheduled_at", None)
+                if scheduled_at and scheduled_at > current_time:
+                    continue
+
                 task = await TaskDAO.get_by_id(queue_entry.task_id)
                 if task is None:
                     continue
@@ -342,6 +363,11 @@ class TaskScheduler:
                     str(e),
                     exc_info=True,
                 )
+
+    @staticmethod
+    def _should_retry_queue_task(task) -> bool:
+        payload = getattr(task, "payload", None) or {}
+        return payload.get("task_execution_type") == "agent_to_agent"
 
     async def _execute_queue_entry_wrapper(self, queue_entry, task, current_time: datetime) -> None:
         try:
@@ -375,6 +401,7 @@ class TaskScheduler:
                 TaskUpdate(
                     id=task.id,
                     status=TaskStatus.completed,
+                    retry_count=0,
                     result=result,
                 )
             )
@@ -387,6 +414,34 @@ class TaskScheduler:
                 )
             )
         except Exception as e:
+            if self._should_retry_queue_task(task):
+                retry_count = task.retry_count + 1
+                next_run_at = current_time + calculate_retry_delay(retry_count)
+
+                await TaskDAO.update(
+                    TaskUpdate(
+                        id=task.id,
+                        status=TaskStatus.pending,
+                        retry_count=retry_count,
+                        scheduled_at=next_run_at,
+                        started_at=None,
+                        completed_at=None,
+                        error_message=str(e)[:500],
+                    )
+                )
+                await TaskQueueDAO.update(
+                    TaskQueueUpdate(
+                        id=queue_entry.id,
+                        status=TaskStatus.pending,
+                        retry_count=retry_count,
+                        scheduled_at=next_run_at,
+                        started_at=None,
+                        completed_at=None,
+                        error_message=str(e)[:500],
+                    )
+                )
+                return
+
             await TaskDAO.update(
                 TaskUpdate(
                     id=task.id,
@@ -644,6 +699,17 @@ class TaskScheduler:
                 )
             )
 
+            if schedule.schedule_type != ScheduleType.once:
+                retry_count = getattr(schedule, "retry_count", 0) + 1
+                await TaskScheduleDAO.update(
+                    TaskScheduleUpdate(
+                        id=schedule.id,
+                        retry_count=retry_count,
+                        next_run_at=current_time + calculate_retry_delay(retry_count),
+                    )
+                )
+                return
+
         # 4. Update schedule's next_run_at
         try:
             next_run = calculate_next_run(
@@ -656,6 +722,7 @@ class TaskScheduler:
                 TaskScheduleUpdate(
                     id=schedule.id,
                     last_run_at=current_time,
+                    retry_count=0,
                     next_run_at=next_run,
                 )
             )

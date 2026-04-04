@@ -205,6 +205,7 @@ class TaskQueueDAO:
         limit: int = 100,
         offset: int = 0,
         status: Optional[TaskStatus] = None,
+        available_at: Optional[datetime] = None,
         session: Optional[AsyncSession] = None,
     ) -> List[TaskQueue]:
         """Retrieve all queue entries with optional filtering.
@@ -216,6 +217,7 @@ class TaskQueueDAO:
             limit: Maximum number of records to return.
             offset: Number of records to skip.
             status: Optional status filter.
+            available_at: Optional cutoff for pending scheduled tasks.
             session: Optional async session for transaction control.
             
         Returns:
@@ -228,6 +230,11 @@ class TaskQueueDAO:
                 query = query.where(TaskQueueEntity.status == status)
                 # For pending status, order by priority DESC (highest first)
                 if status == TaskStatus.pending:
+                    if available_at is not None:
+                        query = query.where(
+                            (TaskQueueEntity.scheduled_at.is_(None))
+                            | (TaskQueueEntity.scheduled_at <= available_at)
+                        )
                     query = query.order_by(
                         desc(TaskQueueEntity.priority),
                         TaskQueueEntity.scheduled_at.asc()

@@ -241,6 +241,13 @@ class TaskScheduleUpdate(BaseModel):
         description="Last execution timestamp",
     )
     """Last run time."""
+
+    retry_count: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description="Number of consecutive failed retries",
+    )
+    """Retry count."""
     
     @model_validator(mode="after")
     def validate_expression_if_provided(self) -> "TaskScheduleUpdate":
@@ -296,6 +303,13 @@ class TaskSchedule(TaskScheduleBase):
         description="Last execution timestamp",
     )
     """Last run time."""
+
+    retry_count: int = Field(
+        default=0,
+        ge=0,
+        description="Number of consecutive failed retries",
+    )
+    """Retry count."""
     
     created_at: datetime = Field(
         default_factory=now_utc,
@@ -331,6 +345,7 @@ class TaskSchedule(TaskScheduleBase):
                 "schedule_expression": "0 12 * * *",
                 "next_run_at": "2026-03-22T12:00:00Z",
                 "last_run_at": "2026-03-22T11:00:00Z",
+                "retry_count": 0,
                 "is_active": True,
                 "created_at": "2026-03-22T10:00:00Z",
                 "updated_at": "2026-03-22T11:00:00Z",

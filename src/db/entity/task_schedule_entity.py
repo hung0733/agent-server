@@ -19,6 +19,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Integer,
     Index,
     String,
     Text,
@@ -109,6 +110,14 @@ class TaskSchedule(Base):
         server_default="true",
     )
     """Whether the schedule is active and should be processed."""
+
+    retry_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+    """Number of consecutive failed execution attempts for this schedule."""
     
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -131,6 +140,10 @@ class TaskSchedule(Base):
         CheckConstraint(
             "schedule_type IN ('once', 'interval', 'cron')",
             name="ck_task_schedules_schedule_type",
+        ),
+        CheckConstraint(
+            "retry_count >= 0",
+            name="ck_task_schedules_retry_count",
         ),
         # Validation for cron format: 5 space-separated parts
         # Each part can be *, numbers, ranges, lists, or step values
