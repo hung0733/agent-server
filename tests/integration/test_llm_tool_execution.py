@@ -345,69 +345,18 @@ async def test_tools(db_session: AsyncSession) -> dict[str, UUID]:
             "implementation_ref": "tools.agent_tools:agents_list_impl",
         },
         {
-            "name": "sessions_history",
-            "description": "Fetch collaboration session message history",
+            "name": "submit_delegate_task",
+            "description": "Create asynchronous delegated task for sub-agent execution",
             "input_schema": {
                 "type": "object",
                 "properties": {
-                    "session_id": {
-                        "type": "string",
-                        "description": "Collaboration session ID",
-                    },
-                    "limit": {
-                        "type": "integer",
-                        "description": "Max messages to fetch",
-                        "default": 50,
-                    },
+                    "goal": {"type": "string", "description": "Final user goal"},
+                    "instruction": {"type": "string", "description": "Instruction for sub-agent"},
+                    "callback": {"type": "object", "description": "Callback payload"},
                 },
-                "required": ["session_id"],
+                "required": ["goal", "instruction", "callback"],
             },
-            "implementation_ref": "tools.agent_tools:sessions_history_impl",
-        },
-        {
-            "name": "sessions_send",
-            "description": "Send message to another agent",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "session_id": {
-                        "type": "string",
-                        "description": "Collaboration session ID",
-                    },
-                    "message": {"type": "string", "description": "Message to send"},
-                },
-                "required": ["session_id", "message"],
-            },
-            "implementation_ref": "tools.agent_tools:sessions_send_impl",
-        },
-        {
-            "name": "sessions_spawn",
-            "description": "Create new collaboration session with sub-agent",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "agent_id": {
-                        "type": "string",
-                        "description": "Target agent ID (UUID)",
-                    },
-                    "initial_message": {
-                        "type": "string",
-                        "description": "Initial message",
-                    },
-                },
-                "required": ["agent_id", "initial_message"],
-            },
-            "implementation_ref": "tools.agent_tools:sessions_spawn_impl",
-        },
-        {
-            "name": "session_status",
-            "description": "Show agent status card",
-            "input_schema": {
-                "type": "object",
-                "properties": {},
-                "required": [],
-            },
-            "implementation_ref": "tools.agent_tools:session_status_impl",
+            "implementation_ref": "tools.agent_tools:submit_delegate_task_impl",
         },
         # Scheduled task tools
         {
@@ -542,7 +491,7 @@ class TestToolLoading:
         """Test that get_tools loads all registered tools."""
         tools = await get_tools(str(agent_with_all_tools))
 
-        assert len(tools) >= 19  # We registered 19 tools
+        assert len(tools) >= 16
         assert all(isinstance(t, StructuredTool) for t in tools)
 
         tool_names = {t.name for t in tools}
@@ -559,10 +508,7 @@ class TestToolLoading:
             "web_search",
             "web_fetch",
             "agents_list",
-            "sessions_history",
-            "sessions_send",
-            "sessions_spawn",
-            "session_status",
+            "submit_delegate_task",
             "create_cron_task",
             "list_my_cron_tasks",
             "update_my_cron_task",
@@ -767,17 +713,22 @@ class TestAgentCollaborationTools:
         # Should return some output (even if no agents)
         assert isinstance(result, str)
 
-    async def test_session_status_tool_shows_status(
+    async def test_submit_delegate_task_tool_accepts_orders(
         self, db_session: AsyncSession, agent_with_all_tools: UUID
     ):
-        """Test that session_status tool shows agent status."""
+        """Test that submit_delegate_task tool accepts a delegation request."""
         tools = await get_tools(str(agent_with_all_tools))
-        status_tool = next(t for t in tools if t.name == "session_status")
+        submit_tool = next(t for t in tools if t.name == "submit_delegate_task")
 
-        result = await status_tool.ainvoke({})
+        result = await submit_tool.ainvoke(
+            {
+                "goal": "整理會議摘要",
+                "instruction": "請整理今日會議重點",
+                "callback": {"channel": "whatsapp", "target": "+85290000000", "reply_context": {"instance_id": "85260000"}},
+            }
+        )
         assert isinstance(result, str)
-        # Should contain agent ID or status info
-        assert len(result) > 0
+        assert "Task ID" in result or "已經落單" in result
 
 
 class TestScheduledTaskTools:
@@ -864,7 +815,7 @@ class TestToolConfiguration:
         tools = await get_tools(str(agent_with_all_tools))
 
         # Tools that accept agent_db_id should work
-        status_tool = next(t for t in tools if t.name == "session_status")
+        status_tool = next(t for t in tools if t.name == "agents_list")
         result = await status_tool.ainvoke({})
 
         # Should contain agent ID reference

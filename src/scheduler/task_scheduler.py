@@ -271,10 +271,6 @@ class TaskScheduler:
                 len(due_schedules),
             )
 
-            if not due_schedules:
-                logger.debug(_("[TaskScheduler.tick] 無待執行任務"))
-                return
-
             # 2. Launch each due schedule in a separate asyncio task (non-blocking)
             for schedule in due_schedules:
                 try:
@@ -300,12 +296,101 @@ class TaskScheduler:
                     )
                     # Continue with next schedule
 
+            await self._process_pending_queue_entries(current_time)
+
+            if not due_schedules and not self.active_tasks:
+                logger.debug(_("[TaskScheduler.tick] 無待執行任務"))
+
         except Exception as e:
             logger.error(
                 _("[TaskScheduler.tick] 掃描失敗: %s"),
                 str(e),
                 exc_info=True,
             )
+
+    async def _process_pending_queue_entries(self, current_time: datetime) -> None:
+        pending_entries = await TaskQueueDAO.get_all(limit=50, status=TaskStatus.pending)
+        if not pending_entries:
+            return
+
+        for queue_entry in pending_entries:
+            try:
+                task = await TaskDAO.get_by_id(queue_entry.task_id)
+                if task is None:
+                    continue
+
+                runner = asyncio.create_task(
+                    self._execute_queue_entry_wrapper(queue_entry, task, current_time)
+                )
+                self.active_tasks.add(runner)
+            except Exception as e:
+                logger.error(
+                    _("[TaskScheduler.tick] 啟動 queue task 失敗 (queue_id=%s): %s"),
+                    queue_entry.id,
+                    str(e),
+                    exc_info=True,
+                )
+
+    async def _execute_queue_entry_wrapper(self, queue_entry, task, current_time: datetime) -> None:
+        try:
+            await self._execute_queue_entry(queue_entry, task, current_time)
+        except Exception as e:
+            logger.error(
+                _("[TaskScheduler._execute_queue_entry_wrapper] 執行 queue task 失敗 (queue_id=%s): %s"),
+                queue_entry.id,
+                str(e),
+                exc_info=True,
+            )
+
+    async def _execute_queue_entry(self, queue_entry, task, current_time: datetime) -> None:
+        can_run = await TaskDependencyDAO.are_dependencies_met(task.id)
+        if not can_run:
+            logger.info(_("[TaskScheduler._execute_queue_entry] 任務依賴未滿足: %s"), task.id)
+            return
+
+        await TaskDAO.update(TaskUpdate(id=task.id, status=TaskStatus.running))
+        await TaskQueueDAO.update(
+            TaskQueueUpdate(
+                id=queue_entry.id,
+                status=TaskStatus.running,
+                started_at=current_time,
+            )
+        )
+
+        try:
+            result = await TaskExecutor.execute_task(task)
+            await TaskDAO.update(
+                TaskUpdate(
+                    id=task.id,
+                    status=TaskStatus.completed,
+                    result=result,
+                )
+            )
+            await TaskQueueDAO.update(
+                TaskQueueUpdate(
+                    id=queue_entry.id,
+                    status=TaskStatus.completed,
+                    completed_at=now_utc(),
+                    result_json=result,
+                )
+            )
+        except Exception as e:
+            await TaskDAO.update(
+                TaskUpdate(
+                    id=task.id,
+                    status=TaskStatus.failed,
+                    error_message=str(e)[:500],
+                )
+            )
+            await TaskQueueDAO.update(
+                TaskQueueUpdate(
+                    id=queue_entry.id,
+                    status=TaskStatus.failed,
+                    completed_at=now_utc(),
+                    error_message=str(e)[:500],
+                )
+            )
+            raise
 
     async def _execute_schedule_wrapper(self, schedule, current_time: datetime) -> None:
         """

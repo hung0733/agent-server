@@ -29,6 +29,7 @@ class QueueTask(BaseModel):
     id: str = Field(default_factory=lambda: f"task_{uuid.uuid4()}")
     agent_id: str
     session_id: str
+    sender_agent_id: Optional[str] = None
 
     # Input
     message: str

@@ -470,7 +470,7 @@ TOOLS = [
         "description": (
             "List all sub-agents (is_sub_agent=True) that belong to the same user as the calling agent. "
             "Returns each sub-agent's name, ID, current status, and agent type ID. "
-            "Use this to discover available agents before spawning a collaboration session."
+            "Use this to discover available workers before delegating a task."
         ),
         "version": "1.0.0",
         "input_schema": {
@@ -481,108 +481,32 @@ TOOLS = [
         "implementation_ref": "tools.agent_tools:agents_list_impl",
     },
     {
-        "name": "sessions_history",
+        "name": "submit_delegate_task",
         "description": (
-            "Fetch the message history of a collaboration session in chronological order. "
-            "Each entry shows the timestamp, message type, sender agent ID, and content. "
-            "Use this to catch up on what another agent has said or done in a shared session."
+            "Create an asynchronous agent-to-agent delegation task. "
+            "Save the final user goal, the sender agent's instruction, and callback details. "
+            "Returns immediately with a task ID after the order is accepted."
         ),
         "version": "1.0.0",
         "input_schema": {
             "type": "object",
             "properties": {
-                "session_id": {
+                "goal": {
                     "type": "string",
-                    "description": "The session_id string of the collaboration session to read, e.g. 'session-<uuid>'.",
+                    "description": "The final user goal. This will be appended to the sender agent's system prompt during acceptance review.",
                 },
-                "limit": {
-                    "type": "integer",
-                    "description": "Maximum number of messages to return, ordered oldest-first (default: 50).",
-                    "default": 50,
+                "instruction": {
+                    "type": "string",
+                    "description": "The concrete work order sent from the sender agent to the selected sub-agent.",
+                },
+                "callback": {
+                    "type": "object",
+                    "description": "Callback channel payload used to notify the user after background execution completes.",
                 },
             },
-            "required": ["session_id"],
+            "required": ["goal", "instruction", "callback"],
         },
-        "implementation_ref": "tools.agent_tools:sessions_history_impl",
-    },
-    {
-        "name": "sessions_send",
-        "description": (
-            "Send a message to another agent through an existing collaboration session. "
-            "The message is stored in the session history and can be read by the receiver via sessions_history. "
-            "Specify receiver_agent_id to target a specific agent, or leave blank to broadcast to all session participants."
-        ),
-        "version": "1.0.0",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "session_id": {
-                    "type": "string",
-                    "description": "The session_id string of the collaboration session to send the message into.",
-                },
-                "content": {
-                    "type": "string",
-                    "description": "Text content of the message to send.",
-                },
-                "receiver_agent_id": {
-                    "type": "string",
-                    "description": "UUID of the agent instance that should receive the message. Leave empty to broadcast to all participants.",
-                    "default": "",
-                },
-                "sender_agent_id": {
-                    "type": "string",
-                    "description": "UUID of the agent instance sending the message. Defaults to the calling agent when left empty.",
-                    "default": "",
-                },
-                "message_type": {
-                    "type": "string",
-                    "description": "Semantic type of the message: 'request' (default), 'response', 'notification', 'ack', 'tool_call', or 'tool_result'.",
-                    "default": "request",
-                },
-            },
-            "required": ["session_id", "content"],
-        },
-        "implementation_ref": "tools.agent_tools:sessions_send_impl",
-    },
-    {
-        "name": "sessions_spawn",
-        "description": (
-            "Create a new collaboration session between the calling agent and a target agent. "
-            "Returns a session_id that can be used with sessions_send and sessions_history. "
-            "Use agents_list first to discover available agent IDs."
-        ),
-        "version": "1.0.0",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "to_agent_id": {
-                    "type": "string",
-                    "description": "UUID of the target agent instance to open a collaboration session with.",
-                },
-                "session_name": {
-                    "type": "string",
-                    "description": "Optional human-readable name for the session. Auto-generated from both agent names if omitted.",
-                    "default": "",
-                },
-            },
-            "required": ["to_agent_id"],
-        },
-        "implementation_ref": "tools.agent_tools:sessions_spawn_impl",
-    },
-    {
-        "name": "session_status",
-        "description": (
-            "Show a status card for the calling agent, including its name, current state, "
-            "last heartbeat time, and the most recent token usage (input tokens, output tokens, model name). "
-            "Use this to answer questions about model usage or to verify the agent is running correctly."
-        ),
-        "version": "1.0.0",
-        "input_schema": {
-            "type": "object",
-            "properties": {},
-            "required": [],
-        },
-        "implementation_ref": "tools.agent_tools:session_status_impl",
+        "implementation_ref": "tools.agent_tools:submit_delegate_task_impl",
     },
 ]
 

@@ -86,6 +86,7 @@ class CollaborationSessionDAO:
             status=dto.status,
             involves_secrets=dto.involves_secrets,
             context_json=dto.context_json,
+            sender_agent_id=dto.sender_agent_id,
         )
         
         if session is not None:
@@ -211,6 +212,42 @@ class CollaborationSessionDAO:
             await engine.dispose()
         
         return [CollaborationSession.model_validate(e) for e in entities]
+
+    @staticmethod
+    async def get_private_session(
+        user_id: UUID,
+        sender_agent_id: UUID,
+        main_agent_id: UUID,
+        session: Optional[AsyncSession] = None,
+    ) -> Optional[CollaborationSession]:
+        """Retrieve the active private session between sender and target agents."""
+
+        async def _query(s: AsyncSession) -> Optional[CollaborationSessionEntity]:
+            result = await s.execute(
+                select(CollaborationSessionEntity)
+                .where(CollaborationSessionEntity.user_id == user_id)
+                .where(CollaborationSessionEntity.sender_agent_id == sender_agent_id)
+                .where(CollaborationSessionEntity.main_agent_id == main_agent_id)
+                .where(CollaborationSessionEntity.status == CollaborationStatus.active)
+                .order_by(CollaborationSessionEntity.created_at.desc())
+                .limit(1)
+            )
+            return result.scalar_one_or_none()
+
+        if session is not None:
+            entity = await _query(session)
+        else:
+            engine = create_engine()
+            async_session = async_sessionmaker(
+                engine, class_=AsyncSession, expire_on_commit=False
+            )
+            async with async_session() as s:
+                entity = await _query(s)
+            await engine.dispose()
+
+        if entity is None:
+            return None
+        return CollaborationSession.model_validate(entity)
     
     @staticmethod
     async def get_all(

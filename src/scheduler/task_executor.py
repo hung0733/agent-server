@@ -11,11 +11,13 @@ Import path: scheduler.task_executor
 from __future__ import annotations
 
 import importlib
+import json
 import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+from db.dao.agent_instance_dao import AgentInstanceDAO
 from db.dto.task_dto import Task, TaskUpdate
 from db.types import TaskStatus
 from i18n import _
@@ -46,7 +48,6 @@ class TaskExecutor:
             ValueError: If task_execution_type is unknown or agent not available
             Exception: Various execution-specific exceptions
         """
-        from db.dao.agent_instance_dao import AgentInstanceDAO
         from uuid import UUID
 
         execution_type = (
@@ -73,11 +74,13 @@ class TaskExecutor:
             # 2. Execute the task
             if execution_type == "message":
                 result = await MessageTaskExecutor.execute(task)
+            elif execution_type == "agent_to_agent":
+                result = await AgentToAgentTaskExecutor.execute(task)
             elif execution_type == "method":
                 result = await MethodTaskExecutor.execute(task)
             else:
                 raise ValueError(
-                    _("未知的任務執行類型: %s (期望: message 或 method)") % execution_type
+                    _("未知的任務執行類型: %s (期望: message、agent_to_agent 或 method)") % execution_type
                 )
 
             logger.info(
@@ -291,6 +294,225 @@ class MessageTaskExecutor:
                 exc_info=True,
             )
             raise
+
+
+class AgentToAgentTaskExecutor:
+    """Executes delegated agent-to-agent tasks asynchronously."""
+
+    @staticmethod
+    async def execute(task: Task) -> dict[str, Any]:
+        if not task.payload:
+            raise ValueError(_("任務 payload 為空"))
+
+        sender = await AgentToAgentTaskExecutor._get_sender_agent(task)
+        worker = await AgentToAgentTaskExecutor._select_sub_agent(task, sender.id)
+        session = await AgentToAgentTaskExecutor._get_or_create_private_session(
+            sender=sender,
+            worker=worker,
+        )
+        worker_result = await AgentToAgentTaskExecutor._run_worker_task(
+            sender=sender,
+            worker=worker,
+            session_id=session.session_id,
+            task=task,
+        )
+        review_result = await AgentToAgentTaskExecutor._review_worker_result(
+            sender=sender,
+            task=task,
+            worker_result=worker_result,
+        )
+
+        callback_result = None
+        if review_result.get("accepted"):
+            callback_result = await AgentToAgentTaskExecutor._dispatch_callback(
+                task.payload.get("callback") or {},
+                review_result.get("response") or worker_result.get("output", ""),
+            )
+
+        return {
+            "success": bool(review_result.get("accepted")),
+            "selected_agent_id": str(worker.id),
+            "session_id": session.session_id,
+            "worker_output": worker_result.get("output", ""),
+            "worker_react_flow": worker_result.get("react_flow"),
+            "manager_verdict": "accepted" if review_result.get("accepted") else "rejected",
+            "manager_reason": review_result.get("reason", ""),
+            "callback_result": callback_result,
+            "final_response": review_result.get("response") or worker_result.get("output", ""),
+        }
+
+    @staticmethod
+    async def _get_sender_agent(task: Task):
+        from db.dao.agent_instance_dao import AgentInstanceDAO
+
+        requester_agent_id = (task.payload or {}).get("requester_agent_id")
+        if not requester_agent_id:
+            raise ValueError(_("agent_to_agent 任務缺少 requester_agent_id"))
+
+        sender = await AgentInstanceDAO.get_by_id(uuid.UUID(str(requester_agent_id)))
+        if sender is None:
+            raise ValueError(_("找不到 sender agent: %s") % requester_agent_id)
+        return sender
+
+    @staticmethod
+    async def _select_sub_agent(task: Task, sender_agent_id: uuid.UUID):
+        from db.dao.agent_instance_dao import AgentInstanceDAO
+
+        idle_agents = await AgentInstanceDAO.get_idle_agents()
+        for agent in idle_agents:
+            if (
+                agent.user_id == task.user_id
+                and agent.is_sub_agent
+                and agent.id != sender_agent_id
+                and agent.agent_id
+            ):
+                return agent
+        raise ValueError(_("沒有可用的 idle sub-agent"))
+
+    @staticmethod
+    async def _get_or_create_private_session(sender, worker):
+        from db.dao.collaboration_session_dao import CollaborationSessionDAO
+        from db.dto.collaboration_dto import CollaborationSessionCreate
+
+        session = await CollaborationSessionDAO.get_private_session(
+            user_id=sender.user_id,
+            sender_agent_id=sender.id,
+            main_agent_id=worker.id,
+        )
+        if session is not None:
+            return session
+
+        return await CollaborationSessionDAO.create(
+            CollaborationSessionCreate(
+                user_id=sender.user_id,
+                main_agent_id=worker.id,
+                sender_agent_id=sender.id,
+                session_id=f"session-{uuid.uuid4()}",
+                name=f"{sender.name} -> {worker.name}",
+            )
+        )
+
+    @staticmethod
+    async def _run_worker_task(sender, worker, session_id: str, task: Task) -> dict[str, Any]:
+        from msg_queue.handler import MsgQueueHandler
+        from msg_queue.models import QueueTaskPriority
+
+        content_parts: list[str] = []
+        react_flow: dict[str, Any] = {
+            "input": task.payload.get("instruction", ""),
+            "thinking": None,
+            "actions": [],
+            "observations": [],
+            "final_answer": None,
+        }
+        thinking_parts: list[str] = []
+
+        async for chunk in MsgQueueHandler.create_msg_queue(
+            agent_id=worker.agent_id,
+            session_id=session_id,
+            message=task.payload.get("instruction", ""),
+            sender_agent_id=str(sender.id),
+            think_mode=False,
+            priority=QueueTaskPriority.NORMAL,
+            metadata={
+                "source": "agent_to_agent",
+                "task_id": str(task.id),
+                "sender_agent_id": str(sender.id),
+            },
+        ):
+            if chunk.chunk_type == "think" and chunk.content:
+                thinking_parts.append(chunk.content)
+            elif chunk.chunk_type == "tool" and chunk.content:
+                react_flow["actions"].append({"type": "tool_call", "content": str(chunk.content)})
+            elif chunk.chunk_type == "tool_result" and chunk.content:
+                react_flow["observations"].append({"type": "observation", "content": str(chunk.content)})
+            elif chunk.chunk_type == "content" and chunk.content:
+                content_parts.append(chunk.content)
+
+        final_output = "".join(content_parts).strip()
+        if thinking_parts:
+            react_flow["thinking"] = "\n".join(thinking_parts)
+        react_flow["final_answer"] = final_output
+        return {
+            "output": final_output,
+            "react_flow": react_flow,
+            "session_id": session_id,
+        }
+
+    @staticmethod
+    async def _review_worker_result(sender, task: Task, worker_result: dict[str, Any]) -> dict[str, Any]:
+        from agent.bulter import Bulter
+        from msg_queue.handler import MsgQueueHandler
+        from msg_queue.models import QueueTaskPriority
+
+        goal = task.payload.get("goal", "")
+        instruction = task.payload.get("instruction", "")
+        review_session_id = f"review-a2a-{uuid.uuid4()}"
+        sender_agent = await Bulter.get_agent(sender.agent_id, review_session_id)
+        sender_prompt = await sender_agent.get_memory_prompt()
+        sender_prompt = (
+            f"{sender_prompt}\n\n[最終目標]\n{goal}\n\n"
+            "你而家要驗收另一個 sub-agent 嘅輸出。"
+            "你必須只輸出 JSON，格式："
+            '{"accepted": true|false, "reason": "...", "response": "..."}'
+        )
+        review_message = (
+            "請根據最終目標驗收以下 sub-agent 輸出。\n\n"
+            f"[Instruction]\n{instruction}\n\n"
+            f"[Worker Output]\n{worker_result.get('output', '')}\n"
+        )
+
+        content_parts: list[str] = []
+        async for chunk in MsgQueueHandler.create_msg_queue(
+            agent_id=sender.agent_id,
+            session_id=review_session_id,
+            message=review_message,
+            sender_agent_id=str(sender.id),
+            system_prompt=sender_prompt,
+            think_mode=False,
+            priority=QueueTaskPriority.NORMAL,
+            metadata={
+                "source": "review_msg",
+                "task_id": str(task.id),
+                "thread_id_override": review_session_id,
+                "sender_agent_id": str(sender.id),
+            },
+        ):
+            if chunk.chunk_type == "content" and chunk.content:
+                content_parts.append(chunk.content)
+
+        raw_output = "".join(content_parts).strip()
+        try:
+            parsed = json.loads(raw_output)
+        except json.JSONDecodeError:
+            return {
+                "accepted": False,
+                "reason": _("sender review 輸出唔係有效 JSON"),
+                "response": worker_result.get("output", ""),
+            }
+
+        return {
+            "accepted": bool(parsed.get("accepted")),
+            "reason": str(parsed.get("reason") or ""),
+            "response": str(parsed.get("response") or worker_result.get("output", "")),
+        }
+
+    @staticmethod
+    async def _dispatch_callback(callback: dict[str, Any], message: str) -> dict[str, Any]:
+        from channels.whatsapp import WhatsAppChannel
+
+        channel = callback.get("channel")
+        if channel != "whatsapp":
+            raise ValueError(_("未支援的 callback channel: %s") % channel)
+
+        target = str(callback.get("target") or "").lstrip("+")
+        reply_context = callback.get("reply_context") or {}
+        instance_id = reply_context.get("instance_id")
+        if not instance_id or not target:
+            raise ValueError(_("whatsapp callback 缺少 instance_id 或 target"))
+
+        await WhatsAppChannel().send_text(str(instance_id), target, message)
+        return {"status": "sent", "channel": channel, "target": target}
 
 
 class MethodTaskExecutor:

@@ -14,9 +14,82 @@ from msg_queue.handler import MsgQueueHandler
 from msg_queue.models import QueueTaskState
 from msg_queue.task import QueueTask
 from msg_queue.models import StreamChunk
+from msg_queue.models import QueueTaskPriority
 
 
 class TestMsgQueueSystemPromptOverride:
+    async def test_create_msg_queue_passes_sender_agent_id_to_queue_manager(self, monkeypatch):
+        enqueue_mock = AsyncMock(return_value=("task-123", _empty_stream()))
+        manager = SimpleNamespace(
+            _running=True,
+            _state_handlers={},
+            enqueue=enqueue_mock,
+        )
+
+        monkeypatch.setattr("msg_queue.handler.get_queue_manager", lambda: manager)
+
+        chunks = []
+        async for chunk in MsgQueueHandler.create_msg_queue(
+            agent_id="agent-001",
+            session_id="session-001",
+            message="hello",
+            sender_agent_id="sender-001",
+            priority=QueueTaskPriority.HIGH,
+            metadata={"source": "agent_to_agent"},
+        ):
+            chunks.append(chunk)
+
+        assert chunks == []
+        enqueue_mock.assert_awaited_once_with(
+            agent_id="agent-001",
+            session_id="session-001",
+            message="hello",
+            system_prompt=None,
+            priority=QueueTaskPriority.HIGH,
+            metadata={"source": "agent_to_agent"},
+            think_mode=None,
+            sender_agent_id="sender-001",
+        )
+
+    async def test_send_llm_msg_persists_sender_agent_id(self, monkeypatch):
+        async def _fake_stream():
+            yield StreamChunk(chunk_type="content", content="hello")
+
+        save_messages = AsyncMock()
+        started_coroutines = []
+
+        def _fake_start_async_task(coro):
+            started_coroutines.append(coro)
+            try:
+                coro.close()
+            except Exception:
+                pass
+
+        monkeypatch.setattr("msg_queue.handler.MsgQueueHandler._save_messages_to_db", save_messages)
+        monkeypatch.setattr("utils.tools.Tools.start_async_task", _fake_start_async_task)
+
+        task = QueueTask(
+            agent_id="agent-001",
+            session_id="session-001",
+            message="hello",
+            metadata={"source": "agent_to_agent", "sender_agent_id": "sender-001"},
+            sender_agent_id="sender-001",
+        )
+        task.agent = SimpleNamespace(
+            send=lambda **_kwargs: _fake_stream(),
+            review_stm=AsyncMock(),
+            session_db_id="00000000-0000-0000-0000-000000000001",
+            agent_db_id="00000000-0000-0000-0000-000000000002",
+        )
+        task.model_set = object()
+        task.packed_prompt = "prompt"
+        task.packed_message = "message"
+
+        await MsgQueueHandler.send_llm_msg(task)
+
+        save_messages.assert_called_once()
+        assert save_messages.call_args.kwargs["sender_db_id"] == "sender-001"
+
     async def test_save_token_usage_persists_provider_usage(self, monkeypatch):
         user_id = uuid4()
         agent_id = uuid4()
@@ -264,3 +337,8 @@ class TestMsgQueueSystemPromptOverride:
         await MsgQueueHandler.send_llm_msg(task)
 
         assert len(started_coroutines) == 3
+
+
+async def _empty_stream():
+    if False:
+        yield None

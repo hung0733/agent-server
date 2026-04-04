@@ -51,6 +51,7 @@ class MsgQueueHandler:
         agent_id: str,
         session_id: str,
         message: str,
+        sender_agent_id: Optional[str] = None,
         system_prompt: Optional[str] = None,
         think_mode: Optional[bool] = None,
         priority: QueueTaskPriority = QueueTaskPriority.NORMAL,
@@ -71,6 +72,7 @@ class MsgQueueHandler:
             agent_id=agent_id,
             session_id=session_id,
             message=message,
+            sender_agent_id=sender_agent_id,
             system_prompt=system_prompt,
             priority=priority,
             metadata=metadata,
@@ -300,7 +302,14 @@ class MsgQueueHandler:
                 sys_prompt=task.packed_prompt,
                 message=task.packed_message,
                 think_mode=task.think_mode,
-                metadata=task.metadata,
+                metadata={
+                    **task.metadata,
+                    **(
+                        {"sender_agent_id": task.sender_agent_id}
+                        if task.sender_agent_id
+                        else {}
+                    ),
+                },
             )
             task.update_state(QueueTaskState.RECEIVING_STREAM)
             task.update_state(QueueTaskState.STREAMING_TO_CLIENT)
@@ -365,7 +374,7 @@ class MsgQueueHandler:
                     MsgQueueHandler._save_messages_to_db(
                         task_id=task.id,
                         session_db_id=task.agent.session_db_id,
-                        sender_db_id=None,
+                        sender_db_id=task.sender_agent_id,
                         receiver_db_id=task.agent.agent_db_id,
                         llm_response_content=llm_response_content,
                     )
