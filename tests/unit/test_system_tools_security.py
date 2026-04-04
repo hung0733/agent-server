@@ -216,6 +216,26 @@ async def test_exec_impl_cwd_within_sandbox(user_sandbox, user_id):
 
 
 @pytest.mark.asyncio
+async def test_write_and_read_impl_map_absolute_style_paths_into_sandbox(user_sandbox, user_id):
+    """Absolute-style tool paths should be sandbox-rooted for agents."""
+    virtual_path = "/mnt/data/workspace/castle-stamp-app/package.json"
+
+    write_result = await write_impl(
+        path=virtual_path,
+        content='{"name":"castle-stamp-app"}',
+        _config={"user_id": user_id},
+    )
+
+    assert "🚫 拒絕存取" not in write_result
+    expected_file = user_sandbox / "mnt/data/workspace/castle-stamp-app/package.json"
+    assert expected_file.exists()
+
+    read_result = await read_impl(path=virtual_path, _config={"user_id": user_id})
+
+    assert 'castle-stamp-app' in read_result
+
+
+@pytest.mark.asyncio
 async def test_exec_impl_blocks_cwd_outside_sandbox(user_id):
     """Test that exec_impl blocks cwd outside sandbox."""
     result = await exec_impl(

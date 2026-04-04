@@ -127,6 +127,17 @@ def test_resolve_safe_path_no_base_dir(temp_agent_home, user_id):
     assert result == target
 
 
+def test_resolve_safe_path_maps_absolute_style_paths_into_sandbox(temp_agent_home, user_id):
+    """Absolute-style tool paths should be treated as sandbox-rooted paths."""
+    sandbox = temp_agent_home / user_id
+    sandbox.mkdir(parents=True, exist_ok=True)
+
+    result = resolve_safe_path("/mnt/data/workspace/castle-stamp-app/package.json", user_id)
+
+    expected = (sandbox / "mnt/data/workspace/castle-stamp-app/package.json").resolve()
+    assert result == expected
+
+
 def test_resolve_safe_path_with_valid_base_dir(temp_agent_home, user_id):
     """Test resolving paths with base_dir inside sandbox."""
     sandbox = temp_agent_home / user_id

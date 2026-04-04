@@ -172,7 +172,7 @@ async def get_tools(agent_db_id: str) -> List[StructuredTool]:
             args_schema=args_schema,
         )
         tools.append(structured_tool)
-        logger.info(
+        logger.debug(
             _("✅ 已載入工具: %s (v%s) - %s"),
             tool_dto.name,
             version.version,

@@ -25,6 +25,11 @@ class PathSecurityError(Exception):
     pass
 
 
+VIRTUAL_SANDBOX_PREFIXES = (
+    Path("/mnt/data/workspace"),
+)
+
+
 def get_agent_home_dir() -> Path:
     """Get the base agent home directory from environment.
 
@@ -130,19 +135,36 @@ def resolve_safe_path(
     """
     sandbox_dir = get_user_sandbox_dir(user_id)
 
+    def _resolve_from(base: Path | None = None) -> Path:
+        path_obj = Path(path)
+        if path_obj.is_absolute():
+            resolved_absolute = path_obj.resolve()
+            try:
+                resolved_absolute.relative_to(sandbox_dir)
+                return resolved_absolute
+            except ValueError:
+                if any(path_obj.is_relative_to(prefix) for prefix in VIRTUAL_SANDBOX_PREFIXES):
+                    virtual_relative = Path(*path_obj.parts[1:])
+                    anchor = base or sandbox_dir
+                    return (anchor / virtual_relative).resolve()
+                return resolved_absolute
+
+        anchor = base or sandbox_dir
+        return (anchor / path_obj).resolve()
+
     # If base_dir is provided, validate it's within the sandbox
     if base_dir:
         base_path = Path(base_dir).resolve()
         try:
             base_path.relative_to(sandbox_dir)
             # base_dir is valid, use it as the starting point
-            resolved = (base_path / path).resolve() if not Path(path).is_absolute() else Path(path).resolve()
+            resolved = _resolve_from(base_path)
         except ValueError:
             # base_dir is outside sandbox, ignore it and use sandbox_dir
-            resolved = (sandbox_dir / path).resolve() if not Path(path).is_absolute() else Path(path).resolve()
+            resolved = _resolve_from()
     else:
         # No base_dir, resolve relative to sandbox
-        resolved = (sandbox_dir / path).resolve() if not Path(path).is_absolute() else Path(path).resolve()
+        resolved = _resolve_from()
 
     # Validate the resolved path is within sandbox
     try:

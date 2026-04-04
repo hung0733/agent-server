@@ -137,7 +137,7 @@ class TaskScheduleBase(BaseModel):
         description="Whether the schedule is active and should be processed",
     )
     """Schedule active status."""
-    
+
     model_config = ConfigDict(
         extra="ignore",
         json_schema_extra={
@@ -229,7 +229,7 @@ class TaskScheduleUpdate(BaseModel):
         description="Whether the schedule is active",
     )
     """Active status."""
-    
+
     next_run_at: Optional[datetime] = Field(
         default=None,
         description="Next scheduled execution time",
