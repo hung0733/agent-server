@@ -39,6 +39,8 @@ AGENT_HOME_DIR=/mnt/data/misc/agent-server/home/
 2. 使用 `_resolve_path()` 驗證路徑
 3. 如果路徑超出 sandbox,返回錯誤訊息
 
+其中 `exec` 同 `process` 已由單純拒絕改成透過 sandbox provider 轉發去 container 內 agent API 執行；因此 sandbox mode 下的 execution boundary 已提升為 container/runtime 邊界，而唔再係 host shell。
+
 ## 安全特性
 
 ### 1. 用戶隔離

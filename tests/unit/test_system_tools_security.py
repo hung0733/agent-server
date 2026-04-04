@@ -10,6 +10,7 @@ from uuid import uuid4
 
 import pytest
 
+from sandbox.models import SandboxRequest
 from tools.system_tools import (
     apply_patch_impl,
     edit_impl,
@@ -43,6 +44,32 @@ def user_sandbox(temp_agent_home, user_id):
     sandbox = temp_agent_home / user_id
     sandbox.mkdir(parents=True, exist_ok=True)
     return sandbox
+
+
+@pytest.fixture
+def fake_provider(monkeypatch):
+    class FakeProvider:
+        def __init__(self):
+            self.exec_calls = []
+            self.process_calls = []
+
+        async def exec(self, request: SandboxRequest, command: str, cwd: str, timeout: int):
+            self.exec_calls.append((request, command, cwd, timeout))
+            return f"sandbox:{command}:{cwd or '.'}:{timeout}"
+
+        async def start_process(self, request: SandboxRequest, command: str, cwd: str):
+            self.process_calls.append((request, command, cwd))
+            return {"handle": "proc-1", "status": "running", "cwd": cwd}
+
+        async def get_process(self, request: SandboxRequest, process_handle: str):
+            return {"handle": process_handle, "status": "running"}
+
+        async def kill_process(self, request: SandboxRequest, process_handle: str):
+            return {"handle": process_handle, "status": "killed"}
+
+    provider = FakeProvider()
+    monkeypatch.setattr("tools.system_tools.get_sandbox_provider", lambda _config=None: provider)
+    return provider
 
 
 @pytest.mark.asyncio
@@ -247,15 +274,16 @@ async def test_ls_impl_blocks_outside_sandbox(user_id):
 
 
 @pytest.mark.asyncio
-async def test_exec_impl_cwd_within_sandbox(user_sandbox, user_id):
-    """Sandboxed agents should not get arbitrary shell execution."""
+async def test_exec_impl_cwd_within_sandbox(user_sandbox, user_id, fake_provider):
+    """Sandboxed exec should be routed through sandbox provider."""
     subdir = user_sandbox / "workspace"
     subdir.mkdir()
 
     result = await exec_impl(
         command="pwd", cwd="workspace", _config={"user_id": user_id}
     )
-    assert "🚫 拒絕存取" in result
+    assert result == "sandbox:pwd:workspace:60"
+    assert fake_provider.exec_calls[0][1:] == ("pwd", "workspace", 60)
 
 
 @pytest.mark.asyncio
@@ -279,8 +307,8 @@ async def test_write_and_read_impl_map_absolute_style_paths_into_sandbox(user_sa
 
 
 @pytest.mark.asyncio
-async def test_exec_impl_blocks_cwd_outside_sandbox(user_id):
-    """Sandboxed agents should reject exec even before cwd matters."""
+async def test_exec_impl_blocks_cwd_outside_sandbox(user_id, fake_provider):
+    """Sandboxed exec still blocks cwd outside sandbox."""
     result = await exec_impl(
         command="ls", cwd="/etc", _config={"user_id": user_id}
     )
@@ -288,43 +316,45 @@ async def test_exec_impl_blocks_cwd_outside_sandbox(user_id):
 
 
 @pytest.mark.asyncio
-async def test_exec_impl_without_cwd_defaults_to_user_sandbox(user_sandbox, user_id):
-    """Sandboxed agents should not get arbitrary shell execution."""
+async def test_exec_impl_without_cwd_defaults_to_user_sandbox(user_sandbox, user_id, fake_provider):
+    """Sandboxed exec defaults cwd to user sandbox root."""
     result = await exec_impl(command="pwd", _config={"user_id": user_id})
 
-    assert "🚫 拒絕存取" in result
+    assert result == "sandbox:pwd:.:60"
+    assert fake_provider.exec_calls[0][2] == "."
 
 
 @pytest.mark.asyncio
-async def test_process_impl_without_cwd_defaults_to_user_sandbox(user_sandbox, user_id):
-    """Sandboxed agents should not get background shell processes."""
+async def test_process_impl_without_cwd_defaults_to_user_sandbox(user_sandbox, user_id, fake_provider):
+    """Sandboxed processes should be created through provider."""
     result = await process_impl(
         action="start",
         command="pwd > process_pwd.txt",
         _config={"user_id": user_id},
     )
 
-    assert "🚫 拒絕存取" in result
+    assert "proc-1" in result
+    assert fake_provider.process_calls[0][1:] == ("pwd > process_pwd.txt", ".")
 
 
 @pytest.mark.asyncio
-async def test_exec_impl_blocks_absolute_host_path_access_in_command(user_id):
-    """Sandboxed agents must not read host paths through shell commands."""
+async def test_exec_impl_allows_container_scoped_absolute_paths(user_id, fake_provider):
+    """Absolute paths in command are delegated to sandbox, not host exec."""
     result = await exec_impl(command="cat /etc/passwd", _config={"user_id": user_id})
 
-    assert "🚫 拒絕存取" in result
+    assert result == "sandbox:cat /etc/passwd:.:60"
 
 
 @pytest.mark.asyncio
-async def test_process_impl_blocks_absolute_host_path_access_in_command(user_id):
-    """Sandboxed agents must not start background commands against host paths."""
+async def test_process_impl_delegates_absolute_paths_to_sandbox(user_id, fake_provider):
+    """Absolute paths in process commands are delegated to sandbox runtime."""
     result = await process_impl(
         action="start",
         command="cat /etc/hostname > leak.txt",
         _config={"user_id": user_id},
     )
 
-    assert "🚫 拒絕存取" in result
+    assert "proc-1" in result
 
 
 @pytest.mark.asyncio

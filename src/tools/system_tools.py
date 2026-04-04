@@ -38,6 +38,8 @@ from tools.path_security import (
     get_user_sandbox_dir,
     resolve_safe_path,
 )
+from sandbox.factory import get_sandbox_provider
+from sandbox.models import SandboxMount, SandboxRequest
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +88,32 @@ def _resolve_working_dir(base_dir: str | None, user_id: str = "") -> Path:
     if base_dir:
         return Path(base_dir).resolve()
     return Path.cwd().resolve()
+
+
+def _sandbox_request_from_config(_config: dict[str, Any], user_id: str) -> SandboxRequest:
+    scope = _config.get("sandbox_scope", "session")
+    scope_key = _config.get("sandbox_scope_key") or _config.get("agent_db_id") or user_id
+    profile = _config.get("sandbox_profile", "default")
+    network_mode = _config.get("sandbox_network_mode", "default")
+    mounts = []
+    base_dir = _config.get("base_dir")
+    if base_dir:
+        mounts.append(
+            SandboxMount(
+                name="workspace",
+                source=str(get_user_sandbox_dir(user_id)),
+                target="/workspace",
+                read_only=False,
+            )
+        )
+    return SandboxRequest(
+        owner_id=user_id,
+        scope=scope,
+        scope_key=scope_key,
+        profile=profile,
+        network_mode=network_mode,
+        mounts=tuple(mounts),
+    )
 
 
 def _display_path(path: Path, user_id: str = "") -> str:
@@ -162,7 +190,7 @@ async def read_impl(
     user_id = _config.get("user_id", "")
     try:
         resolved = _resolve_path(path, _config.get("base_dir"), user_id)
-    except PathSecurityError as exc:
+    except (PathSecurityError, RuntimeError) as exc:
         logger.warning(_("[read] 🚫 路徑安全檢查失敗: %s"), exc)
         return _("🚫 拒絕存取: %s") % str(exc)
 
@@ -201,7 +229,7 @@ async def write_impl(
     user_id = _config.get("user_id", "")
     try:
         resolved = _resolve_path(path, _config.get("base_dir"), user_id)
-    except PathSecurityError as exc:
+    except (PathSecurityError, RuntimeError) as exc:
         logger.warning(_("[write] 🚫 路徑安全檢查失敗: %s"), exc)
         return _("🚫 拒絕存取: %s") % str(exc)
 
@@ -246,7 +274,7 @@ async def edit_impl(
     user_id = _config.get("user_id", "")
     try:
         resolved = _resolve_path(path, _config.get("base_dir"), user_id)
-    except PathSecurityError as exc:
+    except (PathSecurityError, RuntimeError) as exc:
         logger.warning(_("[edit] 🚫 路徑安全檢查失敗: %s"), exc)
         return _("🚫 拒絕存取: %s") % str(exc)
 
@@ -299,7 +327,7 @@ async def apply_patch_impl(
         for raw_path in _extract_patch_target_paths(patch):
             candidate = _normalize_patch_path(raw_path, strip)
             _resolve_path(candidate, cwd, user_id)
-    except PathSecurityError as exc:
+    except (PathSecurityError, RuntimeError) as exc:
         logger.warning(_("[apply_patch] 🚫 路徑安全檢查失敗: %s"), exc)
         return _("🚫 拒絕存取: %s") % str(exc)
 
@@ -357,7 +385,7 @@ async def grep_impl(
     user_id = _config.get("user_id", "")
     try:
         resolved = _resolve_path(path, _config.get("base_dir"), user_id)
-    except PathSecurityError as exc:
+    except (PathSecurityError, RuntimeError) as exc:
         logger.warning(_("[grep] 🚫 路徑安全檢查失敗: %s"), exc)
         return _("🚫 拒絕存取: %s") % str(exc)
 
@@ -426,7 +454,7 @@ async def find_impl(
     user_id = _config.get("user_id", "")
     try:
         root = _resolve_path(path, _config.get("base_dir"), user_id)
-    except PathSecurityError as exc:
+    except (PathSecurityError, RuntimeError) as exc:
         logger.warning(_("[find] 🚫 路徑安全檢查失敗: %s"), exc)
         return _("🚫 拒絕存取: %s") % str(exc)
 
@@ -466,7 +494,7 @@ async def ls_impl(
     user_id = _config.get("user_id", "")
     try:
         resolved = _resolve_path(path, _config.get("base_dir"), user_id)
-    except PathSecurityError as exc:
+    except (PathSecurityError, RuntimeError) as exc:
         logger.warning(_("[ls] 🚫 路徑安全檢查失敗: %s"), exc)
         return _("🚫 拒絕存取: %s") % str(exc)
 
@@ -514,7 +542,17 @@ async def exec_impl(
     timeout = min(timeout, 300)
 
     if user_id:
-        return _("🚫 拒絕存取: sandbox 模式唔支援 exec")
+        try:
+            if cwd:
+                _resolve_path(cwd, _config.get("base_dir"), user_id)
+            request = _sandbox_request_from_config(_config, user_id)
+            provider = get_sandbox_provider(_config)
+            sandbox_cwd = cwd or "."
+            result = await provider.exec(request, command, sandbox_cwd, timeout)
+            return str(result)
+        except (PathSecurityError, RuntimeError) as exc:
+            logger.warning(_("[exec] 🚫 sandbox 執行失敗: %s"), exc)
+            return _("🚫 拒絕存取: %s") % str(exc)
 
     # Determine working directory and validate if user_id is set
     if cwd:
@@ -580,7 +618,40 @@ async def process_impl(
     user_id = _config.get("user_id", "")
 
     if user_id:
-        return _("🚫 拒絕存取: sandbox 模式唔支援 process")
+        try:
+            request = _sandbox_request_from_config(_config, user_id)
+            provider = get_sandbox_provider(_config)
+            sandbox_cwd = cwd or "."
+            if cwd:
+                _resolve_path(cwd, _config.get("base_dir"), user_id)
+
+            if action == "start":
+                if not command:
+                    return _("❌ action=start 需要提供 command")
+                result = await provider.start_process(request, command, sandbox_cwd)
+                return _("✅ 後台進程已啟動\nhandle: %s") % result.get("handle", "")
+            if action == "status":
+                if not handle:
+                    return _("❌ 找不到進程 handle: %s") % handle
+                result = await provider.get_process(request, handle)
+                return _("✅ 進程狀態\nhandle: %s\nstatus: %s") % (
+                    result.get("handle", handle),
+                    result.get("status", "unknown"),
+                )
+            if action == "kill":
+                if not handle:
+                    return _("❌ 找不到進程 handle: %s") % handle
+                result = await provider.kill_process(request, handle)
+                return _("✅ 進程已終止\nhandle: %s\nstatus: %s") % (
+                    result.get("handle", handle),
+                    result.get("status", "unknown"),
+                )
+            if action == "list":
+                return _("📭 sandbox provider 未提供 list")
+            return _("❌ 未知 action: %s (有效值: start, status, kill, list)") % action
+        except (PathSecurityError, RuntimeError) as exc:
+            logger.warning(_("[process] 🚫 sandbox 執行失敗: %s"), exc)
+            return _("🚫 拒絕存取: %s") % str(exc)
 
     if action == "start":
         if not command:

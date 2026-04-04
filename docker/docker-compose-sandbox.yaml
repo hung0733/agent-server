@@ -1,0 +1,23 @@
+services:
+  sandbox-agent:
+    build:
+      context: ..
+      dockerfile: docker/sandbox/Dockerfile
+    environment:
+      PYTHONPATH: /app/src
+    ports:
+      - "8080:8080"
+    read_only: true
+    tmpfs:
+      - /tmp
+    volumes:
+      - /tmp/agent-sandbox-workspace:/workspace
+
+  sandbox-provisioner:
+    build:
+      context: ..
+      dockerfile: docker/provisioner/Dockerfile
+    environment:
+      PYTHONPATH: /app/src
+    ports:
+      - "8090:8090"

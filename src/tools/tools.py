@@ -161,6 +161,9 @@ async def get_tools(agent_db_id: str) -> List[StructuredTool]:
             **(version.config_json or {}),
             **override_map.get(tool_id, {}),
             "user_id": user_id,  # Inject user_id for path security in system tools
+            "agent_db_id": agent_db_id,
+            "sandbox_scope": "session",
+            "sandbox_scope_key": agent_db_id,
         }
         args_schema = _build_args_schema(tool_dto.name, version.input_schema)
         executor = _make_executor(version.implementation_ref, merged_config, agent_db_id)
