@@ -38,11 +38,12 @@ from db.dto.memory_block_dto import MemoryBlockCreate, MemoryBlockUpdate
 from db.dto.collaboration_dto import CollaborationSessionCreate
 from db.dao.task_dao import TaskDAO
 from db.dao.task_schedule_dao import TaskScheduleDAO
-from db.dto.task_dto import TaskCreate
-from db.dto.task_schedule_dto import TaskScheduleCreate
+from db.dto.task_dto import TaskCreate, TaskUpdate
+from db.dto.task_schedule_dto import TaskScheduleCreate, TaskScheduleUpdate
 from db.types import CollaborationStatus, TaskStatus, Priority, ScheduleType
 from db import AsyncSession, async_sessionmaker, create_engine
 from scheduler.task_scheduler import calculate_next_run
+from utils.timezone import to_server_tz
 
 
 def _parse_optional_datetime(value):
@@ -379,6 +380,283 @@ async def _dashboard_agent_tools(request: web.Request) -> web.Response:
     provider = request.app[DASHBOARD_PROVIDER_KEY]
     auth_context = await _require_auth(request)
     return web.json_response(await provider.get_agent_tools(user_id=auth_context["user_id"]))
+
+
+def _json_http_error(status: int, error: str) -> web.HTTPException:
+    error_map = {
+        400: web.HTTPBadRequest,
+        404: web.HTTPNotFound,
+        409: web.HTTPConflict,
+    }
+    exc_cls = error_map.get(status, web.HTTPBadRequest)
+    return exc_cls(
+        text=json.dumps({"error": error}),
+        content_type="application/json",
+    )
+
+
+def _normalize_schedule_task_type(task) -> str | None:
+    payload = task.payload or {}
+    execution_type = payload.get("task_execution_type")
+    if execution_type in {"method", "message"}:
+        return execution_type
+
+    raw_task_type = str(getattr(task, "task_type", "") or "").lower()
+    if "method" in raw_task_type:
+        return "method"
+    if "message" in raw_task_type:
+        return "message"
+    return None
+
+
+def _serialize_schedule_item(schedule, task, agent) -> dict:
+    payload = task.payload or {}
+    task_type = _normalize_schedule_task_type(task) or "message"
+    if task_type == "method":
+        prompt = payload.get("method_path") or ""
+        fallback_name = payload.get("description") or prompt or "Method schedule"
+    else:
+        prompt = payload.get("prompt") or ""
+        fallback_name = prompt[:40] or "Message schedule"
+
+    agent_name = None
+    if agent is not None:
+        agent_name = agent.name or agent.agent_id or str(agent.id)
+
+    return {
+        "id": str(schedule.id),
+        "taskId": str(task.id),
+        "taskType": task_type,
+        "name": payload.get("name") or fallback_name,
+        "prompt": prompt,
+        "scheduleType": str(schedule.schedule_type),
+        "scheduleExpression": schedule.schedule_expression,
+        "isActive": schedule.is_active,
+        "nextRunAt": to_server_tz(schedule.next_run_at).isoformat() if schedule.next_run_at else None,
+        "lastRunAt": to_server_tz(schedule.last_run_at).isoformat() if schedule.last_run_at else None,
+        "agentId": str(task.agent_id) if task.agent_id else None,
+        "agentName": agent_name,
+    }
+
+
+async def _load_schedule_context(schedule_id: UUID, user_id) -> tuple:
+    schedule = await TaskScheduleDAO.get_by_id(schedule_id)
+    if schedule is None:
+        raise _json_http_error(404, "schedule_not_found")
+
+    task = await TaskDAO.get_by_id(schedule.task_template_id)
+    if task is None or task.user_id != user_id:
+        raise _json_http_error(404, "schedule_not_found")
+
+    task_type = _normalize_schedule_task_type(task)
+    if task_type is None:
+        raise _json_http_error(404, "schedule_not_found")
+
+    agent = None
+    if task.agent_id:
+        agent = await AgentInstanceDAO.get_by_id(task.agent_id)
+
+    return schedule, task, task_type, agent
+
+
+def _parse_message_schedule_type(raw_value: str | None) -> ScheduleType:
+    if raw_value not in {ScheduleType.cron.value, ScheduleType.interval.value}:
+        raise _json_http_error(400, "invalid_schedule_type")
+    return ScheduleType(raw_value)
+
+
+def _require_non_empty_string(body: dict, key: str, error: str) -> str:
+    value = body.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise _json_http_error(400, error)
+    return value.strip()
+
+
+async def _dashboard_schedules(request: web.Request) -> web.Response:
+    auth_context = await _require_auth(request)
+    schedules = await TaskScheduleDAO.get_all(limit=500)
+    method_schedules: list[dict] = []
+    message_schedules: list[dict] = []
+
+    for schedule in schedules:
+        task = await TaskDAO.get_by_id(schedule.task_template_id)
+        if task is None or task.user_id != auth_context["user_id"]:
+            continue
+
+        task_type = _normalize_schedule_task_type(task)
+        if task_type is None:
+            continue
+
+        agent = None
+        if task.agent_id:
+            agent = await AgentInstanceDAO.get_by_id(task.agent_id)
+
+        item = _serialize_schedule_item(schedule, task, agent)
+        if task_type == "method":
+            method_schedules.append(item)
+        else:
+            message_schedules.append(item)
+
+    method_schedules.sort(key=lambda item: ((item["name"] or "").lower(), item["id"]))
+    message_schedules.sort(key=lambda item: ((item["name"] or "").lower(), item["id"]))
+    return web.json_response(
+        {
+            "methodSchedules": method_schedules,
+            "messageSchedules": message_schedules,
+            "source": "database",
+        }
+    )
+
+
+async def _dashboard_create_message_schedule(request: web.Request) -> web.Response:
+    auth_context = await _require_auth(request)
+    body = await request.json()
+
+    name = _require_non_empty_string(body, "name", "name_required")
+    prompt = _require_non_empty_string(body, "prompt", "prompt_required")
+    schedule_type = _parse_message_schedule_type(body.get("scheduleType"))
+    schedule_expression = _require_non_empty_string(
+        body, "scheduleExpression", "schedule_expression_required"
+    )
+    raw_agent_id = body.get("agentId")
+    if not raw_agent_id:
+        raise _json_http_error(400, "agent_id_required")
+
+    agent_id = UUID(raw_agent_id)
+    agent = await AgentInstanceDAO.get_by_id(agent_id)
+    if agent is None or agent.user_id != auth_context["user_id"]:
+        raise _json_http_error(404, "agent_not_found")
+
+    try:
+        next_run = calculate_next_run(schedule_expression, schedule_type)
+        task = await TaskDAO.create(
+            TaskCreate(
+                user_id=auth_context["user_id"],
+                agent_id=agent_id,
+                task_type="message",
+                status=TaskStatus.pending,
+                priority=Priority.normal,
+                payload={
+                    "task_execution_type": "message",
+                    "name": name,
+                    "prompt": prompt,
+                    "system_prompt": "",
+                    "think_mode": False,
+                },
+            )
+        )
+        schedule = await TaskScheduleDAO.create(
+            TaskScheduleCreate(
+                task_template_id=task.id,
+                schedule_type=schedule_type,
+                schedule_expression=schedule_expression,
+                is_active=bool(body.get("isActive", True)),
+                next_run_at=next_run,
+            )
+        )
+    except ValueError as exc:
+        raise _json_http_error(400, str(exc)) from exc
+
+    return web.json_response(
+        {"schedule": _serialize_schedule_item(schedule, task, agent)}, status=201
+    )
+
+
+async def _dashboard_update_message_schedule(request: web.Request) -> web.Response:
+    auth_context = await _require_auth(request)
+    schedule_id = UUID(request.match_info["schedule_id"])
+    schedule, task, task_type, agent = await _load_schedule_context(
+        schedule_id, auth_context["user_id"]
+    )
+    if task_type != "message":
+        raise _json_http_error(400, "schedule_not_editable")
+
+    body = await request.json()
+    next_task_payload = dict(task.payload or {})
+    payload_changed = False
+
+    if "name" in body:
+        next_task_payload["name"] = _require_non_empty_string(body, "name", "name_required")
+        payload_changed = True
+    if "prompt" in body:
+        next_task_payload["prompt"] = _require_non_empty_string(body, "prompt", "prompt_required")
+        payload_changed = True
+
+    schedule_type_value = body.get("scheduleType")
+    if schedule_type_value is None:
+        effective_schedule_type = ScheduleType(str(schedule.schedule_type))
+    else:
+        effective_schedule_type = _parse_message_schedule_type(schedule_type_value)
+
+    effective_expression = body.get("scheduleExpression", schedule.schedule_expression)
+    if not isinstance(effective_expression, str) or not effective_expression.strip():
+        raise _json_http_error(400, "schedule_expression_required")
+    effective_expression = effective_expression.strip()
+
+    is_active = body.get("isActive", schedule.is_active)
+
+    try:
+        next_run = calculate_next_run(effective_expression, effective_schedule_type)
+        if payload_changed:
+            task = await TaskDAO.update(TaskUpdate(id=task.id, payload=next_task_payload))
+            if task is None:
+                raise _json_http_error(404, "schedule_not_found")
+
+        updated_schedule = await TaskScheduleDAO.update(
+            TaskScheduleUpdate(
+                id=schedule.id,
+                schedule_type=effective_schedule_type,
+                schedule_expression=effective_expression,
+                is_active=bool(is_active),
+                next_run_at=next_run,
+            )
+        )
+    except ValueError as exc:
+        raise _json_http_error(400, str(exc)) from exc
+
+    if updated_schedule is None:
+        raise _json_http_error(404, "schedule_not_found")
+    return web.json_response(
+        {"schedule": _serialize_schedule_item(updated_schedule, task, agent)}
+    )
+
+
+async def _dashboard_delete_message_schedule(request: web.Request) -> web.Response:
+    auth_context = await _require_auth(request)
+    schedule_id = UUID(request.match_info["schedule_id"])
+    schedule, task, task_type, _agent = await _load_schedule_context(
+        schedule_id, auth_context["user_id"]
+    )
+    if task_type != "message":
+        raise _json_http_error(400, "schedule_not_editable")
+
+    await TaskScheduleDAO.delete(schedule.id)
+    await TaskDAO.delete(task.id)
+    return web.json_response({"deleted": True})
+
+
+async def _dashboard_refresh_message_schedule(request: web.Request) -> web.Response:
+    auth_context = await _require_auth(request)
+    schedule_id = UUID(request.match_info["schedule_id"])
+    schedule, task, task_type, agent = await _load_schedule_context(
+        schedule_id, auth_context["user_id"]
+    )
+    if task_type != "message":
+        raise _json_http_error(400, "schedule_not_editable")
+
+    try:
+        next_run = calculate_next_run(schedule.schedule_expression, schedule.schedule_type)
+        updated_schedule = await TaskScheduleDAO.update(
+            TaskScheduleUpdate(id=schedule.id, next_run_at=next_run)
+        )
+    except ValueError as exc:
+        raise _json_http_error(400, str(exc)) from exc
+
+    if updated_schedule is None:
+        raise _json_http_error(404, "schedule_not_found")
+    return web.json_response(
+        {"schedule": _serialize_schedule_item(updated_schedule, task, agent)}
+    )
 
 
 def _serialize_endpoint(endpoint) -> dict:
@@ -806,6 +1084,11 @@ def create_app(
     app.router.add_post("/api/dashboard/agents", _agents_create)
     app.router.add_get("/api/dashboard/tasks", _dashboard_tasks)
     app.router.add_get("/api/dashboard/memory", _dashboard_memory)
+    app.router.add_get("/api/dashboard/schedules", _dashboard_schedules)
+    app.router.add_post("/api/dashboard/schedules/message", _dashboard_create_message_schedule)
+    app.router.add_patch("/api/dashboard/schedules/message/{schedule_id}", _dashboard_update_message_schedule)
+    app.router.add_delete("/api/dashboard/schedules/message/{schedule_id}", _dashboard_delete_message_schedule)
+    app.router.add_post("/api/dashboard/schedules/message/{schedule_id}/refresh", _dashboard_refresh_message_schedule)
     app.router.add_get("/api/dashboard/stm", _dashboard_stm)
     app.router.add_get("/api/dashboard/ltm", _dashboard_ltm)
     app.router.add_get("/api/dashboard/settings", _dashboard_settings)

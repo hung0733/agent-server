@@ -11,6 +11,7 @@ import {
   OverviewSummary,
   OverviewPayload,
   RailSummary,
+  SchedulesPayload,
   SettingsPayload,
   ShellMeta,
   StatMetric,
@@ -159,6 +160,42 @@ export const usagePayload: UsagePayload = {
 
 export const agentsPayload: AgentsPayload = {
   agents,
+  source: "mock",
+};
+
+export const schedulesPayload: SchedulesPayload = {
+  methodSchedules: [
+    {
+      id: "schedule-method-1",
+      taskId: "task-method-1",
+      taskType: "method",
+      name: "Daily review",
+      prompt: "agent.bulter@Bulter.review_ltm",
+      scheduleType: "cron",
+      scheduleExpression: "0 16 * * *",
+      isActive: true,
+      nextRunAt: "2026-04-04T16:00:00+08:00",
+      lastRunAt: "2026-04-03T16:00:00+08:00",
+      agentId: "otter",
+      agentName: "otter",
+    },
+  ],
+  messageSchedules: [
+    {
+      id: "schedule-message-1",
+      taskId: "task-message-1",
+      taskType: "message",
+      name: "Morning ping",
+      prompt: "send summary",
+      scheduleType: "interval",
+      scheduleExpression: "PT2H",
+      isActive: true,
+      nextRunAt: "2026-04-04T10:00:00+08:00",
+      lastRunAt: null,
+      agentId: "main",
+      agentName: "main",
+    },
+  ],
   source: "mock",
 };
 

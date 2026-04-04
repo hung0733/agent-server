@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -76,6 +77,26 @@ class _FakeAuthService:
         return None
 
 
+class _FakeSchedule:
+    def __init__(self, schedule_id, task_template_id, schedule_type="cron", schedule_expression="0 12 * * *", is_active=True, next_run_at=None, last_run_at=None):
+        self.id = schedule_id
+        self.task_template_id = task_template_id
+        self.schedule_type = schedule_type
+        self.schedule_expression = schedule_expression
+        self.is_active = is_active
+        self.next_run_at = next_run_at
+        self.last_run_at = last_run_at
+
+
+class _FakeTask:
+    def __init__(self, task_id, user_id, agent_id, task_type, payload):
+        self.id = task_id
+        self.user_id = user_id
+        self.agent_id = agent_id
+        self.task_type = task_type
+        self.payload = payload
+
+
 @pytest.mark.asyncio
 async def test_health_returns_queue_and_dedup_stats(tmp_path: Path) -> None:
     app = create_app(_FakeQueue(), _FakeDedup(), dashboard_data_provider=_FakeDashboardProvider())
@@ -144,6 +165,260 @@ async def test_memory_endpoint_returns_provider_contract_shape() -> None:
     assert payload["health"]["summary"] == "最近 5 項用戶活動可歸因。"
     assert payload["recentEntries"][0]["kind"] == "message"
     assert payload["source"] == "mixed"
+
+
+@pytest.mark.asyncio
+async def test_schedule_endpoint_returns_method_and_message_groups(monkeypatch) -> None:
+    user_id = uuid4()
+    method_task_id = uuid4()
+    message_task_id = uuid4()
+    method_schedule_id = uuid4()
+    message_schedule_id = uuid4()
+    agent_id = uuid4()
+    next_run = datetime(2026, 4, 4, 8, 0, 0, tzinfo=timezone.utc)
+    last_run = datetime(2026, 4, 4, 1, 30, 0, tzinfo=timezone.utc)
+
+    monkeypatch.setattr(
+        app_module.TaskScheduleDAO,
+        "get_all",
+        AsyncMock(
+            return_value=[
+                _FakeSchedule(method_schedule_id, method_task_id),
+                _FakeSchedule(
+                    message_schedule_id,
+                    message_task_id,
+                    schedule_type="interval",
+                    schedule_expression="PT2H",
+                    next_run_at=next_run,
+                    last_run_at=last_run,
+                ),
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        app_module.TaskDAO,
+        "get_by_id",
+        AsyncMock(
+            side_effect=[
+                _FakeTask(
+                    method_task_id,
+                    user_id,
+                    agent_id,
+                    "scheduled_method",
+                    {"task_execution_type": "method", "name": "Daily review", "prompt": "", "method_path": "agent.bulter@Bulter.review_ltm"},
+                ),
+                _FakeTask(
+                    message_task_id,
+                    user_id,
+                    agent_id,
+                    "scheduled_message",
+                    {"task_execution_type": "message", "name": "Morning ping", "prompt": "send summary"},
+                ),
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        app_module.AgentInstanceDAO,
+        "get_by_id",
+        AsyncMock(return_value=type("Agent", (), {"id": agent_id, "name": "otter", "agent_id": "agent-otter"})()),
+    )
+
+    app = create_app(
+        _FakeQueue(),
+        _FakeDedup(),
+        dashboard_data_provider=_FakeDashboardProvider(),
+        auth_service=_FakeAuthService(user_id),
+    )
+    server = TestServer(app)
+    client = TestClient(server)
+
+    await client.start_server()
+    try:
+        response = await client.get("/api/dashboard/schedules", headers={"X-API-Key": "good-key"})
+        payload = await response.json()
+    finally:
+        await client.close()
+
+    assert response.status == 200
+    assert payload["methodSchedules"][0]["taskType"] == "method"
+    assert payload["messageSchedules"][0]["taskType"] == "message"
+    assert payload["messageSchedules"][0]["name"] == "Morning ping"
+    assert payload["messageSchedules"][0]["nextRunAt"].endswith("+08:00")
+    assert payload["messageSchedules"][0]["lastRunAt"].endswith("+08:00")
+
+
+@pytest.mark.asyncio
+async def test_method_schedule_rejects_write_actions(monkeypatch) -> None:
+    user_id = uuid4()
+    task_id = uuid4()
+    schedule_id = uuid4()
+    agent_id = uuid4()
+
+    monkeypatch.setattr(
+        app_module.TaskScheduleDAO,
+        "get_by_id",
+        AsyncMock(return_value=_FakeSchedule(schedule_id, task_id)),
+    )
+    monkeypatch.setattr(
+        app_module.TaskDAO,
+        "get_by_id",
+        AsyncMock(
+            return_value=_FakeTask(
+                task_id,
+                user_id,
+                agent_id,
+                "scheduled_method",
+                {"task_execution_type": "method", "name": "Daily review", "method_path": "agent.bulter@Bulter.review_ltm"},
+            )
+        ),
+    )
+
+    app = create_app(
+        _FakeQueue(),
+        _FakeDedup(),
+        dashboard_data_provider=_FakeDashboardProvider(),
+        auth_service=_FakeAuthService(user_id),
+    )
+    server = TestServer(app)
+    client = TestClient(server)
+
+    await client.start_server()
+    try:
+        response = await client.patch(
+            f"/api/dashboard/schedules/message/{schedule_id}",
+            headers={"X-API-Key": "good-key"},
+            json={"name": "changed", "prompt": "changed", "scheduleType": "cron", "scheduleExpression": "0 8 * * *", "isActive": True},
+        )
+        payload = await response.json()
+    finally:
+        await client.close()
+
+    assert response.status == 400
+    assert payload["error"] == "schedule_not_editable"
+
+
+@pytest.mark.asyncio
+async def test_create_message_schedule_returns_serialized_schedule(monkeypatch) -> None:
+    user_id = uuid4()
+    agent_id = uuid4()
+    task_id = uuid4()
+    schedule_id = uuid4()
+
+    monkeypatch.setattr(
+        app_module.AgentInstanceDAO,
+        "get_by_id",
+        AsyncMock(return_value=type("Agent", (), {"id": agent_id, "name": "main", "agent_id": "agent-main", "user_id": user_id})()),
+    )
+    monkeypatch.setattr(
+        app_module.TaskDAO,
+        "create",
+        AsyncMock(
+            return_value=_FakeTask(
+                task_id,
+                user_id,
+                agent_id,
+                "message",
+                {"task_execution_type": "message", "name": "Morning ping", "prompt": "send summary"},
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        app_module.TaskScheduleDAO,
+        "create",
+        AsyncMock(return_value=_FakeSchedule(schedule_id, task_id, schedule_type="interval", schedule_expression="PT2H")),
+    )
+
+    app = create_app(
+        _FakeQueue(),
+        _FakeDedup(),
+        dashboard_data_provider=_FakeDashboardProvider(),
+        auth_service=_FakeAuthService(user_id),
+    )
+    server = TestServer(app)
+    client = TestClient(server)
+
+    await client.start_server()
+    try:
+        response = await client.post(
+            "/api/dashboard/schedules/message",
+            headers={"X-API-Key": "good-key"},
+            json={
+                "agentId": str(agent_id),
+                "name": "Morning ping",
+                "prompt": "send summary",
+                "scheduleType": "interval",
+                "scheduleExpression": "PT2H",
+                "isActive": True,
+            },
+        )
+        payload = await response.json()
+    finally:
+        await client.close()
+
+    assert response.status == 201
+    assert payload["schedule"]["taskType"] == "message"
+    assert payload["schedule"]["name"] == "Morning ping"
+    assert payload["schedule"]["agentName"] == "main"
+
+
+@pytest.mark.asyncio
+async def test_refresh_message_schedule_updates_next_run(monkeypatch) -> None:
+    user_id = uuid4()
+    task_id = uuid4()
+    schedule_id = uuid4()
+    agent_id = uuid4()
+
+    monkeypatch.setattr(
+        app_module.TaskScheduleDAO,
+        "get_by_id",
+        AsyncMock(return_value=_FakeSchedule(schedule_id, task_id, schedule_type="interval", schedule_expression="PT2H")),
+    )
+    monkeypatch.setattr(
+        app_module.TaskDAO,
+        "get_by_id",
+        AsyncMock(
+            return_value=_FakeTask(
+                task_id,
+                user_id,
+                agent_id,
+                "message",
+                {"task_execution_type": "message", "name": "Morning ping", "prompt": "send summary"},
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        app_module.AgentInstanceDAO,
+        "get_by_id",
+        AsyncMock(return_value=type("Agent", (), {"id": agent_id, "name": "main", "agent_id": "agent-main"})()),
+    )
+    monkeypatch.setattr(
+        app_module.TaskScheduleDAO,
+        "update",
+        AsyncMock(return_value=_FakeSchedule(schedule_id, task_id, schedule_type="interval", schedule_expression="PT2H")),
+    )
+
+    app = create_app(
+        _FakeQueue(),
+        _FakeDedup(),
+        dashboard_data_provider=_FakeDashboardProvider(),
+        auth_service=_FakeAuthService(user_id),
+    )
+    server = TestServer(app)
+    client = TestClient(server)
+
+    await client.start_server()
+    try:
+        response = await client.post(
+            f"/api/dashboard/schedules/message/{schedule_id}/refresh",
+            headers={"X-API-Key": "good-key"},
+        )
+        payload = await response.json()
+    finally:
+        await client.close()
+
+    assert response.status == 200
+    assert payload["schedule"]["id"] == str(schedule_id)
+    assert payload["schedule"]["taskType"] == "message"
 
 
 @pytest.mark.asyncio

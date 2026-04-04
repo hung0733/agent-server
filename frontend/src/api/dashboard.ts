@@ -11,7 +11,9 @@ import {
   LTMPayload,
   MemoryBlocksInput,
   MemoryPayload,
+  MessageScheduleInput,
   OverviewPayload,
+  SchedulesPayload,
   SettingsPayload,
   STMPayload,
   TasksPayload,
@@ -88,6 +90,31 @@ export function fetchTasks(before?: string): Promise<TasksPayload> {
 
 export function fetchMemory(): Promise<MemoryPayload> {
   return requestJson<MemoryPayload>("/api/dashboard/memory");
+}
+
+export function fetchSchedules(): Promise<SchedulesPayload> {
+  return requestJson<SchedulesPayload>("/api/dashboard/schedules");
+}
+
+export function createMessageSchedule(body: MessageScheduleInput): Promise<{ schedule: SchedulesPayload["messageSchedules"][number] }> {
+  return mutateJson("/api/dashboard/schedules/message", "POST", body);
+}
+
+export function updateMessageSchedule(
+  scheduleId: string,
+  body: Partial<MessageScheduleInput>,
+): Promise<{ schedule: SchedulesPayload["messageSchedules"][number] }> {
+  return mutateJson(`/api/dashboard/schedules/message/${scheduleId}`, "PATCH", body);
+}
+
+export function deleteMessageSchedule(scheduleId: string): Promise<{ deleted: boolean }> {
+  return mutateJson(`/api/dashboard/schedules/message/${scheduleId}`, "DELETE", {});
+}
+
+export function refreshMessageSchedule(
+  scheduleId: string,
+): Promise<{ schedule: SchedulesPayload["messageSchedules"][number] }> {
+  return mutateJson(`/api/dashboard/schedules/message/${scheduleId}/refresh`, "POST", {});
 }
 
 export function fetchSTM(): Promise<STMPayload> {

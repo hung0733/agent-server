@@ -5,6 +5,7 @@ import AgentToolsTab from "../components/agents/AgentToolsTab";
 import AgentTypeToolsTab from "../components/agents/AgentTypeToolsTab";
 import AgentTypesTab from "../components/agents/AgentTypesTab";
 import AgentsTabs, { type AgentTabKey } from "../components/agents/AgentsTabs";
+import ScheduleTab from "../components/agents/ScheduleTab";
 import SectionHeader from "../components/ui/SectionHeader";
 
 export default function AgentsPage() {
@@ -20,12 +21,7 @@ export default function AgentsPage() {
 
       {activeTab === "agent-type" ? <AgentTypesTab /> : null}
 
-      {activeTab === "schedule" ? (
-        <article className="card agents-placeholder">
-          <h3>{t("agents.tabs.schedule")}</h3>
-          <p>{t("agents.tabs.placeholder")}</p>
-        </article>
-      ) : null}
+      {activeTab === "schedule" ? <ScheduleTab /> : null}
 
       {activeTab === "agent-tools" ? <AgentToolsTab /> : null}
 

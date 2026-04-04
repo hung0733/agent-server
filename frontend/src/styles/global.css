@@ -633,6 +633,125 @@ textarea {
   min-height: 180px;
 }
 
+.schedule-tab {
+  display: grid;
+  gap: 18px;
+}
+
+.schedule-section {
+  display: grid;
+  gap: 14px;
+}
+
+.schedule-section__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+}
+
+.schedule-section__header h3,
+.schedule-form h4,
+.schedule-card h4 {
+  margin: 0;
+}
+
+.schedule-section__add,
+.schedule-form__actions button,
+.schedule-card__actions button {
+  min-height: 38px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid var(--border-soft);
+  background: transparent;
+  color: var(--text-1);
+  cursor: pointer;
+}
+
+.schedule-section__add {
+  border: 0;
+  background: linear-gradient(135deg, var(--primary), #a7c1ff);
+  color: #08111d;
+  font-weight: 700;
+}
+
+.schedule-section__list {
+  display: grid;
+  gap: 14px;
+}
+
+.schedule-card,
+.schedule-form {
+  display: grid;
+  gap: 14px;
+  padding: 20px;
+}
+
+.schedule-card__header p {
+  margin: 8px 0 0;
+  color: var(--text-2);
+}
+
+.schedule-card__meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 18px;
+  margin: 0;
+}
+
+.schedule-card__meta dt {
+  margin-bottom: 6px;
+  color: var(--text-3);
+}
+
+.schedule-card__meta dd {
+  margin: 0;
+}
+
+.schedule-card__actions,
+.schedule-form__actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.schedule-form label {
+  display: grid;
+  gap: 6px;
+  color: var(--text-2);
+}
+
+.schedule-form input,
+.schedule-form select,
+.schedule-form textarea {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(170, 185, 208, 0.18);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-1);
+}
+
+.schedule-form textarea {
+  resize: vertical;
+}
+
+.schedule-form__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.schedule-form__checkbox {
+  display: flex !important;
+  align-items: center;
+  gap: 10px;
+}
+
+.schedule-form__checkbox input {
+  width: auto;
+}
+
 /* ── Agent Tab ───────────────────────────────────────────────── */
 
 .agent-tab {

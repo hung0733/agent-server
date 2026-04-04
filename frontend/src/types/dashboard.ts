@@ -122,6 +122,39 @@ export interface AgentsPayload {
   source: string;
 }
 
+export type ScheduleTaskType = "method" | "message";
+export type EditableScheduleType = "cron" | "interval";
+
+export interface ScheduleItem {
+  id: string;
+  taskId: string;
+  taskType: ScheduleTaskType;
+  name: string;
+  prompt: string;
+  scheduleType: EditableScheduleType;
+  scheduleExpression: string;
+  isActive: boolean;
+  nextRunAt: string | null;
+  lastRunAt: string | null;
+  agentId: string | null;
+  agentName: string | null;
+}
+
+export interface SchedulesPayload {
+  methodSchedules: ScheduleItem[];
+  messageSchedules: ScheduleItem[];
+  source: string;
+}
+
+export interface MessageScheduleInput {
+  agentId: string;
+  name: string;
+  prompt: string;
+  scheduleType: EditableScheduleType;
+  scheduleExpression: string;
+  isActive: boolean;
+}
+
 export interface TasksPayload {
   items: TimelineItem[];
   source: string;
