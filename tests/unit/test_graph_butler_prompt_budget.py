@@ -1,9 +1,57 @@
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, RemoveMessage, SystemMessage, ToolMessage
 
-from graph.butler import _build_messages_with_token_budget
+from graph.butler import _build_messages_with_token_budget, _compact_react_state_if_needed
 
 
 class TestGraphButlerPromptBudget:
+    def test_compact_react_state_if_needed_summarizes_old_steps(self, monkeypatch):
+        monkeypatch.setattr("graph.butler.Tools.get_token_count", lambda value: 80)
+
+        existing_messages = [
+            HumanMessage(content="user asks for city route", id="m1"),
+            AIMessage(
+                content="",
+                tool_calls=[{"id": "tc1", "name": "find", "args": {"path": "src/app/api"}}],
+                id="m2",
+            ),
+            ToolMessage(content="found route.ts", tool_call_id="call-1", name="find", id="m3"),
+            AIMessage(content="checking route details", id="m4"),
+        ]
+        new_messages = [
+            ToolMessage(content="route.ts contains GET handler", tool_call_id="call-2", name="read", id="m5")
+        ]
+
+        result = _compact_react_state_if_needed(
+            summary="",
+            existing_messages=existing_messages,
+            new_messages=new_messages,
+            max_tokens=250,
+            keep_last_messages=2,
+        )
+
+        assert result is not None
+        assert "user asks for city route" in result["summary"]
+        assert "Tool call find" in result["summary"]
+        assert result["messages"][0] == RemoveMessage(id="m1")
+        assert result["messages"][1] == RemoveMessage(id="m2")
+        assert result["messages"][2] == new_messages[0]
+
+    def test_compact_react_state_if_needed_skips_when_within_budget(self, monkeypatch):
+        monkeypatch.setattr("graph.butler.Tools.get_token_count", lambda value: 20)
+
+        existing_messages = [HumanMessage(content="short", id="m1")]
+        new_messages = [AIMessage(content="ok", id="m2")]
+
+        result = _compact_react_state_if_needed(
+            summary="",
+            existing_messages=existing_messages,
+            new_messages=new_messages,
+            max_tokens=200,
+            keep_last_messages=2,
+        )
+
+        assert result is None
+
     def test_build_messages_with_token_budget_logs_trim_summary(self, monkeypatch):
         def _fake_token_count(value):
             text = str(value)

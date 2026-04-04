@@ -310,45 +310,91 @@ class AgentToAgentTaskExecutor:
             sender=sender,
             worker=worker,
         )
-        worker_result = await AgentToAgentTaskExecutor._run_worker_task(
-            sender=sender,
-            worker=worker,
-            session_id=session.session_id,
-            task=task,
-        )
-        try:
-            review_result = await AgentToAgentTaskExecutor._review_worker_result(
+        base_instruction = task.payload.get("instruction", "")
+        goal = task.payload.get("goal", "")
+        current_instruction = base_instruction
+        revision_count = 0
+
+        while True:
+            worker_task = task.model_copy(deep=True)
+            worker_payload = dict(task.payload or {})
+            worker_payload["instruction"] = current_instruction
+            worker_task.payload = worker_payload
+
+            worker_result = await AgentToAgentTaskExecutor._run_worker_task(
                 sender=sender,
-                task=task,
-                worker_result=worker_result,
+                worker=worker,
+                session_id=session.session_id,
+                task=worker_task,
             )
-        except Exception as exc:
-            logger.error(_("[AgentToAgentTaskExecutor] 驗收失敗: %s"), exc, exc_info=True)
-            review_result = {
-                "accepted": False,
-                "reason": str(exc),
-                "response": worker_result.get("output", ""),
+            try:
+                review_result = await AgentToAgentTaskExecutor._review_worker_result(
+                    sender=sender,
+                    task=task,
+                    worker_result=worker_result,
+                )
+            except Exception as exc:
+                logger.error(_("[AgentToAgentTaskExecutor] 驗收失敗: %s"), exc, exc_info=True)
+                review_result = {
+                    "verdict": "fail",
+                    "reason": str(exc),
+                    "response": worker_result.get("output", ""),
+                }
+
+            verdict = str(review_result.get("verdict") or "fail")
+            if verdict == "revise":
+                current_instruction = AgentToAgentTaskExecutor._build_revision_instruction(
+                    goal=goal,
+                    instruction=base_instruction,
+                    previous_output=worker_result.get("output", ""),
+                    review_reason=review_result.get("reason", ""),
+                )
+                revision_count += 1
+                continue
+
+            final_response = review_result.get("response") or worker_result.get("output", "")
+            callback_result = None
+            if task.payload.get("callback") and final_response:
+                callback = task.payload.get("callback") or {}
+                logger.info(
+                    _("[AgentToAgentTaskExecutor] 準備發送 callback: channel=%s target=%s task_id=%s verdict=%s"),
+                    callback.get("channel"),
+                    callback.get("target"),
+                    task.id,
+                    verdict,
+                )
+                callback_result = await AgentToAgentTaskExecutor._dispatch_callback(
+                    callback,
+                    final_response,
+                )
+
+            return {
+                "success": verdict == "accept",
+                "selected_agent_id": str(worker.id),
+                "session_id": session.session_id,
+                "worker_output": worker_result.get("output", ""),
+                "worker_react_flow": worker_result.get("react_flow"),
+                "manager_verdict": verdict,
+                "manager_reason": review_result.get("reason", ""),
+                "callback_result": callback_result,
+                "final_response": final_response,
+                "revision_count": revision_count,
             }
 
-        callback_result = None
-        callback_message = review_result.get("response") or worker_result.get("output", "")
-        if task.payload.get("callback") and callback_message:
-            callback_result = await AgentToAgentTaskExecutor._dispatch_callback(
-                task.payload.get("callback") or {},
-                callback_message,
-            )
-
-        return {
-            "success": bool(review_result.get("accepted")),
-            "selected_agent_id": str(worker.id),
-            "session_id": session.session_id,
-            "worker_output": worker_result.get("output", ""),
-            "worker_react_flow": worker_result.get("react_flow"),
-            "manager_verdict": "accepted" if review_result.get("accepted") else "rejected",
-            "manager_reason": review_result.get("reason", ""),
-            "callback_result": callback_result,
-            "final_response": review_result.get("response") or worker_result.get("output", ""),
-        }
+    @staticmethod
+    def _build_revision_instruction(
+        goal: str,
+        instruction: str,
+        previous_output: str,
+        review_reason: str,
+    ) -> str:
+        return (
+            "請根據以下 review feedback 修正你上一輪結果。\n\n"
+            f"[Original Goal]\n{goal}\n\n"
+            f"[Original Instruction]\n{instruction}\n\n"
+            f"[Previous Output]\n{previous_output}\n\n"
+            f"[Manager Feedback]\n{review_reason}\n"
+        )
 
     @staticmethod
     async def _get_sender_agent(task: Task):
@@ -424,8 +470,18 @@ class AgentToAgentTaskExecutor:
             if chunk.chunk_type == "think" and chunk.content:
                 thinking_parts.append(chunk.content)
             elif chunk.chunk_type == "tool" and chunk.content:
+                logger.info(
+                    _("[AgentToAgentTaskExecutor] A2A worker tool call: session=%s tool=%s"),
+                    session_id,
+                    str(chunk.content),
+                )
                 react_flow["actions"].append({"type": "tool_call", "content": str(chunk.content)})
             elif chunk.chunk_type == "tool_result" and chunk.content:
+                logger.info(
+                    _("[AgentToAgentTaskExecutor] A2A worker tool result: session=%s result=%s"),
+                    session_id,
+                    str(chunk.content),
+                )
                 react_flow["observations"].append({"type": "observation", "content": str(chunk.content)})
             elif chunk.chunk_type == "content" and chunk.content:
                 content_parts.append(chunk.content)
@@ -466,11 +522,12 @@ class AgentToAgentTaskExecutor:
             f"{sender_prompt}\n\n[最終目標]\n{goal}\n\n"
             "你而家要驗收另一個 sub-agent 嘅輸出。"
             "你必須只輸出 JSON，格式："
-            '{"accepted": true|false, "reason": "...", "response": "..."}'
+            '{"verdict":"accept|revise|fail", "reason": "...", "response": "..."}'
         )
         review_message = (
             "請根據最終目標驗收以下 sub-agent 輸出。\n\n"
             f"[Instruction]\n{instruction}\n\n"
+            f"[Worker Session ID]\n{worker_result.get('session_id', '')}\n\n"
             f"[Worker Output]\n{worker_result.get('output', '')}\n"
         )
 
@@ -497,15 +554,19 @@ class AgentToAgentTaskExecutor:
             parsed = json.loads(raw_output)
         except json.JSONDecodeError:
             return {
-                "accepted": False,
+                "verdict": "fail",
                 "reason": _("sender review 輸出唔係有效 JSON"),
                 "response": worker_result.get("output", ""),
             }
 
+        verdict = str(parsed.get("verdict") or "").strip().lower()
+        if verdict not in {"accept", "revise", "fail"}:
+            verdict = "fail"
+
         return {
-            "accepted": bool(parsed.get("accepted")),
+            "verdict": verdict,
             "reason": str(parsed.get("reason") or ""),
-            "response": str(parsed.get("response") or worker_result.get("output", "")),
+            "response": str(parsed.get("response") or ""),
         }
 
     @staticmethod
@@ -514,14 +575,29 @@ class AgentToAgentTaskExecutor:
 
         channel = callback.get("channel")
         if channel != "whatsapp":
+            logger.warning(
+                _("[AgentToAgentTaskExecutor] callback channel 不支援: channel=%s"),
+                channel,
+            )
             raise ValueError(_("未支援的 callback channel: %s") % channel)
 
         target = str(callback.get("target") or "").lstrip("+")
         reply_context = callback.get("reply_context") or {}
-        instance_id = reply_context.get("instance_id")
+        instance_id = reply_context.get("instance_id") or callback.get("instance_id")
         if not instance_id or not target:
+            logger.warning(
+                _("[AgentToAgentTaskExecutor] whatsapp callback 缺少欄位: target=%s instance_id=%s reply_context=%s"),
+                bool(target),
+                bool(instance_id),
+                reply_context,
+            )
             raise ValueError(_("whatsapp callback 缺少 instance_id 或 target"))
 
+        logger.info(
+            _("[AgentToAgentTaskExecutor] 發送 WhatsApp callback: instance_id=%s target=%s"),
+            instance_id,
+            target,
+        )
         await WhatsAppChannel().send_text(str(instance_id), target, message)
         return {"status": "sent", "channel": channel, "target": target}
 

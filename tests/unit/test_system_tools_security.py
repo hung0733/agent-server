@@ -11,11 +11,13 @@ from uuid import uuid4
 import pytest
 
 from tools.system_tools import (
+    apply_patch_impl,
     edit_impl,
     exec_impl,
     find_impl,
     grep_impl,
     ls_impl,
+    process_impl,
     read_impl,
     write_impl,
 )
@@ -156,6 +158,31 @@ async def test_grep_impl_within_sandbox(user_sandbox, user_id):
 
 
 @pytest.mark.asyncio
+async def test_find_and_grep_redact_real_sandbox_paths(user_sandbox, user_id):
+    """Find and grep results should not leak the real sandbox root."""
+    project_dir = user_sandbox / "mnt/data/workspace/castle-stamp-app/src"
+    project_dir.mkdir(parents=True, exist_ok=True)
+    target_file = project_dir / "route.ts"
+    target_file.write_text("export const city = 'Central';\n")
+
+    find_result = await find_impl(
+        pattern="**/*.ts",
+        path="/mnt/data/workspace/castle-stamp-app/src",
+        _config={"user_id": user_id},
+    )
+    grep_result = await grep_impl(
+        pattern="Central",
+        path="/mnt/data/workspace/castle-stamp-app/src",
+        _config={"user_id": user_id},
+    )
+
+    assert str(user_sandbox) not in find_result
+    assert str(user_sandbox) not in grep_result
+    assert "/mnt/data/workspace/castle-stamp-app/src/route.ts" in find_result
+    assert "/mnt/data/workspace/castle-stamp-app/src/route.ts:1:export const city = 'Central';" in grep_result
+
+
+@pytest.mark.asyncio
 async def test_grep_impl_blocks_outside_sandbox(user_id):
     """Test that grep_impl blocks searching outside sandbox."""
     result = await grep_impl(
@@ -196,6 +223,23 @@ async def test_ls_impl_within_sandbox(user_sandbox, user_id):
 
 
 @pytest.mark.asyncio
+async def test_ls_impl_redacts_real_sandbox_path(user_sandbox, user_id):
+    """Sandbox listings should expose virtual paths, not AGENT_HOME_DIR paths."""
+    project_dir = user_sandbox / "mnt/data/workspace/castle-stamp-app/src/app/api/cities"
+    project_dir.mkdir(parents=True, exist_ok=True)
+    (project_dir / "route.ts").write_text("export const GET = () => null;\n")
+
+    result = await ls_impl(
+        path="/mnt/data/workspace/castle-stamp-app/src/app/api/cities",
+        _config={"user_id": user_id},
+    )
+
+    assert str(user_sandbox) not in result
+    assert "/mnt/data/workspace/castle-stamp-app/src/app/api/cities" in result
+    assert "route.ts" in result
+
+
+@pytest.mark.asyncio
 async def test_ls_impl_blocks_outside_sandbox(user_id):
     """Test that ls_impl blocks listing outside sandbox."""
     result = await ls_impl(path="/etc", _config={"user_id": user_id})
@@ -204,15 +248,14 @@ async def test_ls_impl_blocks_outside_sandbox(user_id):
 
 @pytest.mark.asyncio
 async def test_exec_impl_cwd_within_sandbox(user_sandbox, user_id):
-    """Test that exec_impl restricts cwd to sandbox."""
+    """Sandboxed agents should not get arbitrary shell execution."""
     subdir = user_sandbox / "workspace"
     subdir.mkdir()
 
     result = await exec_impl(
         command="pwd", cwd="workspace", _config={"user_id": user_id}
     )
-    # Should execute in sandbox/workspace
-    assert "workspace" in result.lower() or "[exit code:" in result
+    assert "🚫 拒絕存取" in result
 
 
 @pytest.mark.asyncio
@@ -237,10 +280,76 @@ async def test_write_and_read_impl_map_absolute_style_paths_into_sandbox(user_sa
 
 @pytest.mark.asyncio
 async def test_exec_impl_blocks_cwd_outside_sandbox(user_id):
-    """Test that exec_impl blocks cwd outside sandbox."""
+    """Sandboxed agents should reject exec even before cwd matters."""
     result = await exec_impl(
         command="ls", cwd="/etc", _config={"user_id": user_id}
     )
+    assert "🚫 拒絕存取" in result
+
+
+@pytest.mark.asyncio
+async def test_exec_impl_without_cwd_defaults_to_user_sandbox(user_sandbox, user_id):
+    """Sandboxed agents should not get arbitrary shell execution."""
+    result = await exec_impl(command="pwd", _config={"user_id": user_id})
+
+    assert "🚫 拒絕存取" in result
+
+
+@pytest.mark.asyncio
+async def test_process_impl_without_cwd_defaults_to_user_sandbox(user_sandbox, user_id):
+    """Sandboxed agents should not get background shell processes."""
+    result = await process_impl(
+        action="start",
+        command="pwd > process_pwd.txt",
+        _config={"user_id": user_id},
+    )
+
+    assert "🚫 拒絕存取" in result
+
+
+@pytest.mark.asyncio
+async def test_exec_impl_blocks_absolute_host_path_access_in_command(user_id):
+    """Sandboxed agents must not read host paths through shell commands."""
+    result = await exec_impl(command="cat /etc/passwd", _config={"user_id": user_id})
+
+    assert "🚫 拒絕存取" in result
+
+
+@pytest.mark.asyncio
+async def test_process_impl_blocks_absolute_host_path_access_in_command(user_id):
+    """Sandboxed agents must not start background commands against host paths."""
+    result = await process_impl(
+        action="start",
+        command="cat /etc/hostname > leak.txt",
+        _config={"user_id": user_id},
+    )
+
+    assert "🚫 拒絕存取" in result
+
+
+@pytest.mark.asyncio
+async def test_apply_patch_impl_blocks_base_dir_outside_sandbox(user_sandbox, user_id):
+    """Patch application should reject a base dir outside sandbox."""
+    patch = """--- a/test.txt\n+++ b/test.txt\n@@ -0,0 +1 @@\n+hello\n"""
+
+    result = await apply_patch_impl(
+        patch=patch,
+        _config={"user_id": user_id, "base_dir": "/etc"},
+    )
+
+    assert "🚫 拒絕存取" in result
+
+
+@pytest.mark.asyncio
+async def test_apply_patch_impl_blocks_patch_target_outside_sandbox(user_sandbox, user_id):
+    """Patch application should reject targets outside sandbox even with safe base dir."""
+    patch = """--- /etc/passwd\n+++ /etc/passwd\n@@ -1 +1 @@\n-root\n+agent\n"""
+
+    result = await apply_patch_impl(
+        patch=patch,
+        _config={"user_id": user_id, "base_dir": str(user_sandbox)},
+    )
+
     assert "🚫 拒絕存取" in result
 
 

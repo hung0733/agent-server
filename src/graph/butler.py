@@ -4,7 +4,7 @@ import logging
 import operator
 import re
 from typing import Annotated, Sequence, TypedDict
-from langchain_core.messages import BaseMessage, AIMessage, SystemMessage, RemoveMessage
+from langchain_core.messages import BaseMessage, AIMessage, HumanMessage, SystemMessage, RemoveMessage, ToolMessage
 from langgraph.graph.message import add_messages
 from langgraph.graph import StateGraph, START, END
 from langchain_core.runnables import RunnableConfig
@@ -26,6 +26,9 @@ SUMMARY_TRIGGER_TOKEN = 10000
 SUMMARY_USAGE_TOKEN = 5000
 CONFIDENCE_THRESHOLD = 0.8
 MODEL_INPUT_TOKEN_BUDGET = 20000
+REACT_STEP_SUMMARY_TRIGGER_TOKEN = 12000
+REACT_STEP_SUMMARY_KEEP_MESSAGES = 6
+REACT_SUMMARY_TOKEN_BUDGET = 4000
 
 # 定義「提交答案」嘅 System Tool (用嚟攞信心評分)
 SUBMIT_TOOL = {
@@ -119,6 +122,96 @@ def _build_messages_with_token_budget(
     )
 
     return messages_to_send
+
+
+def _message_summary_line(message: BaseMessage) -> str:
+    content = str(message.content).strip()
+    if len(content) > 240:
+        content = content[:240] + "..."
+
+    if isinstance(message, HumanMessage):
+        return f"User: {content}"
+    if isinstance(message, ToolMessage):
+        tool_name = getattr(message, "name", "tool") or "tool"
+        return f"Tool result {tool_name}: {content}"
+    if isinstance(message, AIMessage):
+        tool_calls = getattr(message, "tool_calls", None) or []
+        if tool_calls:
+            tool_descriptions = []
+            for tool_call in tool_calls[:3]:
+                tool_name = tool_call.get("name", "tool")
+                tool_args = json.dumps(tool_call.get("args", {}), ensure_ascii=False)
+                if len(tool_args) > 120:
+                    tool_args = tool_args[:120] + "..."
+                tool_descriptions.append(f"{tool_name}({tool_args})")
+            more = " ..." if len(tool_calls) > 3 else ""
+            return f"Tool call {'; '.join(tool_descriptions)}{more}"
+        return f"Assistant: {content}"
+    return f"Message: {content}"
+
+
+def _trim_summary_text(summary: str, max_tokens: int = REACT_SUMMARY_TOKEN_BUDGET) -> str:
+    lines = [line for line in summary.splitlines() if line.strip()]
+    if not lines:
+        return ""
+
+    kept: list[str] = []
+    used_tokens = 0
+    for line in reversed(lines):
+        line_tokens = Tools.get_token_count(line)
+        if kept and used_tokens + line_tokens > max_tokens:
+            break
+        kept.append(line)
+        used_tokens += line_tokens
+    return "\n".join(reversed(kept))
+
+
+def _compact_react_state_if_needed(
+    summary: str,
+    existing_messages: Sequence[BaseMessage],
+    new_messages: Sequence[BaseMessage],
+    max_tokens: int = REACT_STEP_SUMMARY_TRIGGER_TOKEN,
+    keep_last_messages: int = REACT_STEP_SUMMARY_KEEP_MESSAGES,
+) -> dict[str, object] | None:
+    filtered_existing = [m for m in existing_messages if not isinstance(m, RemoveMessage)]
+    filtered_new = [m for m in new_messages if not isinstance(m, RemoveMessage)]
+    projected_tokens = Tools.get_token_count(summary) + sum(
+        _message_token_count(message) for message in [*filtered_existing, *filtered_new]
+    )
+
+    if projected_tokens <= max_tokens or len(filtered_existing) <= keep_last_messages:
+        return None
+
+    messages_to_summarize = filtered_existing[:-keep_last_messages]
+    if not messages_to_summarize:
+        return None
+
+    remove_messages: list[RemoveMessage] = []
+    for message in messages_to_summarize:
+        message_id = getattr(message, "id", None)
+        if not message_id:
+            logger.warning(_("ReAct summary skipped because message lacks id: %s"), type(message).__name__)
+            return None
+        remove_messages.append(RemoveMessage(id=message_id))
+
+    summary_lines: list[str] = []
+    if summary.strip():
+        summary_lines.append(summary.strip())
+    summary_lines.append(_("以下為較早前 ReAct 步驟摘要："))
+    summary_lines.extend(f"- {_message_summary_line(message)}" for message in messages_to_summarize)
+    updated_summary = _trim_summary_text("\n".join(summary_lines))
+
+    logger.info(
+        _("ReAct context compacted: removed=%d kept=%d new=%d tokens_before=%d"),
+        len(messages_to_summarize),
+        keep_last_messages,
+        len(filtered_new),
+        projected_tokens,
+    )
+    return {
+        "summary": updated_summary,
+        "messages": [*remove_messages, *filtered_new],
+    }
 
 
 # ==========================================
@@ -641,6 +734,14 @@ async def dynamic_tool_node(
 
     # 4. 執行 ToolNode (佢會自動對應 state 裡面嘅 tool_calls 去 run，並回傳 ToolMessage)
     result = await tool_executor.ainvoke(state, config)
+
+    compacted = _compact_react_state_if_needed(
+        summary=state.get("summary", ""),
+        existing_messages=state.get("messages", []),
+        new_messages=result.get("messages", []),
+    )
+    if compacted is not None:
+        return compacted
 
     return result
 

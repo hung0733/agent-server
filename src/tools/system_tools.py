@@ -32,7 +32,12 @@ from pathlib import Path
 from typing import Any
 
 from i18n import _
-from tools.path_security import PathSecurityError, resolve_safe_path
+from tools.path_security import (
+    PathSecurityError,
+    VIRTUAL_SANDBOX_PREFIXES,
+    get_user_sandbox_dir,
+    resolve_safe_path,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +74,67 @@ def _resolve_path(path: str, base_dir: str | None, user_id: str = "") -> Path:
         if not p.is_absolute() and base_dir:
             p = Path(base_dir) / p
         return p.resolve()
+
+
+def _resolve_working_dir(base_dir: str | None, user_id: str = "") -> Path:
+    """Resolve the effective working directory for a tool invocation."""
+    if user_id:
+        if base_dir:
+            return _resolve_path(base_dir, None, user_id)
+        return _resolve_path(".", None, user_id)
+
+    if base_dir:
+        return Path(base_dir).resolve()
+    return Path.cwd().resolve()
+
+
+def _display_path(path: Path, user_id: str = "") -> str:
+    """Render a sandbox path without leaking the real AGENT_HOME_DIR root."""
+    if not user_id:
+        return str(path)
+
+    sandbox_dir = get_user_sandbox_dir(user_id)
+    resolved = path.resolve()
+    try:
+        relative = resolved.relative_to(sandbox_dir)
+    except ValueError:
+        return str(path)
+
+    virtual_prefix = VIRTUAL_SANDBOX_PREFIXES[0]
+    virtual_parts = virtual_prefix.parts[1:]
+    if relative.parts[: len(virtual_parts)] == virtual_parts:
+        return str(Path("/") / relative)
+    return str(virtual_prefix / relative)
+
+
+def _extract_patch_target_paths(patch: str) -> list[str]:
+    """Extract candidate target paths from unified diff headers."""
+    targets: list[str] = []
+    for line in patch.splitlines():
+        if not line.startswith(("--- ", "+++ ")):
+            continue
+        raw_path = line[4:].strip()
+        if not raw_path or raw_path == "/dev/null":
+            continue
+        raw_path = raw_path.split("\t", 1)[0].strip()
+        targets.append(raw_path)
+    return targets
+
+
+def _normalize_patch_path(raw_path: str, strip: int) -> str:
+    """Apply patch -p stripping semantics to a diff header path."""
+    path_obj = Path(raw_path)
+    if path_obj.is_absolute():
+        return raw_path
+
+    anchor = path_obj.anchor
+    parts = [part for part in path_obj.parts if part and part != anchor]
+    if strip > 0:
+        parts = parts[strip:]
+    if not parts:
+        return "."
+    normalized = Path(*parts)
+    return str(normalized)
 
 
 # ---------------------------------------------------------------------------
@@ -143,7 +209,7 @@ async def write_impl(
     try:
         resolved.parent.mkdir(parents=True, exist_ok=True)
         resolved.write_text(content, encoding=encoding)
-        return _("✅ 已寫入: %s") % str(resolved)
+        return _("✅ 已寫入: %s") % _display_path(resolved, user_id)
     except Exception as exc:
         logger.error(_("[write] ❌ 寫入失敗: %s"), exc)
         return _("❌ 寫入失敗: %s") % str(exc)
@@ -198,7 +264,7 @@ async def edit_impl(
             count = 1
 
         resolved.write_text(updated, encoding=encoding)
-        return _("✅ 已替換 %d 處: %s") % (count, str(resolved))
+        return _("✅ 已替換 %d 處: %s") % (count, _display_path(resolved, user_id))
     except Exception as exc:
         logger.error(_("[edit] ❌ 編輯失敗: %s"), exc)
         return _("❌ 編輯失敗: %s") % str(exc)
@@ -226,7 +292,16 @@ async def apply_patch_impl(
         Patch output or error message.
     """
     _config = _config or {}
-    cwd = _config.get("base_dir") or os.getcwd()
+    user_id = _config.get("user_id", "")
+
+    try:
+        cwd = str(_resolve_working_dir(_config.get("base_dir"), user_id))
+        for raw_path in _extract_patch_target_paths(patch):
+            candidate = _normalize_patch_path(raw_path, strip)
+            _resolve_path(candidate, cwd, user_id)
+    except PathSecurityError as exc:
+        logger.warning(_("[apply_patch] 🚫 路徑安全檢查失敗: %s"), exc)
+        return _("🚫 拒絕存取: %s") % str(exc)
 
     logger.info(_("[apply_patch] 套用 patch，cwd=%s"), cwd)
     try:
@@ -312,7 +387,7 @@ async def grep_impl(
             continue
         for lineno, line in enumerate(text.splitlines(), start=1):
             if compiled.search(line):
-                results.append(f"{file_path}:{lineno}:{line}")
+                results.append(f"{_display_path(file_path, user_id)}:{lineno}:{line}")
                 if len(results) >= max_results:
                     results.append(
                         _("... (已達上限 %d 筆，請縮小搜索範圍)") % max_results
@@ -360,7 +435,7 @@ async def find_impl(
         matches = sorted(root.glob(pattern))[:max_results]
         if not matches:
             return _("🔍 無符合結果: %s") % pattern
-        return "\n".join(str(p) for p in matches)
+        return "\n".join(_display_path(p, user_id) for p in matches)
     except Exception as exc:
         logger.error(_("[find] ❌ 失敗: %s"), exc)
         return _("❌ find 失敗: %s") % str(exc)
@@ -398,7 +473,7 @@ async def ls_impl(
     logger.info(_("[ls] 列出目錄: %s"), resolved)
     try:
         entries = sorted(resolved.iterdir(), key=lambda p: (p.is_file(), p.name))
-        lines: list[str] = [_("📂 %s") % str(resolved), ""]
+        lines: list[str] = [_("📂 %s") % _display_path(resolved, user_id), ""]
         for entry in entries:
             if not show_hidden and entry.name.startswith("."):
                 continue
@@ -438,6 +513,9 @@ async def exec_impl(
     user_id = _config.get("user_id", "")
     timeout = min(timeout, 300)
 
+    if user_id:
+        return _("🚫 拒絕存取: sandbox 模式唔支援 exec")
+
     # Determine working directory and validate if user_id is set
     if cwd:
         try:
@@ -448,16 +526,12 @@ async def exec_impl(
             return _("🚫 拒絕存取: %s") % str(exc)
     else:
         # Use base_dir or default, but validate if user_id is set
-        base_dir = _config.get("base_dir")
-        if base_dir:
-            try:
-                working_dir_path = _resolve_path(".", base_dir, user_id)
-                working_dir = str(working_dir_path)
-            except PathSecurityError as exc:
-                logger.warning(_("[exec] 🚫 路徑安全檢查失敗: %s"), exc)
-                return _("🚫 拒絕存取: %s") % str(exc)
-        else:
-            working_dir = os.getcwd()
+        try:
+            working_dir_path = _resolve_working_dir(_config.get("base_dir"), user_id)
+            working_dir = str(working_dir_path)
+        except PathSecurityError as exc:
+            logger.warning(_("[exec] 🚫 路徑安全檢查失敗: %s"), exc)
+            return _("🚫 拒絕存取: %s") % str(exc)
 
     logger.info(_("[exec] 執行命令: %s (cwd=%s)"), command, working_dir)
     try:
@@ -505,6 +579,9 @@ async def process_impl(
     _config = _config or {}
     user_id = _config.get("user_id", "")
 
+    if user_id:
+        return _("🚫 拒絕存取: sandbox 模式唔支援 process")
+
     if action == "start":
         if not command:
             return _("❌ action=start 需要提供 command")
@@ -518,16 +595,12 @@ async def process_impl(
                 logger.warning(_("[process] 🚫 路徑安全檢查失敗: %s"), exc)
                 return _("🚫 拒絕存取: %s") % str(exc)
         else:
-            base_dir = _config.get("base_dir")
-            if base_dir:
-                try:
-                    working_dir_path = _resolve_path(".", base_dir, user_id)
-                    working_dir = str(working_dir_path)
-                except PathSecurityError as exc:
-                    logger.warning(_("[process] 🚫 路徑安全檢查失敗: %s"), exc)
-                    return _("🚫 拒絕存取: %s") % str(exc)
-            else:
-                working_dir = os.getcwd()
+            try:
+                working_dir_path = _resolve_working_dir(_config.get("base_dir"), user_id)
+                working_dir = str(working_dir_path)
+            except PathSecurityError as exc:
+                logger.warning(_("[process] 🚫 路徑安全檢查失敗: %s"), exc)
+                return _("🚫 拒絕存取: %s") % str(exc)
 
         key = f"{agent_db_id}:{command[:40]}"
         try:
