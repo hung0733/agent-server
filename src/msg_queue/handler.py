@@ -366,39 +366,31 @@ class MsgQueueHandler:
                 # Log message content for debugging
                 logger.info(_("Task %s: %s, %s"), task.id, content, tool_args)
 
-            should_persist = task.metadata.get("source") != "review_msg"
+            # Create background tasks to save messages (DB + long-term memory)
+            Tools.start_async_task(
+                MsgQueueHandler._save_messages_to_db(
+                    task_id=task.id,
+                    session_db_id=task.agent.session_db_id,
+                    sender_db_id=task.sender_agent_id,
+                    receiver_db_id=task.agent.agent_db_id,
+                    llm_response_content=llm_response_content,
+                )
+            )
 
-            if should_persist:
-                # Create background tasks to save messages (DB + long-term memory)
+            Tools.start_async_task(task.agent.review_stm(task.model_set))
+
+            if usage_payload is not None:
                 Tools.start_async_task(
-                    MsgQueueHandler._save_messages_to_db(
-                        task_id=task.id,
-                        session_db_id=task.agent.session_db_id,
-                        sender_db_id=task.sender_agent_id,
-                        receiver_db_id=task.agent.agent_db_id,
-                        llm_response_content=llm_response_content,
+                    MsgQueueHandler._save_token_usage(
+                        session_id=task.session_id,
+                        agent_db_id=task.agent.agent_db_id,
+                        usage_payload=usage_payload,
                     )
                 )
 
-                Tools.start_async_task(task.agent.review_stm(task.model_set))
-
-                if usage_payload is not None:
-                    Tools.start_async_task(
-                        MsgQueueHandler._save_token_usage(
-                            session_id=task.session_id,
-                            agent_db_id=task.agent.agent_db_id,
-                            usage_payload=usage_payload,
-                        )
-                    )
-
-                logger.debug(
-                    _("Task %s: background save tasks created (DB + memory)"), task.id
-                )
-            else:
-                logger.debug(
-                    _("Task %s: skip persistence for internal review_msg analysis"),
-                    task.id,
-                )
+            logger.debug(
+                _("Task %s: background save tasks created (DB + memory)"), task.id
+            )
 
             await task.stream_callback(StreamChunk(chunk_type="done"))
             task.update_state(QueueTaskState.COMPLETED)

@@ -11,6 +11,11 @@ from db.types import Priority, TaskStatus
 from scheduler.task_executor import AgentToAgentTaskExecutor, TaskExecutor
 
 
+async def _empty_chunk_stream():
+    if False:
+        yield None
+
+
 def _make_task() -> Task:
     return Task(
         id=uuid4(),
@@ -93,3 +98,108 @@ async def test_agent_to_agent_executor_runs_worker_review_and_callback(monkeypat
     assert result["session_id"] == "session-private"
     assert result["manager_verdict"] == "accepted"
     callback_mock.assert_awaited_once_with(task.payload["callback"], "最後答案")
+
+
+@pytest.mark.asyncio
+async def test_agent_to_agent_executor_dispatches_callback_even_when_review_rejects(monkeypatch):
+    task = _make_task()
+    sender_agent_id = uuid4()
+    task.payload["requester_agent_id"] = str(sender_agent_id)
+
+    sender = SimpleNamespace(id=sender_agent_id, user_id=task.user_id, agent_id="agent-sender", name="管家")
+    worker = SimpleNamespace(id=uuid4(), user_id=task.user_id, agent_id="agent-worker", name="細𡃁")
+    session = SimpleNamespace(session_id="session-private")
+
+    monkeypatch.setattr("scheduler.task_executor.AgentToAgentTaskExecutor._get_sender_agent", AsyncMock(return_value=sender))
+    monkeypatch.setattr("scheduler.task_executor.AgentToAgentTaskExecutor._select_sub_agent", AsyncMock(return_value=worker))
+    monkeypatch.setattr("scheduler.task_executor.AgentToAgentTaskExecutor._get_or_create_private_session", AsyncMock(return_value=session))
+    monkeypatch.setattr(
+        "scheduler.task_executor.AgentToAgentTaskExecutor._run_worker_task",
+        AsyncMock(return_value={"output": "worker result", "session_id": session.session_id}),
+    )
+    monkeypatch.setattr(
+        "scheduler.task_executor.AgentToAgentTaskExecutor._review_worker_result",
+        AsyncMock(return_value={"accepted": False, "reason": "needs polish", "response": "fallback reply"}),
+    )
+    callback_mock = AsyncMock(return_value={"status": "sent"})
+    monkeypatch.setattr("scheduler.task_executor.AgentToAgentTaskExecutor._dispatch_callback", callback_mock)
+
+    result = await AgentToAgentTaskExecutor.execute(task)
+
+    assert result["success"] is False
+    assert result["manager_verdict"] == "rejected"
+    callback_mock.assert_awaited_once_with(task.payload["callback"], "fallback reply")
+
+
+@pytest.mark.asyncio
+async def test_agent_to_agent_executor_falls_back_to_worker_output_when_review_errors(monkeypatch):
+    task = _make_task()
+    sender_agent_id = uuid4()
+    task.payload["requester_agent_id"] = str(sender_agent_id)
+
+    sender = SimpleNamespace(id=sender_agent_id, user_id=task.user_id, agent_id="agent-sender", name="管家")
+    worker = SimpleNamespace(id=uuid4(), user_id=task.user_id, agent_id="agent-worker", name="細𡃁")
+    session = SimpleNamespace(session_id="session-private")
+
+    monkeypatch.setattr("scheduler.task_executor.AgentToAgentTaskExecutor._get_sender_agent", AsyncMock(return_value=sender))
+    monkeypatch.setattr("scheduler.task_executor.AgentToAgentTaskExecutor._select_sub_agent", AsyncMock(return_value=worker))
+    monkeypatch.setattr("scheduler.task_executor.AgentToAgentTaskExecutor._get_or_create_private_session", AsyncMock(return_value=session))
+    monkeypatch.setattr(
+        "scheduler.task_executor.AgentToAgentTaskExecutor._run_worker_task",
+        AsyncMock(return_value={"output": "worker result", "session_id": session.session_id}),
+    )
+    monkeypatch.setattr(
+        "scheduler.task_executor.AgentToAgentTaskExecutor._review_worker_result",
+        AsyncMock(side_effect=RuntimeError("review failed")),
+    )
+    callback_mock = AsyncMock(return_value={"status": "sent"})
+    monkeypatch.setattr("scheduler.task_executor.AgentToAgentTaskExecutor._dispatch_callback", callback_mock)
+
+    result = await AgentToAgentTaskExecutor.execute(task)
+
+    assert result["success"] is False
+    assert result["manager_verdict"] == "rejected"
+    assert "review failed" in result["manager_reason"]
+    callback_mock.assert_awaited_once_with(task.payload["callback"], "worker result")
+
+
+@pytest.mark.asyncio
+async def test_agent_to_agent_review_creates_review_session_before_loading_agent(monkeypatch):
+    task = _make_task()
+    sender_agent_id = uuid4()
+    task.payload["requester_agent_id"] = str(sender_agent_id)
+
+    sender = SimpleNamespace(id=sender_agent_id, user_id=task.user_id, agent_id="agent-sender", name="管家")
+    create_session = AsyncMock(return_value=SimpleNamespace(session_id="review-a2a-fixed"))
+    get_agent = AsyncMock(return_value=SimpleNamespace(get_memory_prompt=AsyncMock(return_value="memory"), agent_id="agent-sender"))
+
+    monkeypatch.setattr("db.dao.collaboration_session_dao.CollaborationSessionDAO.create", create_session)
+    monkeypatch.setattr("agent.bulter.Bulter.get_agent", get_agent)
+    monkeypatch.setattr("msg_queue.handler.MsgQueueHandler.create_msg_queue", lambda **_kwargs: _empty_chunk_stream())
+
+    review_result = await AgentToAgentTaskExecutor._review_worker_result(
+        sender=sender,
+        task=task,
+        worker_result={"output": "worker output"},
+    )
+
+    create_session.assert_awaited_once()
+    created_dto = create_session.await_args.args[0]
+    assert created_dto.session_id.startswith("review-a2a-")
+    get_agent.assert_awaited_once_with("agent-sender", created_dto.session_id)
+    assert review_result["accepted"] is False
+
+
+@pytest.mark.asyncio
+async def test_agent_to_agent_executor_creates_fresh_private_session(monkeypatch):
+    task = _make_task()
+    sender = SimpleNamespace(id=uuid4(), user_id=task.user_id, name="管家")
+    worker = SimpleNamespace(id=uuid4(), name="細𡃁")
+    create_session = AsyncMock(return_value=SimpleNamespace(session_id="session-new"))
+
+    monkeypatch.setattr("db.dao.collaboration_session_dao.CollaborationSessionDAO.create", create_session)
+
+    session = await AgentToAgentTaskExecutor._get_or_create_private_session(sender=sender, worker=worker)
+
+    assert session.session_id == "session-new"
+    create_session.assert_awaited_once()

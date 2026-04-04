@@ -316,17 +316,26 @@ class AgentToAgentTaskExecutor:
             session_id=session.session_id,
             task=task,
         )
-        review_result = await AgentToAgentTaskExecutor._review_worker_result(
-            sender=sender,
-            task=task,
-            worker_result=worker_result,
-        )
+        try:
+            review_result = await AgentToAgentTaskExecutor._review_worker_result(
+                sender=sender,
+                task=task,
+                worker_result=worker_result,
+            )
+        except Exception as exc:
+            logger.error(_("[AgentToAgentTaskExecutor] 驗收失敗: %s"), exc, exc_info=True)
+            review_result = {
+                "accepted": False,
+                "reason": str(exc),
+                "response": worker_result.get("output", ""),
+            }
 
         callback_result = None
-        if review_result.get("accepted"):
+        callback_message = review_result.get("response") or worker_result.get("output", "")
+        if task.payload.get("callback") and callback_message:
             callback_result = await AgentToAgentTaskExecutor._dispatch_callback(
                 task.payload.get("callback") or {},
-                review_result.get("response") or worker_result.get("output", ""),
+                callback_message,
             )
 
         return {
@@ -373,14 +382,6 @@ class AgentToAgentTaskExecutor:
     async def _get_or_create_private_session(sender, worker):
         from db.dao.collaboration_session_dao import CollaborationSessionDAO
         from db.dto.collaboration_dto import CollaborationSessionCreate
-
-        session = await CollaborationSessionDAO.get_private_session(
-            user_id=sender.user_id,
-            sender_agent_id=sender.id,
-            main_agent_id=worker.id,
-        )
-        if session is not None:
-            return session
 
         return await CollaborationSessionDAO.create(
             CollaborationSessionCreate(
@@ -442,12 +443,23 @@ class AgentToAgentTaskExecutor:
     @staticmethod
     async def _review_worker_result(sender, task: Task, worker_result: dict[str, Any]) -> dict[str, Any]:
         from agent.bulter import Bulter
+        from db.dao.collaboration_session_dao import CollaborationSessionDAO
+        from db.dto.collaboration_dto import CollaborationSessionCreate
         from msg_queue.handler import MsgQueueHandler
         from msg_queue.models import QueueTaskPriority
 
         goal = task.payload.get("goal", "")
         instruction = task.payload.get("instruction", "")
         review_session_id = f"review-a2a-{uuid.uuid4()}"
+        await CollaborationSessionDAO.create(
+            CollaborationSessionCreate(
+                user_id=sender.user_id,
+                main_agent_id=sender.id,
+                sender_agent_id=sender.id,
+                session_id=review_session_id,
+                name=f"{sender.name} review",
+            )
+        )
         sender_agent = await Bulter.get_agent(sender.agent_id, review_session_id)
         sender_prompt = await sender_agent.get_memory_prompt()
         sender_prompt = (
@@ -472,7 +484,6 @@ class AgentToAgentTaskExecutor:
             think_mode=False,
             priority=QueueTaskPriority.NORMAL,
             metadata={
-                "source": "review_msg",
                 "task_id": str(task.id),
                 "thread_id_override": review_session_id,
                 "sender_agent_id": str(sender.id),

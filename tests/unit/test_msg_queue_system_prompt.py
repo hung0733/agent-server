@@ -203,7 +203,7 @@ class TestMsgQueueSystemPromptOverride:
         assert task.state == QueueTaskState.PACKED_MEMORY
         task.agent.get_memory_prompt.assert_not_awaited()
 
-    async def test_send_llm_msg_skips_persistence_for_review_msg(self, monkeypatch):
+    async def test_send_llm_msg_always_schedules_persistence_tasks(self, monkeypatch):
         async def _fake_stream():
             yield StreamChunk(chunk_type="content", content="{}")
 
@@ -211,7 +211,7 @@ class TestMsgQueueSystemPromptOverride:
             agent_id="agent-001",
             session_id="session-001",
             message="hello",
-            metadata={"source": "review_msg"},
+            metadata={"review_type": "memory_analysis"},
         )
         task.agent = SimpleNamespace(
             send=lambda **_kwargs: _fake_stream(),
@@ -236,7 +236,7 @@ class TestMsgQueueSystemPromptOverride:
 
         await MsgQueueHandler.send_llm_msg(task)
 
-        assert started_tasks == []
+        assert len(started_tasks) == 2
 
     async def test_send_llm_msg_includes_provider_usage_in_completion_result(self):
         async def _fake_stream():

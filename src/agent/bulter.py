@@ -652,7 +652,6 @@ class Bulter(Agent):
                             think_mode=False,
                             priority=QueueTaskPriority.NORMAL,
                             metadata={
-                                "source": "review_msg",
                                 "review_type": "memory_analysis",
                                 "thread_id_override": analysis_session_id,
                             },

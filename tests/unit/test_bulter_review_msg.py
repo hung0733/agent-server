@@ -351,6 +351,7 @@ class TestBulterReviewMsg:
         }
         assert captured["session_id"] == "session-1"
         assert captured["metadata"]["thread_id_override"].startswith("review_msg-")
+        assert "source" not in captured["metadata"]
         assert create_session_mock.await_count == 1
 
     async def test_review_msg_returns_empty_when_no_messages(self, monkeypatch):
