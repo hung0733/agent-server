@@ -96,6 +96,8 @@ describe("AgentTab", () => {
     expect(dialog).toBeInTheDocument();
     expect(within(dialog).getByRole("heading", { name: "新增員工" })).toBeInTheDocument();
     expect(screen.getByPlaceholderText("員工名稱")).toBeInTheDocument();
+    expect(screen.getByLabelText("LLM Endpoint Group")).toBeInTheDocument();
+    expect(screen.getByLabelText("子 Agent")).toBeInTheDocument();
   });
 
   it("shows validation error when submitting without name", async () => {
@@ -154,8 +156,15 @@ describe("AgentTab", () => {
 
     await user.click(await screen.findByRole("button", { name: "新增員工" }));
     await user.type(screen.getByPlaceholderText("員工名稱"), "New Agent");
-    await user.selectOptions(screen.getByRole("combobox"), "type-research");
+    await user.selectOptions(screen.getByLabelText("員工類型"), "type-research");
+    await user.selectOptions(screen.getByLabelText("LLM Endpoint Group"), "group-1");
+    await user.click(screen.getByLabelText("子 Agent"));
     await user.click(screen.getByRole("button", { name: "下一步" }));
+
+    expect(vi.mocked(dashboardApi.createAgent).mock.calls[0]?.[0]).toMatchObject({
+      endpointGroupId: "group-1",
+      isSubAgent: true,
+    });
 
     expect(await screen.findByRole("heading", { name: "建立 SOUL" })).toBeInTheDocument();
     expect(screen.getByText("What kind of collaborator should I be?")).toBeInTheDocument();
@@ -184,7 +193,7 @@ describe("AgentTab", () => {
 
     await user.click(await screen.findByRole("button", { name: "新增員工" }));
     await user.type(screen.getByPlaceholderText("員工名稱"), "New Agent");
-    await user.selectOptions(screen.getByRole("combobox"), "type-research");
+    await user.selectOptions(screen.getByLabelText("員工類型"), "type-research");
     await user.click(screen.getByRole("button", { name: "下一步" }));
 
     expect(await screen.findByRole("heading", { name: "建立 SOUL" })).toBeInTheDocument();
@@ -192,5 +201,44 @@ describe("AgentTab", () => {
 
     expect(await screen.findByText("New Agent")).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "建立 SOUL" })).not.toBeInTheDocument();
+  });
+
+  it("sends bootstrap message on Enter and keeps Shift+Enter for newline", async () => {
+    const user = userEvent.setup();
+    vi.mocked(dashboardApi.bootstrapAgentSoul)
+      .mockReset()
+      .mockResolvedValueOnce({
+        sessionId: "ghost-new-agent",
+        mode: "bootstrap",
+        reply: "What kind of collaborator should I be?",
+        saved: false,
+      })
+      .mockResolvedValueOnce({
+        sessionId: "ghost-new-agent",
+        mode: "bootstrap",
+        reply: "Should I challenge you directly?",
+        saved: false,
+      });
+
+    renderWithRouter(<AgentTab />);
+
+    await user.click(await screen.findByRole("button", { name: "新增員工" }));
+    await user.type(screen.getByPlaceholderText("員工名稱"), "New Agent");
+    await user.selectOptions(screen.getByLabelText("員工類型"), "type-research");
+    await user.click(screen.getByRole("button", { name: "下一步" }));
+
+    const input = await screen.findByLabelText("補充偏好");
+    await user.type(input, "Line 1");
+    await user.keyboard("{Shift>}{Enter}{/Shift}");
+    await user.type(input, "Line 2");
+    expect(input).toHaveValue("Line 1\nLine 2");
+
+    await user.keyboard("{Enter}");
+
+    expect(await screen.findByText("Should I challenge you directly?")).toBeInTheDocument();
+    expect(vi.mocked(dashboardApi.bootstrapAgentSoul).mock.calls[1]?.[1]).toMatchObject({
+      message: "Line 1\nLine 2",
+      save: false,
+    });
   });
 });

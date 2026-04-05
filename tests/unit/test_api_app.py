@@ -1082,7 +1082,9 @@ async def test_agents_bootstrap_save_proxies_llm_and_persists_soul(monkeypatch) 
     monkeypatch.setattr(
         "api.app.MemoryBlockDAO.get_by_agent_instance_id", AsyncMock(return_value=[])
     )
-    run_mock = AsyncMock(return_value="# SOUL\n- Be direct")
+    run_mock = AsyncMock(
+        return_value="<SOUL_DRAFT>\n# SOUL\n- Be direct\n</SOUL_DRAFT>"
+    )
     monkeypatch.setattr("api.app.run_new_agent_bootstrap_turn", run_mock)
     update_mock = AsyncMock()
     monkeypatch.setattr("api.app.MemoryBlockDAO.update", update_mock)
@@ -1119,6 +1121,115 @@ async def test_agents_bootstrap_save_proxies_llm_and_persists_soul(monkeypatch) 
     assert create_mock.await_count == 1
     assert update_mock.await_count == 0
     assert run_mock.await_args.kwargs["mode"] == "synthesis"
+
+
+@pytest.mark.asyncio
+async def test_agents_bootstrap_save_rejects_invalid_soul_draft(monkeypatch) -> None:
+    user_id = uuid4()
+    agent_instance_id = uuid4()
+
+    fake_agent = type(
+        "Agent",
+        (),
+        {
+            "id": agent_instance_id,
+            "user_id": user_id,
+            "agent_id": f"agent-{agent_instance_id}",
+            "name": "Butler",
+        },
+    )()
+
+    monkeypatch.setattr(
+        "api.app.AgentInstanceDAO.get_by_id", AsyncMock(return_value=fake_agent)
+    )
+    monkeypatch.setattr(
+        "api.app.MemoryBlockDAO.get_by_agent_instance_id", AsyncMock(return_value=[])
+    )
+    monkeypatch.setattr(
+        "api.app.run_new_agent_bootstrap_turn",
+        AsyncMock(return_value="收到，**SOUL.md** 已即時保存並鎖定。"),
+    )
+    create_mock = AsyncMock(return_value=type("Block", (), {"id": uuid4()})())
+    monkeypatch.setattr("api.app.MemoryBlockDAO.create", create_mock)
+
+    app = create_app(
+        _FakeQueue(),
+        _FakeDedup(),
+        dashboard_data_provider=_FakeDashboardProvider(),
+        auth_service=_FakeAuthService(user_id),
+    )
+    server = TestServer(app)
+    client = TestClient(server)
+
+    await client.start_server()
+    try:
+        response = await client.post(
+            f"/api/dashboard/agents/{agent_instance_id}/bootstrap",
+            headers={"X-API-Key": "good-key"},
+            json={
+                "message": "save it",
+                "history": [{"role": "assistant", "content": "Tell me more."}],
+                "save": True,
+            },
+        )
+        payload = await response.json()
+    finally:
+        await client.close()
+
+    assert response.status == 502
+    assert payload["error"] == "invalid_soul_draft"
+    assert create_mock.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_agents_bootstrap_returns_bad_gateway_on_llm_failure(monkeypatch) -> None:
+    user_id = uuid4()
+    agent_instance_id = uuid4()
+
+    fake_agent = type(
+        "Agent",
+        (),
+        {
+            "id": agent_instance_id,
+            "user_id": user_id,
+            "agent_id": f"agent-{agent_instance_id}",
+            "name": "Butler",
+        },
+    )()
+
+    monkeypatch.setattr(
+        "api.app.AgentInstanceDAO.get_by_id", AsyncMock(return_value=fake_agent)
+    )
+    monkeypatch.setattr(
+        "api.app.MemoryBlockDAO.get_by_agent_instance_id", AsyncMock(return_value=[])
+    )
+    monkeypatch.setattr(
+        "api.app.run_new_agent_bootstrap_turn",
+        AsyncMock(side_effect=RuntimeError("provider timeout")),
+    )
+
+    app = create_app(
+        _FakeQueue(),
+        _FakeDedup(),
+        dashboard_data_provider=_FakeDashboardProvider(),
+        auth_service=_FakeAuthService(user_id),
+    )
+    server = TestServer(app)
+    client = TestClient(server)
+
+    await client.start_server()
+    try:
+        response = await client.post(
+            f"/api/dashboard/agents/{agent_instance_id}/bootstrap",
+            headers={"X-API-Key": "good-key"},
+            json={"message": "hello", "history": [], "save": False},
+        )
+        payload = await response.json()
+    finally:
+        await client.close()
+
+    assert response.status == 502
+    assert payload["error"] == "bootstrap_llm_failed"
 
 
 @pytest.mark.asyncio

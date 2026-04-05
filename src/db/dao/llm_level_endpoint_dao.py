@@ -537,3 +537,61 @@ class LLMLevelEndpointDAO:
                 endpoints = await _query(s)
             await engine.dispose()
             return endpoints
+
+    @staticmethod
+    async def get_endpoints_with_level_by_group_id(
+        group_id: UUID,
+        session: Optional[AsyncSession] = None,
+    ) -> List[LLMEndpointWithLevel]:
+        """Return active endpoints for a group enriched with level metadata."""
+
+        async def _query(s: AsyncSession) -> List[LLMEndpointWithLevel]:
+            rows = await s.execute(
+                select(
+                    LLMEndpointEntity,
+                    LLMLevelEndpointEntity.difficulty_level,
+                    LLMLevelEndpointEntity.involves_secrets,
+                    LLMLevelEndpointEntity.priority,
+                )
+                .join(
+                    LLMLevelEndpointEntity,
+                    LLMLevelEndpointEntity.endpoint_id == LLMEndpointEntity.id,
+                )
+                .where(
+                    LLMLevelEndpointEntity.group_id == group_id,
+                    LLMLevelEndpointEntity.is_active.is_(True),
+                    LLMEndpointEntity.is_active.is_(True),
+                )
+                .order_by(
+                    LLMLevelEndpointEntity.difficulty_level,
+                    LLMLevelEndpointEntity.priority.asc(),
+                )
+            )
+
+            result: List[LLMEndpointWithLevel] = []
+            for ep_entity, difficulty_level, involves_secrets, priority in rows:
+                data = {
+                    **{c.key: getattr(ep_entity, c.key) for c in ep_entity.__table__.columns},
+                    "difficulty_level": difficulty_level,
+                    "involves_secrets": involves_secrets,
+                    "priority": priority,
+                }
+                if data.get("api_key_encrypted") is None:
+                    data["api_key_encrypted"] = ""
+                result.append(LLMEndpointWithLevel.model_validate(data))
+
+            return result
+
+        if session is not None:
+            return await _query(session)
+
+        from db import create_engine, AsyncSession, async_sessionmaker
+
+        engine = create_engine()
+        async_session = async_sessionmaker(
+            engine, class_=AsyncSession, expire_on_commit=False
+        )
+        async with async_session() as s:
+            endpoints = await _query(s)
+        await engine.dispose()
+        return endpoints

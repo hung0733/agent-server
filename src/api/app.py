@@ -18,6 +18,7 @@ from api.auth import hash_api_key
 from api.new_agent_bootstrap import (
     NEW_AGENT_MODE_REMINDERS,
     build_mode_prompt,
+    extract_soul_draft,
     run_new_agent_bootstrap_turn,
 )
 from i18n import _
@@ -408,16 +409,41 @@ async def _agents_bootstrap(request: web.Request) -> web.Response:
             text=json.dumps({"error": str(exc)}),
             content_type="application/json",
         ) from exc
+    except Exception as exc:
+        logger.error(
+            "new agent bootstrap proxy failed: agent=%s mode=%s error=%s",
+            existing.id,
+            mode,
+            exc,
+            exc_info=True,
+        )
+        raise web.HTTPBadGateway(
+            text=json.dumps({"error": "bootstrap_llm_failed"}),
+            content_type="application/json",
+        ) from exc
 
     if save_requested:
-        await _upsert_memory_blocks(agent_instance_id, {"SOUL": reply})
+        soul_draft = extract_soul_draft(reply)
+        if soul_draft is None:
+            logger.error(
+                "new agent bootstrap returned invalid soul draft: agent=%s mode=%s reply=%r",
+                existing.id,
+                mode,
+                reply[:500],
+            )
+            raise web.HTTPBadGateway(
+                text=json.dumps({"error": "invalid_soul_draft"}),
+                content_type="application/json",
+            )
+
+        await _upsert_memory_blocks(agent_instance_id, {"SOUL": soul_draft})
         return web.json_response(
             {
                 "sessionId": session_id,
                 "mode": "build",
                 "reply": _("SOUL saved."),
                 "saved": True,
-                "soul": reply,
+                "soul": soul_draft,
             }
         )
 

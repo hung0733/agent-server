@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Iterable, Sequence
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -12,6 +13,9 @@ from db.dao.llm_endpoint_group_dao import LLMEndpointGroupDAO
 from db.dao.llm_level_endpoint_dao import LLMLevelEndpointDAO
 from db.dto.llm_endpoint_dto import LLMEndpointWithLevel
 from models.llm import build_streaming_chat_openai
+
+
+logger = logging.getLogger(__name__)
 
 
 NEW_AGENT_BOOTSTRAP_REMINDER = """<system-reminder>
@@ -109,6 +113,11 @@ Turn the collected signal into a compact, usable soul artifact that can be saved
 Do not write a generic system prompt.
 Do not write a personality essay.
 Write a concise, durable `SOUL.md` first draft in English.
+Return ONLY the draft wrapped in the following tags:
+<SOUL_DRAFT>
+...
+</SOUL_DRAFT>
+Do not include any explanation, confirmation, preface, or follow-up outside the tags.
 
 This mode overrides generic assistant behavior for the save workflow.
 </system-reminder>"""
@@ -151,6 +160,23 @@ def build_mode_prompt(memory_blocks: Iterable[object], mode: str) -> str:
     return reminder
 
 
+def extract_soul_draft(reply: str) -> str | None:
+    start_tag = "<SOUL_DRAFT>"
+    end_tag = "</SOUL_DRAFT>"
+    start_index = reply.find(start_tag)
+    end_index = reply.find(end_tag)
+    if start_index == -1 or end_index == -1 or end_index <= start_index:
+        return None
+
+    content = reply[start_index + len(start_tag) : end_index].strip()
+    if content.startswith("```") and content.endswith("```"):
+        lines = content.splitlines()
+        if len(lines) >= 3:
+            content = "\n".join(lines[1:-1]).strip()
+
+    return content or None
+
+
 async def _resolve_active_endpoints(agent: Any, user_id: Any) -> list[LLMEndpointWithLevel]:
     endpoints = await LLMLevelEndpointDAO.get_by_agent_instance_id(agent.id)
     if endpoints:
@@ -160,18 +186,22 @@ async def _resolve_active_endpoints(agent: Any, user_id: Any) -> list[LLMEndpoin
     if default_group is None:
         return []
 
-    group_endpoints = await LLMLevelEndpointDAO.get_by_group_id(default_group.id)
+    group_endpoints = await LLMLevelEndpointDAO.get_endpoints_with_level_by_group_id(
+        default_group.id
+    )
     return [endpoint for endpoint in group_endpoints if endpoint.is_active]
 
 
-def _pick_endpoint(endpoints: Sequence[LLMEndpointWithLevel]) -> LLMEndpointWithLevel | None:
-    if not endpoints:
-        return None
-    sorted_endpoints = sorted(
+def _sort_endpoints(endpoints: Sequence[LLMEndpointWithLevel]) -> list[LLMEndpointWithLevel]:
+    return sorted(
         endpoints,
-        key=lambda endpoint: (endpoint.difficulty_level, -endpoint.priority, endpoint.name),
+        key=lambda endpoint: (
+            endpoint.difficulty_level,
+            -endpoint.priority,
+            getattr(endpoint, "model_name", ""),
+            str(getattr(endpoint, "id", "")),
+        ),
     )
-    return sorted_endpoints[0]
 
 
 async def run_new_agent_bootstrap_turn(
@@ -183,20 +213,9 @@ async def run_new_agent_bootstrap_turn(
     history: Sequence[dict[str, str]],
     message: str,
 ) -> str:
-    endpoint = _pick_endpoint(await _resolve_active_endpoints(agent, user_id))
-    if endpoint is None:
+    endpoints = _sort_endpoints(await _resolve_active_endpoints(agent, user_id))
+    if not endpoints:
         raise ValueError("no_active_llm_endpoint")
-
-    api_key = (
-        CryptoManager().decrypt(endpoint.api_key_encrypted)
-        if endpoint.api_key_encrypted
-        else "EMPTY"
-    )
-    model = build_streaming_chat_openai(
-        base_url=endpoint.base_url,
-        api_key=SecretStr(api_key),
-        model_name=endpoint.model_name,
-    )
 
     transcript: list[Any] = [SystemMessage(content=build_mode_prompt(memory_blocks, mode))]
     for item in history:
@@ -211,10 +230,35 @@ async def run_new_agent_bootstrap_turn(
     if message.strip():
         transcript.append(HumanMessage(content=message.strip()))
 
-    response = await model.ainvoke(transcript)
-    content = response.content
-    if isinstance(content, str):
-        return content.strip()
-    if isinstance(content, list):
-        return "".join(str(part) for part in content).strip()
-    return str(content).strip()
+    last_error: Exception | None = None
+    for endpoint in endpoints:
+        try:
+            api_key = (
+                CryptoManager().decrypt(endpoint.api_key_encrypted)
+                if endpoint.api_key_encrypted
+                else "EMPTY"
+            )
+            model = build_streaming_chat_openai(
+                base_url=endpoint.base_url,
+                api_key=SecretStr(api_key),
+                model_name=endpoint.model_name,
+            )
+            response = await model.ainvoke(transcript)
+            content = response.content
+            if isinstance(content, str):
+                return content.strip()
+            if isinstance(content, list):
+                return "".join(str(part) for part in content).strip()
+            return str(content).strip()
+        except Exception as exc:
+            last_error = exc
+            logger.error(
+                "new agent bootstrap endpoint failed: agent=%s endpoint=%s model=%s error=%s",
+                getattr(agent, "id", "unknown"),
+                getattr(endpoint, "id", "unknown"),
+                endpoint.model_name,
+                exc,
+                exc_info=True,
+            )
+
+    raise RuntimeError("all_bootstrap_endpoints_failed") from last_error

@@ -175,6 +175,8 @@ export default function AgentTab() {
         const result = await createAgent({
           name: form.name.trim(),
           agentTypeId: form.agentTypeId,
+          endpointGroupId: form.endpointGroupId || undefined,
+          isSubAgent: form.isSubAgent,
         });
         setItems((prev) => [...prev, result.agent]);
         setBootstrapAgent({ id: result.agent.id, name: result.agent.name });
@@ -283,6 +285,34 @@ export default function AgentTab() {
                 ))}
               </select>
             </label>
+
+            {!editing ? (
+              <>
+                <label>
+                  {t("agents.agent.endpointGroupLabel")}
+                  <select
+                    value={form.endpointGroupId}
+                    onChange={(e) => setForm((f) => ({ ...f, endpointGroupId: e.target.value }))}
+                  >
+                    <option value="">{t("agents.agent.endpointGroupPlaceholder")}</option>
+                    {endpointGroups.map((g) => (
+                      <option key={g.id} value={g.id}>
+                        {g.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={form.isSubAgent}
+                    onChange={(e) => setForm((f) => ({ ...f, isSubAgent: e.target.checked }))}
+                  />
+                  {t("agents.agent.isSubAgentLabel")}
+                </label>
+              </>
+            ) : null}
 
             {editing ? (
               <>

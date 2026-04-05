@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import type { KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 
 import { bootstrapAgentSoul } from "../../api/dashboard";
@@ -112,6 +113,17 @@ export default function SoulBootstrapDialog({
     }
   }
 
+  function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key !== "Enter" || event.shiftKey) {
+      return;
+    }
+
+    event.preventDefault();
+    if (!loading && draft.trim()) {
+      void handleSend(false);
+    }
+  }
+
   return (
     <div className="agent-tab-modal" onClick={onClose}>
       <div
@@ -167,6 +179,7 @@ export default function SoulBootstrapDialog({
             disabled={loading}
             placeholder={t("agents.agent.bootstrapInputPlaceholder")}
             onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={handleComposerKeyDown}
           />
         </label>
 
