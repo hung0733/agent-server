@@ -163,6 +163,57 @@ async def test_execute_schedule_uses_payload_agent_instance_id_when_template_age
 
 
 @pytest.mark.asyncio
+async def test_execute_schedule_missing_agent_reference_deactivates_schedule_without_creating_task(monkeypatch):
+    scheduler = TaskScheduler()
+    current_time = datetime(2026, 4, 4, 4, 9, 20, tzinfo=timezone.utc)
+    template_task = Task(
+        id=uuid4(),
+        user_id=uuid4(),
+        agent_id=None,
+        parent_task_id=None,
+        task_type="scheduled_method",
+        status=TaskStatus.pending,
+        priority=Priority.normal,
+        payload={
+            "task_execution_type": "method",
+            "method_path": "agent.bulter@Bulter.review_msg",
+        },
+        result=None,
+        error_message=None,
+        retry_count=0,
+        max_retries=3,
+        session_id=None,
+    )
+    schedule = SimpleNamespace(
+        id=uuid4(),
+        task_template_id=template_task.id,
+        next_run_at=current_time,
+        schedule_expression="0 17 * * *",
+        schedule_type=ScheduleType.cron,
+        retry_count=0,
+    )
+
+    monkeypatch.setattr("scheduler.task_scheduler.TaskDAO.get_by_id", AsyncMock(return_value=template_task))
+    create_task = AsyncMock()
+    monkeypatch.setattr("scheduler.task_scheduler.TaskDAO.create", create_task)
+    execute_task = AsyncMock()
+    monkeypatch.setattr("scheduler.task_scheduler.TaskExecutor.execute_task", execute_task)
+    update_schedule = AsyncMock()
+    monkeypatch.setattr("scheduler.task_scheduler.TaskScheduleDAO.update", update_schedule)
+
+    await scheduler._execute_schedule(schedule, current_time)
+
+    create_task.assert_not_awaited()
+    execute_task.assert_not_awaited()
+    update_dto = update_schedule.await_args.args[0]
+    assert update_dto.id == schedule.id
+    assert update_dto.is_active is False
+    assert update_dto.last_run_at == current_time
+    assert update_dto.retry_count is None
+    assert update_dto.next_run_at is None
+
+
+@pytest.mark.asyncio
 async def test_tick_skips_pending_queue_entries_scheduled_in_future(monkeypatch):
     scheduler = TaskScheduler()
     task = _make_task()

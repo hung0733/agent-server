@@ -524,6 +524,23 @@ class TaskScheduler:
                 if payload_agent_id:
                     execution_agent_id = UUID(str(payload_agent_id))
 
+            if execution_agent_id is None:
+                logger.error(
+                    _(
+                        "[TaskScheduler._execute_schedule] 模板任務缺少 agent_id: schedule_id=%s, task_template_id=%s"
+                    ),
+                    schedule.id,
+                    template_task.id,
+                )
+                await TaskScheduleDAO.update(
+                    TaskScheduleUpdate(
+                        id=schedule.id,
+                        is_active=False,
+                        last_run_at=current_time,
+                    )
+                )
+                return
+
             execution_task = await TaskDAO.create(
                 TaskCreate(
                     user_id=template_task.user_id,

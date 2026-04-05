@@ -646,7 +646,7 @@ class Bulter(Agent):
 
                         async for analysis_chunk in MsgQueueHandler.create_msg_queue(
                             agent_id=agent_id,
-                            session_id=session_id,
+                            session_id=analysis_session_id,
                             message=user_message,
                             system_prompt=analysis_prompt,
                             think_mode=False,

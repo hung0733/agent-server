@@ -350,10 +350,69 @@ class TestBulterReviewMsg:
             "SOUL",
             "USER_PROFILE",
         }
-        assert captured["session_id"] == "session-1"
+        assert captured["session_id"].startswith("review_msg-")
         assert captured["metadata"]["thread_id_override"].startswith("review_msg-")
         assert "source" not in captured["metadata"]
         assert create_session_mock.await_count == 1
+
+    async def test_review_msg_uses_isolated_analysis_session(self, monkeypatch):
+        grouped = {
+            "2026-03-28": {
+                "session-1": [
+                    _message(MessageType.request, "User likes concise answers"),
+                ]
+            }
+        }
+
+        agent_instance = SimpleNamespace(id=uuid4(), user_id=uuid4())
+        monkeypatch.setattr(
+            "db.dao.agent_message_dao.AgentMessageDAO.get_unanalyzed_messages_grouped",
+            AsyncMock(return_value=grouped),
+        )
+        monkeypatch.setattr(
+            "db.dao.agent_message_dao.AgentMessageDAO.batch_update_is_analyzed",
+            AsyncMock(return_value=1),
+        )
+        monkeypatch.setattr(
+            "db.dao.agent_instance_dao.AgentInstanceDAO.get_by_agent_id",
+            AsyncMock(return_value=agent_instance),
+        )
+        monkeypatch.setattr(
+            "db.dao.memory_block_dao.MemoryBlockDAO.get_by_agent_instance_id",
+            AsyncMock(return_value=[]),
+        )
+        monkeypatch.setattr(
+            "db.dao.memory_block_dao.MemoryBlockDAO.update",
+            AsyncMock(),
+        )
+        monkeypatch.setattr(
+            "db.dao.memory_block_dao.MemoryBlockDAO.create",
+            AsyncMock(),
+        )
+        create_session_mock = AsyncMock()
+        monkeypatch.setattr(
+            "db.dao.collaboration_session_dao.CollaborationSessionDAO.create",
+            create_session_mock,
+        )
+
+        captured = {}
+
+        def _fake_create_msg_queue(**kwargs):
+            captured.update(kwargs)
+            return _stream_with_content(
+                '{"SOUL":{"updated_data":""},"IDENTITY":{"updated_data":""},"USER_PROFILE":{"updated_data":""}}'
+            )
+
+        monkeypatch.setattr(
+            "msg_queue.handler.MsgQueueHandler.create_msg_queue",
+            _fake_create_msg_queue,
+        )
+
+        await Bulter.review_msg("agent-001")
+
+        assert create_session_mock.await_count == 1
+        assert captured["session_id"].startswith("review_msg-")
+        assert captured["session_id"] == captured["metadata"]["thread_id_override"]
 
     async def test_review_msg_returns_empty_when_no_messages(self, monkeypatch):
         monkeypatch.setattr(
