@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
 from sandbox_agent.app import create_app
@@ -32,3 +34,58 @@ def test_sandbox_agent_rejects_invalid_handle_and_timeout():
 
     assert missing.status_code == 404
     assert timed_out.status_code == 408
+
+
+def test_sandbox_agent_file_endpoints(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    client = TestClient(create_app(api_token="secret", workspace_root=str(workspace)))
+
+    write_result = client.post(
+        "/v1/files/write",
+        headers={"X-Sandbox-Token": "secret"},
+        json={"path": "notes/agent.txt", "content": "hello sandbox", "encoding": "utf-8"},
+    )
+    read_result = client.post(
+        "/v1/files/read",
+        headers={"X-Sandbox-Token": "secret"},
+        json={"path": "notes/agent.txt", "encoding": "utf-8"},
+    )
+    grep_result = client.post(
+        "/v1/files/grep",
+        headers={"X-Sandbox-Token": "secret"},
+        json={"pattern": "sandbox", "path": "notes", "recursive": True, "include": "*.txt", "max_results": 10},
+    )
+    list_result = client.post(
+        "/v1/files/list",
+        headers={"X-Sandbox-Token": "secret"},
+        json={"path": "notes", "show_hidden": False},
+    )
+
+    assert write_result.status_code == 200
+    assert read_result.json()["content"] == "hello sandbox"
+    assert grep_result.json()["matches"] == ["/workspace/notes/agent.txt:1:hello sandbox"]
+    assert list_result.json()["entries"][0]["name"] == "agent.txt"
+
+
+def test_sandbox_agent_accepts_virtual_workspace_paths_and_rejects_patch_escape(tmp_path):
+    workspace = tmp_path / "workspace"
+    virtual_file = workspace / "mnt/data/workspace/project/app.txt"
+    virtual_file.parent.mkdir(parents=True)
+    virtual_file.write_text("virtual")
+    client = TestClient(create_app(api_token="secret", workspace_root=str(workspace)))
+
+    read_result = client.post(
+        "/v1/files/read",
+        headers={"X-Sandbox-Token": "secret"},
+        json={"path": "/mnt/data/workspace/project/app.txt", "encoding": "utf-8"},
+    )
+    patch_result = client.post(
+        "/v1/files/apply-patch",
+        headers={"X-Sandbox-Token": "secret"},
+        json={"patch": "--- ../../etc/passwd\n+++ ../../etc/passwd\n@@\n-root\n+blocked\n", "strip": 0},
+    )
+
+    assert read_result.status_code == 200
+    assert read_result.json()["content"] == "virtual"
+    assert patch_result.status_code == 400

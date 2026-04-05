@@ -25,6 +25,7 @@ Recommended runtime checks:
 3. Confirm writable workspace root exists under `AGENT_HOME_DIR`
 4. Confirm `SANDBOX_API_TOKEN` is set explicitly and not reused from examples
 5. Confirm app can reach sandbox agent health endpoint after container start
+6. Confirm file endpoints work: `POST /v1/files/write`, `POST /v1/files/read`, `POST /v1/files/list`
 
 ## Remote Provisioner Sandbox
 
@@ -49,6 +50,7 @@ Recommended runtime checks:
 2. Confirm provisioner can create, fetch, and delete sandbox records
 3. Confirm returned sandbox endpoint exposes `/health`
 4. Confirm remote storage mapping for workspace, uploads, outputs, and skills
+5. Confirm remote sandbox file endpoints are reachable through returned endpoint metadata
 
 ## Security Checklist
 

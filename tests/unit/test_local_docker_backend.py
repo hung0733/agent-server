@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from sandbox.backends.local_docker import LocalDockerBackend
-from sandbox.models import SandboxMount, SandboxRequest
+from sandbox.models import SandboxHandle, SandboxMount, SandboxRequest
 
 
 @pytest.mark.asyncio
@@ -197,3 +197,74 @@ def test_workspace_host_path_rejects_path_traversal(tmp_path):
 
     with pytest.raises(ValueError, match="owner_id"):
         backend.workspace_host_path("../escape")
+
+
+@pytest.fixture
+def local_handle(tmp_path):
+    root = tmp_path / "user-1"
+    root.mkdir(parents=True, exist_ok=True)
+    return SandboxHandle(
+        sandbox_id="sandbox-1",
+        owner_id="user-1",
+        scope="session",
+        scope_key="thread-1",
+        profile="default",
+        endpoint="http://127.0.0.1:38080",
+        backend_type="local_docker",
+        workspace_host_path=str(root),
+        workspace_container_path="/workspace",
+        metadata={"container_id": "cid-1", "container_name": "agent-sandbox-sandbox-1", "sandbox_token": "secret"},
+    )
+
+
+@pytest.mark.asyncio
+async def test_local_backend_file_ops_use_workspace_root(tmp_path, local_handle):
+    backend = LocalDockerBackend(base_url="http://127.0.0.1", host_workspace_root=tmp_path)
+
+    write_result = await backend.write_file(local_handle, "notes/file.txt", "hello", "utf-8")
+    read_result = await backend.read_file(local_handle, "notes/file.txt", "utf-8")
+    list_result = await backend.list_dir(local_handle, "notes", False)
+    find_result = await backend.find_files(local_handle, "*.txt", "notes", 10)
+
+    assert write_result["path"] == "/notes/file.txt"
+    assert read_result == "hello"
+    assert list_result["entries"][0]["name"] == "file.txt"
+    assert find_result == ["/notes/file.txt"]
+
+
+@pytest.mark.asyncio
+async def test_local_backend_grep_and_edit_use_workspace_root(tmp_path, local_handle):
+    backend = LocalDockerBackend(base_url="http://127.0.0.1", host_workspace_root=tmp_path)
+    target = Path(local_handle.workspace_host_path) / "notes.txt"
+    target.write_text("hello world\n")
+
+    edit_result = await backend.edit_file(local_handle, "notes.txt", "world", "sandbox", False, "utf-8")
+    grep_result = await backend.grep_files(local_handle, "sandbox", ".", True, False, "*.txt", 10)
+
+    assert edit_result["replacements"] == 1
+    assert grep_result == ["/notes.txt:1:hello sandbox"]
+
+
+@pytest.mark.asyncio
+async def test_local_backend_rejects_path_escape(tmp_path, local_handle):
+    backend = LocalDockerBackend(base_url="http://127.0.0.1", host_workspace_root=tmp_path)
+
+    with pytest.raises(RuntimeError, match="escapes sandbox workspace"):
+        await backend.read_file(local_handle, "../../etc/passwd", "utf-8")
+
+
+@pytest.mark.asyncio
+async def test_local_backend_apply_patch_rejects_escaped_targets(tmp_path, local_handle):
+    backend = LocalDockerBackend(base_url="http://127.0.0.1", host_workspace_root=tmp_path)
+    patch = "--- ../../etc/passwd\n+++ ../../etc/passwd\n@@\n-root\n+blocked\n"
+
+    with pytest.raises(RuntimeError, match="patch target"):
+        await backend.apply_patch(local_handle, patch, 0)
+
+
+@pytest.mark.asyncio
+async def test_local_backend_rejects_glob_escape_patterns(tmp_path, local_handle):
+    backend = LocalDockerBackend(base_url="http://127.0.0.1", host_workspace_root=tmp_path)
+
+    with pytest.raises(RuntimeError, match="glob"):
+        await backend.find_files(local_handle, "../*.txt", ".", 10)

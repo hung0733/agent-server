@@ -65,3 +65,69 @@ class SandboxProvider:
             return await self.backend.kill_process(handle, process_handle)
         finally:
             await self.release(handle)
+
+    async def read_file(self, request: SandboxRequest, path: str, encoding: str) -> str:
+        handle = await self.acquire(request)
+        try:
+            return await self.backend.read_file(handle, path, encoding)
+        finally:
+            await self.release(handle)
+
+    async def write_file(self, request: SandboxRequest, path: str, content: str, encoding: str) -> dict:
+        handle = await self.acquire(request)
+        try:
+            return await self.backend.write_file(handle, path, content, encoding)
+        finally:
+            await self.release(handle)
+
+    async def edit_file(
+        self,
+        request: SandboxRequest,
+        path: str,
+        old_string: str,
+        new_string: str,
+        replace_all: bool,
+        encoding: str,
+    ) -> dict:
+        handle = await self.acquire(request)
+        try:
+            return await self.backend.edit_file(handle, path, old_string, new_string, replace_all, encoding)
+        finally:
+            await self.release(handle)
+
+    async def apply_patch(self, request: SandboxRequest, patch: str, strip: int) -> dict:
+        handle = await self.acquire(request)
+        try:
+            return await self.backend.apply_patch(handle, patch, strip)
+        finally:
+            await self.release(handle)
+
+    async def grep_files(
+        self,
+        request: SandboxRequest,
+        pattern: str,
+        path: str,
+        recursive: bool,
+        ignore_case: bool,
+        include: str,
+        max_results: int,
+    ) -> list[str]:
+        handle = await self.acquire(request)
+        try:
+            return await self.backend.grep_files(handle, pattern, path, recursive, ignore_case, include, max_results)
+        finally:
+            await self.release(handle)
+
+    async def find_files(self, request: SandboxRequest, pattern: str, path: str, max_results: int) -> list[str]:
+        handle = await self.acquire(request)
+        try:
+            return await self.backend.find_files(handle, pattern, path, max_results)
+        finally:
+            await self.release(handle)
+
+    async def list_dir(self, request: SandboxRequest, path: str, show_hidden: bool) -> dict:
+        handle = await self.acquire(request)
+        try:
+            return await self.backend.list_dir(handle, path, show_hidden)
+        finally:
+            await self.release(handle)

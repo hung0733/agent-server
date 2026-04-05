@@ -21,9 +21,10 @@ Local backend 會將以上路徑映射到 `AGENT_HOME_DIR/{user_id}` 下面的 p
 
 ## Execution Boundary
 
-- `read/write/edit/grep/find/ls` 仍然沿用 host sandbox path policy
-- `exec/process` 已改為走 sandbox provider
-- host shell 不再係 sandbox mode 主路徑
+- 所有 system tools 都先經 `SandboxProvider`
+- `LocalDockerBackend` 對 file ops 仍可用 host-mounted volume fast path，但 tool layer 不再直接碰 host filesystem
+- `RemoteProvisionerBackend` 的 file ops 與 `exec/process` 一樣走 sandbox agent HTTP API
+- host shell / host file ops 都唔再係 sandbox mode 的 tool-layer 主路徑
 
 ## Backends
 

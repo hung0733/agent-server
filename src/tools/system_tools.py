@@ -116,6 +116,20 @@ def _sandbox_request_from_config(_config: dict[str, Any], user_id: str) -> Sandb
     )
 
 
+def _sandbox_provider(_config: dict[str, Any], user_id: str):
+    request = _sandbox_request_from_config(_config, user_id)
+    provider = get_sandbox_provider(_config)
+    return request, provider
+
+
+def _sandbox_cwd(cwd: str) -> str:
+    if not cwd or cwd == ".":
+        return "."
+    if cwd.startswith("/workspace"):
+        return cwd
+    return f"/workspace/{cwd.lstrip('/')}"
+
+
 def _display_path(path: Path, user_id: str = "") -> str:
     """Render a sandbox path without leaking the real AGENT_HOME_DIR root."""
     if not user_id:
@@ -188,6 +202,17 @@ async def read_impl(
     """
     _config = _config or {}
     user_id = _config.get("user_id", "")
+    if user_id:
+        try:
+            _resolve_path(path, _config.get("base_dir"), user_id)
+            request, provider = _sandbox_provider(_config, user_id)
+            return await provider.read_file(request, path, encoding)
+        except (PathSecurityError, RuntimeError) as exc:
+            logger.warning(_("[read] 🚫 sandbox 讀取失敗: %s"), exc)
+            return _("🚫 拒絕存取: %s") % str(exc)
+        except Exception as exc:
+            logger.error(_("[read] ❌ sandbox 讀取失敗: %s"), exc)
+            return _("❌ 讀取失敗: %s") % str(exc)
     try:
         resolved = _resolve_path(path, _config.get("base_dir"), user_id)
     except (PathSecurityError, RuntimeError) as exc:
@@ -227,6 +252,18 @@ async def write_impl(
     """
     _config = _config or {}
     user_id = _config.get("user_id", "")
+    if user_id:
+        try:
+            _resolve_path(path, _config.get("base_dir"), user_id)
+            request, provider = _sandbox_provider(_config, user_id)
+            result = await provider.write_file(request, path, content, encoding)
+            return _("✅ 已寫入: %s") % result.get("path", path)
+        except (PathSecurityError, RuntimeError) as exc:
+            logger.warning(_("[write] 🚫 sandbox 寫入失敗: %s"), exc)
+            return _("🚫 拒絕存取: %s") % str(exc)
+        except Exception as exc:
+            logger.error(_("[write] ❌ sandbox 寫入失敗: %s"), exc)
+            return _("❌ 寫入失敗: %s") % str(exc)
     try:
         resolved = _resolve_path(path, _config.get("base_dir"), user_id)
     except (PathSecurityError, RuntimeError) as exc:
@@ -272,6 +309,20 @@ async def edit_impl(
     """
     _config = _config or {}
     user_id = _config.get("user_id", "")
+    if user_id:
+        try:
+            _resolve_path(path, _config.get("base_dir"), user_id)
+            request, provider = _sandbox_provider(_config, user_id)
+            result = await provider.edit_file(request, path, old_string, new_string, replace_all, encoding)
+            if result.get("replacements", 0) == 0:
+                return _("❌ 找不到要替換的字串: %r") % old_string
+            return _("✅ 已替換 %d 處: %s") % (result.get("replacements", 0), result.get("path", path))
+        except (PathSecurityError, RuntimeError) as exc:
+            logger.warning(_("[edit] 🚫 sandbox 編輯失敗: %s"), exc)
+            return _("🚫 拒絕存取: %s") % str(exc)
+        except Exception as exc:
+            logger.error(_("[edit] ❌ sandbox 編輯失敗: %s"), exc)
+            return _("❌ 編輯失敗: %s") % str(exc)
     try:
         resolved = _resolve_path(path, _config.get("base_dir"), user_id)
     except (PathSecurityError, RuntimeError) as exc:
@@ -321,6 +372,22 @@ async def apply_patch_impl(
     """
     _config = _config or {}
     user_id = _config.get("user_id", "")
+
+    if user_id:
+        try:
+            cwd = str(_resolve_working_dir(_config.get("base_dir"), user_id))
+            for raw_path in _extract_patch_target_paths(patch):
+                candidate = _normalize_patch_path(raw_path, strip)
+                _resolve_path(candidate, cwd, user_id)
+            request, provider = _sandbox_provider(_config, user_id)
+            result = await provider.apply_patch(request, patch, strip)
+            return _("✅ patch 成功:\n%s") % result.get("stdout", "")
+        except (PathSecurityError, RuntimeError) as exc:
+            logger.warning(_("[apply_patch] 🚫 sandbox patch 失敗: %s"), exc)
+            return _("🚫 拒絕存取: %s") % str(exc)
+        except Exception as exc:
+            logger.error(_("[apply_patch] ❌ sandbox patch 失敗: %s"), exc)
+            return _("❌ apply_patch 失敗: %s") % str(exc)
 
     try:
         cwd = str(_resolve_working_dir(_config.get("base_dir"), user_id))
@@ -383,6 +450,20 @@ async def grep_impl(
     """
     _config = _config or {}
     user_id = _config.get("user_id", "")
+    if user_id:
+        try:
+            _resolve_path(path, _config.get("base_dir"), user_id)
+            request, provider = _sandbox_provider(_config, user_id)
+            results = await provider.grep_files(request, pattern, path, recursive, ignore_case, include, max_results)
+            if not results:
+                return _("🔍 無符合結果: %s") % pattern
+            return "\n".join(results)
+        except (PathSecurityError, RuntimeError) as exc:
+            logger.warning(_("[grep] 🚫 sandbox 搜索失敗: %s"), exc)
+            return _("🚫 拒絕存取: %s") % str(exc)
+        except Exception as exc:
+            logger.error(_("[grep] ❌ sandbox 搜索失敗: %s"), exc)
+            return _("❌ grep 失敗: %s") % str(exc)
     try:
         resolved = _resolve_path(path, _config.get("base_dir"), user_id)
     except (PathSecurityError, RuntimeError) as exc:
@@ -452,6 +533,20 @@ async def find_impl(
     """
     _config = _config or {}
     user_id = _config.get("user_id", "")
+    if user_id:
+        try:
+            _resolve_path(path, _config.get("base_dir"), user_id)
+            request, provider = _sandbox_provider(_config, user_id)
+            matches = await provider.find_files(request, pattern, path, max_results)
+            if not matches:
+                return _("🔍 無符合結果: %s") % pattern
+            return "\n".join(matches)
+        except (PathSecurityError, RuntimeError) as exc:
+            logger.warning(_("[find] 🚫 sandbox 搜索失敗: %s"), exc)
+            return _("🚫 拒絕存取: %s") % str(exc)
+        except Exception as exc:
+            logger.error(_("[find] ❌ sandbox 搜索失敗: %s"), exc)
+            return _("❌ find 失敗: %s") % str(exc)
     try:
         root = _resolve_path(path, _config.get("base_dir"), user_id)
     except (PathSecurityError, RuntimeError) as exc:
@@ -492,6 +587,23 @@ async def ls_impl(
     """
     _config = _config or {}
     user_id = _config.get("user_id", "")
+    if user_id:
+        try:
+            _resolve_path(path, _config.get("base_dir"), user_id)
+            request, provider = _sandbox_provider(_config, user_id)
+            result = await provider.list_dir(request, path, show_hidden)
+            lines: list[str] = [_("📂 %s") % result.get("path", path), ""]
+            for entry in result.get("entries", []):
+                kind = "📄" if entry.get("is_file") else "📁"
+                size = f"  ({entry.get('size', 0):,} bytes)" if entry.get("is_file") else ""
+                lines.append(f"  {kind} {entry.get('name', '')}{size}")
+            return "\n".join(lines) if len(lines) > 2 else _("📂 目錄為空")
+        except (PathSecurityError, RuntimeError) as exc:
+            logger.warning(_("[ls] 🚫 sandbox 列目錄失敗: %s"), exc)
+            return _("🚫 拒絕存取: %s") % str(exc)
+        except Exception as exc:
+            logger.error(_("[ls] ❌ sandbox 列目錄失敗: %s"), exc)
+            return _("❌ ls 失敗: %s") % str(exc)
     try:
         resolved = _resolve_path(path, _config.get("base_dir"), user_id)
     except (PathSecurityError, RuntimeError) as exc:
@@ -547,7 +659,7 @@ async def exec_impl(
                 _resolve_path(cwd, _config.get("base_dir"), user_id)
             request = _sandbox_request_from_config(_config, user_id)
             provider = get_sandbox_provider(_config)
-            sandbox_cwd = cwd or "."
+            sandbox_cwd = _sandbox_cwd(cwd)
             result = await provider.exec(request, command, sandbox_cwd, timeout)
             return str(result)
         except (PathSecurityError, RuntimeError) as exc:
@@ -621,7 +733,7 @@ async def process_impl(
         try:
             request = _sandbox_request_from_config(_config, user_id)
             provider = get_sandbox_provider(_config)
-            sandbox_cwd = cwd or "."
+            sandbox_cwd = _sandbox_cwd(cwd)
             if cwd:
                 _resolve_path(cwd, _config.get("base_dir"), user_id)
 

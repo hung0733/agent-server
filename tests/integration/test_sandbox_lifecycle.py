@@ -44,6 +44,27 @@ class LifecycleBackend(SandboxBackend):
     async def kill_process(self, handle: SandboxHandle, process_handle: str):
         return {"handle": process_handle, "status": "killed"}
 
+    async def read_file(self, handle: SandboxHandle, path: str, encoding: str):
+        return "ok"
+
+    async def write_file(self, handle: SandboxHandle, path: str, content: str, encoding: str):
+        return {"path": path}
+
+    async def edit_file(self, handle: SandboxHandle, path: str, old_string: str, new_string: str, replace_all: bool, encoding: str):
+        return {"path": path, "replacements": 1}
+
+    async def apply_patch(self, handle: SandboxHandle, patch: str, strip: int):
+        return {"stdout": "patched"}
+
+    async def grep_files(self, handle: SandboxHandle, pattern: str, path: str, recursive: bool, ignore_case: bool, include: str, max_results: int):
+        return []
+
+    async def find_files(self, handle: SandboxHandle, pattern: str, path: str, max_results: int):
+        return []
+
+    async def list_dir(self, handle: SandboxHandle, path: str, show_hidden: bool):
+        return {"path": path, "entries": []}
+
 
 @pytest.mark.asyncio
 async def test_same_session_reuses_same_sandbox():

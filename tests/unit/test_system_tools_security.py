@@ -10,7 +10,9 @@ from uuid import uuid4
 
 import pytest
 
+from sandbox.backends.local_docker import LocalDockerBackend
 from sandbox.models import SandboxRequest
+from sandbox.provider import SandboxProvider
 from tools.system_tools import (
     apply_patch_impl,
     edit_impl,
@@ -46,12 +48,32 @@ def user_sandbox(temp_agent_home, user_id):
     return sandbox
 
 
+@pytest.fixture(autouse=True)
+def sandbox_provider_for_file_tools(monkeypatch, temp_agent_home):
+    provider = SandboxProvider(
+        LocalDockerBackend(
+            base_url="http://127.0.0.1",
+            host_workspace_root=temp_agent_home,
+            sandbox_token="secret",
+        )
+    )
+    monkeypatch.setattr("tools.system_tools.get_sandbox_provider", lambda _config=None: provider)
+    return provider
+
+
 @pytest.fixture
 def fake_provider(monkeypatch):
     class FakeProvider:
         def __init__(self):
             self.exec_calls = []
             self.process_calls = []
+            self.read_calls = []
+            self.write_calls = []
+            self.edit_calls = []
+            self.apply_patch_calls = []
+            self.grep_calls = []
+            self.find_calls = []
+            self.list_calls = []
 
         async def exec(self, request: SandboxRequest, command: str, cwd: str, timeout: int):
             self.exec_calls.append((request, command, cwd, timeout))
@@ -66,6 +88,34 @@ def fake_provider(monkeypatch):
 
         async def kill_process(self, request: SandboxRequest, process_handle: str):
             return {"handle": process_handle, "status": "killed"}
+
+        async def read_file(self, request: SandboxRequest, path: str, encoding: str):
+            self.read_calls.append((request, path, encoding))
+            return "sandbox-read"
+
+        async def write_file(self, request: SandboxRequest, path: str, content: str, encoding: str):
+            self.write_calls.append((request, path, content, encoding))
+            return {"path": path}
+
+        async def edit_file(self, request: SandboxRequest, path: str, old_string: str, new_string: str, replace_all: bool, encoding: str):
+            self.edit_calls.append((request, path, old_string, new_string, replace_all, encoding))
+            return {"replacements": 1}
+
+        async def apply_patch(self, request: SandboxRequest, patch: str, strip: int):
+            self.apply_patch_calls.append((request, patch, strip))
+            return {"stdout": "patched"}
+
+        async def grep_files(self, request: SandboxRequest, pattern: str, path: str, recursive: bool, ignore_case: bool, include: str, max_results: int):
+            self.grep_calls.append((request, pattern, path, recursive, ignore_case, include, max_results))
+            return ["/mnt/data/workspace/app.py:1:pattern"]
+
+        async def find_files(self, request: SandboxRequest, pattern: str, path: str, max_results: int):
+            self.find_calls.append((request, pattern, path, max_results))
+            return ["/mnt/data/workspace/file1.txt"]
+
+        async def list_dir(self, request: SandboxRequest, path: str, show_hidden: bool):
+            self.list_calls.append((request, path, show_hidden))
+            return {"path": path, "entries": [{"name": "file1.txt", "is_file": True, "size": 4}]}
 
     provider = FakeProvider()
     monkeypatch.setattr("tools.system_tools.get_sandbox_provider", lambda _config=None: provider)
@@ -282,8 +332,66 @@ async def test_exec_impl_cwd_within_sandbox(user_sandbox, user_id, fake_provider
     result = await exec_impl(
         command="pwd", cwd="workspace", _config={"user_id": user_id}
     )
-    assert result == "sandbox:pwd:workspace:60"
-    assert fake_provider.exec_calls[0][1:] == ("pwd", "workspace", 60)
+    assert result == "sandbox:pwd:/workspace/workspace:60"
+    assert fake_provider.exec_calls[0][1:] == ("pwd", "/workspace/workspace", 60)
+
+
+@pytest.mark.asyncio
+async def test_read_impl_delegates_to_provider_when_user_scoped(user_sandbox, user_id, fake_provider):
+    result = await read_impl(path="test.txt", _config={"user_id": user_id})
+
+    assert result == "sandbox-read"
+    assert fake_provider.read_calls[0][1:] == ("test.txt", "utf-8")
+
+
+@pytest.mark.asyncio
+async def test_write_impl_delegates_to_provider_when_user_scoped(user_sandbox, user_id, fake_provider):
+    result = await write_impl(path="output.txt", content="hello", _config={"user_id": user_id})
+
+    assert "✅ 已寫入" in result
+    assert fake_provider.write_calls[0][1:] == ("output.txt", "hello", "utf-8")
+
+
+@pytest.mark.asyncio
+async def test_edit_impl_delegates_to_provider_when_user_scoped(user_sandbox, user_id, fake_provider):
+    result = await edit_impl(path="edit.txt", old_string="a", new_string="b", _config={"user_id": user_id})
+
+    assert "✅ 已替換" in result
+    assert fake_provider.edit_calls[0][1:] == ("edit.txt", "a", "b", False, "utf-8")
+
+
+@pytest.mark.asyncio
+async def test_apply_patch_impl_delegates_to_provider_when_user_scoped(user_sandbox, user_id, fake_provider):
+    patch = "*** Begin Patch\n*** Update File: test.txt\n@@\n-old\n+new\n*** End Patch"
+
+    result = await apply_patch_impl(patch=patch, strip=1, _config={"user_id": user_id})
+
+    assert "✅ patch 成功" in result
+    assert fake_provider.apply_patch_calls[0][1:] == (patch, 1)
+
+
+@pytest.mark.asyncio
+async def test_grep_impl_delegates_to_provider_when_user_scoped(user_sandbox, user_id, fake_provider):
+    result = await grep_impl(pattern="pattern", path=".", _config={"user_id": user_id})
+
+    assert "/mnt/data/workspace/app.py:1:pattern" in result
+    assert fake_provider.grep_calls[0][1:3] == ("pattern", ".")
+
+
+@pytest.mark.asyncio
+async def test_find_impl_delegates_to_provider_when_user_scoped(user_sandbox, user_id, fake_provider):
+    result = await find_impl(pattern="*.txt", path=".", _config={"user_id": user_id})
+
+    assert "/mnt/data/workspace/file1.txt" in result
+    assert fake_provider.find_calls[0][1:] == ("*.txt", ".", 200)
+
+
+@pytest.mark.asyncio
+async def test_ls_impl_delegates_to_provider_when_user_scoped(user_sandbox, user_id, fake_provider):
+    result = await ls_impl(path=".", _config={"user_id": user_id})
+
+    assert "file1.txt" in result
+    assert fake_provider.list_calls[0][1:] == (".", False)
 
 
 @pytest.mark.asyncio
