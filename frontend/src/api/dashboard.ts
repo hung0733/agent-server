@@ -1,5 +1,7 @@
 import {
   AgentCardData,
+  AgentBootstrapRequest,
+  AgentBootstrapResponse,
   AgentCreateBody,
   AgentToolUpdatePayload,
   AgentToolsPayload,
@@ -203,6 +205,13 @@ export function createAgent(body: AgentCreateBody): Promise<{ agent: AgentCardDa
 
 export function updateAgent(id: string, body: AgentUpdateBody): Promise<{ agent: AgentCardData }> {
   return mutateJson(`/api/dashboard/agents/${id}`, "PATCH", body);
+}
+
+export function bootstrapAgentSoul(
+  id: string,
+  body: AgentBootstrapRequest,
+): Promise<AgentBootstrapResponse> {
+  return mutateJson(`/api/dashboard/agents/${id}/bootstrap`, "POST", body);
 }
 
 export function fetchAgentTypes(): Promise<AgentTypesPayload> {

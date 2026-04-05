@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { createAgent, updateAgent } from "../dashboard";
+import { bootstrapAgentSoul, createAgent, updateAgent } from "../dashboard";
 
 const MOCK_AGENT = {
   id: "agent-1",
@@ -59,5 +59,37 @@ describe("updateAgent", () => {
       expect.objectContaining({ method: "PATCH" }),
     );
     expect(result.agent.isActive).toBe(false);
+  });
+});
+
+describe("bootstrapAgentSoul", () => {
+  it("calls POST /api/dashboard/agents/:id/bootstrap with body", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          sessionId: "ghost-1",
+          mode: "bootstrap",
+          reply: "What kind of partner should I be?",
+          saved: false,
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+    );
+
+    const result = await bootstrapAgentSoul("agent-1", {
+      message: "Start",
+      history: [],
+      save: false,
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining("/api/dashboard/agents/agent-1/bootstrap"),
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(result.reply).toBe("What kind of partner should I be?");
+    expect(result.saved).toBe(false);
   });
 });

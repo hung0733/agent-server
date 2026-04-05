@@ -15,6 +15,11 @@ from sqlalchemy.exc import IntegrityError
 
 from api.auth import DashboardAuthService
 from api.auth import hash_api_key
+from api.new_agent_bootstrap import (
+    NEW_AGENT_MODE_REMINDERS,
+    build_mode_prompt,
+    run_new_agent_bootstrap_turn,
+)
 from i18n import _
 
 logger = logging.getLogger(__name__)
@@ -340,6 +345,90 @@ async def _agents_get_memory_blocks(request: web.Request) -> web.Response:
             result[block.memory_type] = block.content
 
     return web.json_response(result)
+
+
+async def _agents_bootstrap(request: web.Request) -> web.Response:
+    auth_context = await _require_auth(request)
+    agent_instance_id = UUID(request.match_info["agent_id"])
+    body = await request.json()
+
+    existing = await AgentInstanceDAO.get_by_id(agent_instance_id)
+    if existing is None or existing.user_id != auth_context["user_id"]:
+        raise web.HTTPNotFound(
+            text=json.dumps({"error": "agent_not_found"}),
+            content_type="application/json",
+        )
+
+    save_requested = bool(body.get("save", False))
+    message = str(body.get("message") or "").strip()
+    history = body.get("history") or []
+    if not isinstance(history, list):
+        raise web.HTTPBadRequest(
+            text=json.dumps({"error": "invalid_history"}),
+            content_type="application/json",
+        )
+    if not message and not (save_requested and history):
+        raise web.HTTPBadRequest(
+            text=json.dumps({"error": "message_required"}),
+            content_type="application/json",
+        )
+
+    mode = "synthesis" if save_requested else str(body.get("mode") or "bootstrap").strip().lower()
+    if mode not in NEW_AGENT_MODE_REMINDERS:
+        raise web.HTTPBadRequest(
+            text=json.dumps({"error": "invalid_mode"}),
+            content_type="application/json",
+        )
+
+    session_id = f"ghost-{existing.agent_id[6:]}"
+    memory_blocks = await MemoryBlockDAO.get_by_agent_instance_id(agent_instance_id)
+    if body.get("previewPrompt"):
+        system_prompt = build_mode_prompt(memory_blocks, mode)
+        return web.json_response(
+            {
+                "sessionId": session_id,
+                "mode": mode,
+                "message": message,
+                "systemPrompt": system_prompt,
+                "availableModes": sorted(NEW_AGENT_MODE_REMINDERS.keys()),
+            }
+        )
+
+    try:
+        reply = await run_new_agent_bootstrap_turn(
+            agent=existing,
+            user_id=auth_context["user_id"],
+            mode=mode,
+            memory_blocks=memory_blocks,
+            history=history,
+            message=message,
+        )
+    except ValueError as exc:
+        raise web.HTTPBadRequest(
+            text=json.dumps({"error": str(exc)}),
+            content_type="application/json",
+        ) from exc
+
+    if save_requested:
+        await _upsert_memory_blocks(agent_instance_id, {"SOUL": reply})
+        return web.json_response(
+            {
+                "sessionId": session_id,
+                "mode": "build",
+                "reply": _("SOUL saved."),
+                "saved": True,
+                "soul": reply,
+            }
+        )
+
+    return web.json_response(
+        {
+            "sessionId": session_id,
+            "mode": mode,
+            "reply": reply,
+            "saved": False,
+        }
+    )
 
 
 async def _dashboard_tasks(request: web.Request) -> web.Response:
@@ -1082,6 +1171,7 @@ def create_app(
     app.router.add_get("/api/dashboard/usage", _dashboard_usage)
     app.router.add_get("/api/dashboard/agents", _dashboard_agents)
     app.router.add_post("/api/dashboard/agents", _agents_create)
+    app.router.add_post("/api/dashboard/agents/{agent_id}/bootstrap", _agents_bootstrap)
     app.router.add_get("/api/dashboard/tasks", _dashboard_tasks)
     app.router.add_get("/api/dashboard/memory", _dashboard_memory)
     app.router.add_get("/api/dashboard/schedules", _dashboard_schedules)

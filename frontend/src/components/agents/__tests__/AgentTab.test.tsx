@@ -1,7 +1,8 @@
-import { describe, it, expect, vi } from "vitest";
+import { beforeEach, describe, it, expect, vi } from "vitest";
 import userEvent from "@testing-library/user-event";
 import AgentTab from "../AgentTab";
-import { renderWithRouter, screen, within } from "../../../test/render";
+import * as dashboardApi from "../../../api/dashboard";
+import { renderWithRouter, screen, within, waitFor } from "../../../test/render";
 
 vi.mock("../../../api/dashboard", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../../api/dashboard")>();
@@ -41,10 +42,29 @@ vi.mock("../../../api/dashboard", async (importOriginal) => {
         agentTypeName: "研究型員工",
       },
     }),
+    bootstrapAgentSoul: vi.fn(),
   };
 });
 
 describe("AgentTab", () => {
+  beforeEach(() => {
+    vi.mocked(dashboardApi.bootstrapAgentSoul)
+      .mockReset()
+      .mockResolvedValueOnce({
+        sessionId: "ghost-new-agent",
+        mode: "bootstrap",
+        reply: "What kind of collaborator should I be?",
+        saved: false,
+      })
+      .mockResolvedValueOnce({
+        sessionId: "ghost-new-agent",
+        mode: "build",
+        reply: "Saved.",
+        saved: true,
+        soul: "# SOUL\n- Be direct",
+      });
+  });
+
   it("renders agent cards and add button", async () => {
     renderWithRouter(<AgentTab />);
 
@@ -83,7 +103,7 @@ describe("AgentTab", () => {
     renderWithRouter(<AgentTab />);
 
     await user.click(await screen.findByRole("button", { name: "新增員工" }));
-    await user.click(screen.getByRole("button", { name: "儲存" }));
+    await user.click(screen.getByRole("button", { name: "下一步" }));
 
     expect(await screen.findByText("名稱為必填。")).toBeInTheDocument();
   });
@@ -94,7 +114,7 @@ describe("AgentTab", () => {
 
     await user.click(await screen.findByRole("button", { name: "新增員工" }));
     await user.type(screen.getByPlaceholderText("員工名稱"), "New Agent");
-    await user.click(screen.getByRole("button", { name: "儲存" }));
+    await user.click(screen.getByRole("button", { name: "下一步" }));
 
     expect(await screen.findByText("員工類型為必填。")).toBeInTheDocument();
   });
@@ -121,5 +141,56 @@ describe("AgentTab", () => {
 
     await user.click(screen.getByRole("button", { name: "取消" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("opens SOUL bootstrap dialog after creating an agent", async () => {
+    const user = userEvent.setup();
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(window.HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoView,
+    });
+    renderWithRouter(<AgentTab />);
+
+    await user.click(await screen.findByRole("button", { name: "新增員工" }));
+    await user.type(screen.getByPlaceholderText("員工名稱"), "New Agent");
+    await user.selectOptions(screen.getByRole("combobox"), "type-research");
+    await user.click(screen.getByRole("button", { name: "下一步" }));
+
+    expect(await screen.findByRole("heading", { name: "建立 SOUL" })).toBeInTheDocument();
+    expect(screen.getByText("What kind of collaborator should I be?")).toBeInTheDocument();
+    expect(screen.getByText("Soul Builder")).toBeInTheDocument();
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
+  });
+
+  it("saves SOUL and closes bootstrap dialog", async () => {
+    const user = userEvent.setup();
+    vi.mocked(dashboardApi.bootstrapAgentSoul)
+      .mockReset()
+      .mockResolvedValueOnce({
+        sessionId: "ghost-new-agent",
+        mode: "bootstrap",
+        reply: "What kind of collaborator should I be?",
+        saved: false,
+      })
+      .mockResolvedValueOnce({
+        sessionId: "ghost-new-agent",
+        mode: "build",
+        reply: "Saved.",
+        saved: true,
+        soul: "# SOUL\n- Be direct",
+      });
+    renderWithRouter(<AgentTab />);
+
+    await user.click(await screen.findByRole("button", { name: "新增員工" }));
+    await user.type(screen.getByPlaceholderText("員工名稱"), "New Agent");
+    await user.selectOptions(screen.getByRole("combobox"), "type-research");
+    await user.click(screen.getByRole("button", { name: "下一步" }));
+
+    expect(await screen.findByRole("heading", { name: "建立 SOUL" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "儲存 SOUL" }));
+
+    expect(await screen.findByText("New Agent")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "建立 SOUL" })).not.toBeInTheDocument();
   });
 });

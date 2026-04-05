@@ -10,6 +10,7 @@ import {
 } from "../../api/dashboard";
 import { useDashboardResource } from "../../hooks/useDashboardResource";
 import { agentTypesPayload } from "../../mock/dashboard";
+import SoulBootstrapDialog from "./SoulBootstrapDialog";
 import type {
   AgentCardData,
   AgentTypeItem,
@@ -73,6 +74,7 @@ export default function AgentTab() {
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [memoryLoading, setMemoryLoading] = useState(false);
+  const [bootstrapAgent, setBootstrapAgent] = useState<{ id: string; name: string } | null>(null);
 
   const { resource: settingsResource } = useDashboardResource(
     fetchSettings,
@@ -168,30 +170,26 @@ export default function AgentTab() {
           },
         });
         setItems((prev) => prev.map((i) => (i.id === editing.id ? result.agent : i)));
+        closeForm();
       } else {
         const result = await createAgent({
           name: form.name.trim(),
           agentTypeId: form.agentTypeId,
-          phoneNo: form.phoneNo.trim() || undefined,
-          whatsappKey: form.whatsappKey.trim() || undefined,
-          isActive: form.isActive,
-          isSubAgent: form.isSubAgent,
-          endpointGroupId: form.endpointGroupId || undefined,
-          memoryBlocks: {
-            SOUL: form.soul || undefined,
-            USER_PROFILE: form.userProfile || undefined,
-            IDENTITY: form.identity || undefined,
-          },
         });
         setItems((prev) => [...prev, result.agent]);
+        setBootstrapAgent({ id: result.agent.id, name: result.agent.name });
+        closeForm();
       }
-      closeForm();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       setFormError(msg);
     } finally {
       setSaving(false);
     }
+  }
+
+  function handleBootstrapSaved(_soul: string) {
+    setBootstrapAgent(null);
   }
 
   if (isLoading) {
@@ -286,107 +284,120 @@ export default function AgentTab() {
               </select>
             </label>
 
-            <label>
-              {t("agents.agent.endpointGroupLabel")}
-              <select
-                value={form.endpointGroupId}
-                onChange={(e) => setForm((f) => ({ ...f, endpointGroupId: e.target.value }))}
-              >
-                <option value="">{t("agents.agent.endpointGroupPlaceholder")}</option>
-                {endpointGroups.map((g) => (
-                  <option key={g.id} value={g.id}>
-                    {g.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            {editing ? (
+              <>
+                <label>
+                  {t("agents.agent.endpointGroupLabel")}
+                  <select
+                    value={form.endpointGroupId}
+                    onChange={(e) => setForm((f) => ({ ...f, endpointGroupId: e.target.value }))}
+                  >
+                    <option value="">{t("agents.agent.endpointGroupPlaceholder")}</option>
+                    {endpointGroups.map((g) => (
+                      <option key={g.id} value={g.id}>
+                        {g.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
 
-            <label>
-              {t("agents.agent.phoneNoLabel")}
-              <input
-                type="text"
-                value={form.phoneNo}
-                placeholder={t("agents.agent.phoneNoPlaceholder")}
-                onChange={(e) => setForm((f) => ({ ...f, phoneNo: e.target.value }))}
-              />
-            </label>
+                <label>
+                  {t("agents.agent.phoneNoLabel")}
+                  <input
+                    type="text"
+                    value={form.phoneNo}
+                    placeholder={t("agents.agent.phoneNoPlaceholder")}
+                    onChange={(e) => setForm((f) => ({ ...f, phoneNo: e.target.value }))}
+                  />
+                </label>
 
-            <label>
-              {t("agents.agent.whatsappKeyLabel")}
-              <input
-                type="text"
-                value={form.whatsappKey}
-                placeholder={t("agents.agent.whatsappKeyPlaceholder")}
-                onChange={(e) => setForm((f) => ({ ...f, whatsappKey: e.target.value }))}
-              />
-            </label>
+                <label>
+                  {t("agents.agent.whatsappKeyLabel")}
+                  <input
+                    type="text"
+                    value={form.whatsappKey}
+                    placeholder={t("agents.agent.whatsappKeyPlaceholder")}
+                    onChange={(e) => setForm((f) => ({ ...f, whatsappKey: e.target.value }))}
+                  />
+                </label>
 
-            <fieldset style={{ border: "none", padding: 0, margin: "0.5rem 0" }}>
-              <legend style={{ fontWeight: 600, marginBottom: "0.5rem" }}>{t("agents.agent.memoryBlocksLegend")}</legend>
+                <fieldset style={{ border: "none", padding: 0, margin: "0.5rem 0" }}>
+                  <legend style={{ fontWeight: 600, marginBottom: "0.5rem" }}>{t("agents.agent.memoryBlocksLegend")}</legend>
 
-              <label>
-                {t("agents.agent.memorySoulLabel")}
-                <textarea
-                  rows={4}
-                  value={form.soul}
-                  disabled={memoryLoading}
-                  placeholder={memoryLoading ? t("agents.agent.memoryLoadingPlaceholder") : t("agents.agent.memorySoulPlaceholder")}
-                  onChange={(e) => setForm((f) => ({ ...f, soul: e.target.value }))}
-                />
-              </label>
+                  <label>
+                    {t("agents.agent.memorySoulLabel")}
+                    <textarea
+                      rows={4}
+                      value={form.soul}
+                      disabled={memoryLoading}
+                      placeholder={memoryLoading ? t("agents.agent.memoryLoadingPlaceholder") : t("agents.agent.memorySoulPlaceholder")}
+                      onChange={(e) => setForm((f) => ({ ...f, soul: e.target.value }))}
+                    />
+                  </label>
 
-              <label>
-                {t("agents.agent.memoryUserProfileLabel")}
-                <textarea
-                  rows={4}
-                  value={form.userProfile}
-                  disabled={memoryLoading}
-                  placeholder={memoryLoading ? t("agents.agent.memoryLoadingPlaceholder") : t("agents.agent.memoryUserProfilePlaceholder")}
-                  onChange={(e) => setForm((f) => ({ ...f, userProfile: e.target.value }))}
-                />
-              </label>
+                  <label>
+                    {t("agents.agent.memoryUserProfileLabel")}
+                    <textarea
+                      rows={4}
+                      value={form.userProfile}
+                      disabled={memoryLoading}
+                      placeholder={memoryLoading ? t("agents.agent.memoryLoadingPlaceholder") : t("agents.agent.memoryUserProfilePlaceholder")}
+                      onChange={(e) => setForm((f) => ({ ...f, userProfile: e.target.value }))}
+                    />
+                  </label>
 
-              <label>
-                {t("agents.agent.memoryIdentityLabel")}
-                <textarea
-                  rows={4}
-                  value={form.identity}
-                  disabled={memoryLoading}
-                  placeholder={memoryLoading ? t("agents.agent.memoryLoadingPlaceholder") : t("agents.agent.memoryIdentityPlaceholder")}
-                  onChange={(e) => setForm((f) => ({ ...f, identity: e.target.value }))}
-                />
-              </label>
-            </fieldset>
+                  <label>
+                    {t("agents.agent.memoryIdentityLabel")}
+                    <textarea
+                      rows={4}
+                      value={form.identity}
+                      disabled={memoryLoading}
+                      placeholder={memoryLoading ? t("agents.agent.memoryLoadingPlaceholder") : t("agents.agent.memoryIdentityPlaceholder")}
+                      onChange={(e) => setForm((f) => ({ ...f, identity: e.target.value }))}
+                    />
+                  </label>
+                </fieldset>
 
-            <label>
-              <input
-                type="checkbox"
-                checked={form.isActive}
-                onChange={(e) => setForm((f) => ({ ...f, isActive: e.target.checked }))}
-              />
-              {t("agents.agent.isActiveLabel")}
-            </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={form.isActive}
+                    onChange={(e) => setForm((f) => ({ ...f, isActive: e.target.checked }))}
+                  />
+                  {t("agents.agent.isActiveLabel")}
+                </label>
 
-            <label>
-              <input
-                type="checkbox"
-                checked={form.isSubAgent}
-                onChange={(e) => setForm((f) => ({ ...f, isSubAgent: e.target.checked }))}
-              />
-              {t("agents.agent.isSubAgentLabel")}
-            </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={form.isSubAgent}
+                    onChange={(e) => setForm((f) => ({ ...f, isSubAgent: e.target.checked }))}
+                  />
+                  {t("agents.agent.isSubAgentLabel")}
+                </label>
+              </>
+            ) : null}
 
             {formError && <p className="form-error">{formError}</p>}
 
             <div className="modal-actions">
               <button onClick={handleSave} disabled={saving}>
-                {t("agents.agent.saveButton")}
+                {editing ? t("agents.agent.saveButton") : t("agents.agent.nextButton")}
               </button>
               <button onClick={closeForm}>{t("agents.agent.cancelButton")}</button>
             </div>
           </div>
         </div>
       )}
+
+      {bootstrapAgent ? (
+        <SoulBootstrapDialog
+          agentId={bootstrapAgent.id}
+          agentName={bootstrapAgent.name}
+          onClose={() => setBootstrapAgent(null)}
+          onSaved={handleBootstrapSaved}
+        />
+      ) : null}
     </section>
   );
 }

@@ -64,6 +64,30 @@ export interface MemoryBlocksInput {
   IDENTITY?: string;
 }
 
+export interface BootstrapChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface AgentBootstrapRequest {
+  message: string;
+  history: BootstrapChatMessage[];
+  mode?: "bootstrap" | "synthesis" | "build";
+  save?: boolean;
+  previewPrompt?: boolean;
+}
+
+export interface AgentBootstrapResponse {
+  sessionId: string;
+  mode: "bootstrap" | "synthesis" | "build";
+  reply?: string;
+  saved?: boolean;
+  soul?: string;
+  message?: string;
+  systemPrompt?: string;
+  availableModes?: string[];
+}
+
 export interface TimelineItem {
   id: string;
   type: string;

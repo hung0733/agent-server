@@ -876,7 +876,8 @@ textarea {
 }
 
 .agent-tab-modal input[type="text"],
-.agent-tab-modal select {
+.agent-tab-modal select,
+.agent-tab-modal textarea {
   width: 100%;
   padding: 10px 14px;
   border-radius: 10px;
@@ -887,6 +888,10 @@ textarea {
 }
 
 .agent-tab-modal input[type="text"]::placeholder {
+  color: var(--text-3);
+}
+
+.agent-tab-modal textarea::placeholder {
   color: var(--text-3);
 }
 
@@ -1079,6 +1084,123 @@ textarea {
 .modal-actions button:last-child:hover {
   background: rgba(255, 255, 255, 0.06);
   color: var(--text-1);
+}
+
+.agent-soul-dialog {
+  width: min(720px, calc(100vw - 32px));
+}
+
+.agent-soul-dialog__header {
+  display: grid;
+  gap: 6px;
+}
+
+.agent-soul-dialog__header p {
+  margin: 0;
+  color: var(--text-2);
+}
+
+.agent-soul-dialog__timeline {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  max-height: min(52vh, 460px);
+  overflow-y: auto;
+  border: 1px solid rgba(170, 185, 208, 0.12);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at top left, rgba(123, 162, 255, 0.18), transparent 36%),
+    rgba(255, 255, 255, 0.03);
+}
+
+.agent-soul-dialog__message {
+  display: grid;
+  gap: 6px;
+  max-width: 85%;
+}
+
+.agent-soul-dialog__message--assistant {
+  justify-self: start;
+}
+
+.agent-soul-dialog__message--user {
+  justify-self: end;
+}
+
+.agent-soul-dialog__speaker {
+  font-size: 0.8rem;
+  color: var(--text-3);
+}
+
+.agent-soul-dialog__message-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.agent-soul-dialog__message--user .agent-soul-dialog__message-head {
+  justify-content: flex-end;
+}
+
+.agent-soul-dialog__avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(170, 185, 208, 0.18);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-1);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.agent-soul-dialog__message--user .agent-soul-dialog__avatar {
+  background: linear-gradient(135deg, rgba(111, 169, 255, 0.32), rgba(143, 116, 255, 0.22));
+}
+
+.agent-soul-dialog__message--user .agent-soul-dialog__speaker {
+  text-align: right;
+}
+
+.agent-soul-dialog__bubble {
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(170, 185, 208, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.agent-soul-dialog__message--assistant .agent-soul-dialog__bubble {
+  border-top-left-radius: 6px;
+}
+
+.agent-soul-dialog__message--user .agent-soul-dialog__bubble {
+  border-top-right-radius: 6px;
+  background: linear-gradient(135deg, rgba(111, 169, 255, 0.26), rgba(143, 116, 255, 0.18));
+}
+
+.agent-soul-dialog__bubble--loading {
+  opacity: 0.8;
+}
+
+.agent-soul-dialog__bubble p {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.agent-soul-dialog__composer {
+  display: grid;
+  gap: 8px;
+}
+
+.agent-soul-dialog__textarea {
+  min-height: 112px;
+  resize: vertical;
 }
 
 .agent-tools {
