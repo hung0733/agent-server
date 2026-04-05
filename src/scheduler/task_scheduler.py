@@ -517,14 +517,21 @@ class TaskScheduler:
             from db.dto.task_dto import TaskCreate
             from uuid import UUID
 
+            payload = dict(template_task.payload or {})
+            execution_agent_id = template_task.agent_id
+            if execution_agent_id is None:
+                payload_agent_id = payload.get("agent_instance_id")
+                if payload_agent_id:
+                    execution_agent_id = UUID(str(payload_agent_id))
+
             execution_task = await TaskDAO.create(
                 TaskCreate(
                     user_id=template_task.user_id,
-                    agent_id=template_task.agent_id,
+                    agent_id=execution_agent_id,
                     task_type=template_task.task_type,
                     status=TaskStatus.pending,
                     priority=template_task.priority,
-                    payload=template_task.payload,
+                    payload=payload,
                     session_id=template_task.session_id,
                     parent_task_id=template_task.id,  # Link to template
                 )

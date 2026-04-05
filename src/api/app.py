@@ -192,6 +192,7 @@ async def _create_default_task_schedules(agent, session: AsyncSession) -> None:
                     "task_execution_type": "method",
                     "method_path": spec["method_path"],
                     "description": _(spec["description"]),
+                    "agent_instance_id": str(agent.id),
                 },
             ),
             session=session,

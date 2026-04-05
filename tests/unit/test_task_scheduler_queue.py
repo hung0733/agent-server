@@ -106,6 +106,63 @@ async def test_execute_schedule_busy_agent_keeps_schedule_cadence(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_execute_schedule_uses_payload_agent_instance_id_when_template_agent_missing(monkeypatch):
+    scheduler = TaskScheduler()
+    current_time = datetime(2026, 4, 4, 4, 9, 20, tzinfo=timezone.utc)
+    agent_instance_id = uuid4()
+    template_task = Task(
+        id=uuid4(),
+        user_id=uuid4(),
+        agent_id=None,
+        parent_task_id=None,
+        task_type="scheduled_method",
+        status=TaskStatus.pending,
+        priority=Priority.normal,
+        payload={
+            "task_execution_type": "method",
+            "method_path": "agent.bulter@Bulter.review_msg",
+            "agent_instance_id": str(agent_instance_id),
+        },
+        result=None,
+        error_message=None,
+        retry_count=0,
+        max_retries=3,
+        session_id=None,
+    )
+    execution_task = _make_task()
+    schedule = SimpleNamespace(
+        id=uuid4(),
+        task_template_id=template_task.id,
+        next_run_at=current_time,
+        schedule_expression="0 17 * * *",
+        schedule_type=ScheduleType.cron,
+    )
+    queue_entry = SimpleNamespace(id=uuid4())
+
+    monkeypatch.setattr("scheduler.task_scheduler.TaskDAO.get_by_id", AsyncMock(return_value=template_task))
+    create_task = AsyncMock(return_value=execution_task)
+    monkeypatch.setattr("scheduler.task_scheduler.TaskDAO.create", create_task)
+    monkeypatch.setattr("scheduler.task_scheduler.TaskDependencyDAO.are_dependencies_met", AsyncMock(return_value=True))
+    monkeypatch.setattr("scheduler.task_scheduler.TaskQueueDAO.create", AsyncMock(return_value=queue_entry))
+    monkeypatch.setattr(
+        "scheduler.task_scheduler.TaskExecutor.execute_task",
+        AsyncMock(return_value={"success": True}),
+    )
+    monkeypatch.setattr("scheduler.task_scheduler.TaskDAO.update", AsyncMock())
+    monkeypatch.setattr("scheduler.task_scheduler.TaskQueueDAO.update", AsyncMock())
+    monkeypatch.setattr("scheduler.task_scheduler.TaskScheduleDAO.update", AsyncMock())
+    monkeypatch.setattr(
+        "scheduler.task_scheduler.calculate_next_run",
+        lambda *_args, **_kwargs: current_time + timedelta(days=1),
+    )
+
+    await scheduler._execute_schedule(schedule, current_time)
+
+    created_dto = create_task.await_args.args[0]
+    assert created_dto.agent_id == agent_instance_id
+
+
+@pytest.mark.asyncio
 async def test_tick_skips_pending_queue_entries_scheduled_in_future(monkeypatch):
     scheduler = TaskScheduler()
     task = _make_task()

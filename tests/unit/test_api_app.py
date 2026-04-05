@@ -996,6 +996,12 @@ async def test_agents_create_accepts_endpoint_group_and_memory_blocks(monkeypatc
     created_block = MemoryBlockDAO.create.await_args.args[0]
     assert created_block.memory_type == "SOUL"
     assert created_block.content == "你是一個友善的助手"
+    from api.app import TaskDAO
+    assert TaskDAO.create.await_count == 2
+    for call in TaskDAO.create.await_args_list:
+        task_dto = call.args[0]
+        assert task_dto.agent_id == agent_id_val
+        assert task_dto.payload["agent_instance_id"] == str(agent_id_val)
 
 
 @pytest.mark.asyncio
