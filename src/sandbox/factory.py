@@ -21,6 +21,9 @@ def _build_provider() -> SandboxProvider:
             raise RuntimeError("SANDBOX_PROVISIONER_TOKEN is required")
         return SandboxProvider(RemoteProvisionerBackend(base_url=base_url, api_token=token))
 
+    if backend not in {None, "", "local_docker"}:
+        raise RuntimeError(f"unsupported SANDBOX_BACKEND: {backend}")
+
     api_base = os.environ.get("SANDBOX_AGENT_BASE_URL")
     host_root = os.environ.get("AGENT_HOME_DIR")
     if not api_base:

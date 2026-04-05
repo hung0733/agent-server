@@ -5,6 +5,7 @@ import logging
 import pytest
 
 from sandbox.backends.base import SandboxBackend
+from sandbox.factory import _build_provider
 from sandbox.models import SandboxHandle, SandboxRequest
 from sandbox.provider import SandboxProvider
 
@@ -78,3 +79,11 @@ async def test_provider_logs_create_and_release(caplog):
     messages = [record.getMessage() for record in caplog.records]
     assert any("sandbox.acquire action=create" in message for message in messages)
     assert any("sandbox.release sandbox_id=" in message for message in messages)
+
+
+def test_factory_rejects_unsupported_backend(monkeypatch):
+    _build_provider.cache_clear()
+    monkeypatch.setenv("SANDBOX_BACKEND", "local-docker")
+
+    with pytest.raises(RuntimeError, match="unsupported"):
+        _build_provider()

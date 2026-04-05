@@ -2,11 +2,26 @@ from __future__ import annotations
 
 from pathlib import Path
 from datetime import datetime, timezone
+from datetime import timedelta
+import sys
+import types
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
+
+
+
+def _parse_duration_stub(value: str):
+    if value == "PT2H":
+        return timedelta(hours=2)
+    if value == "PT1H":
+        return timedelta(hours=1)
+    raise ValueError(value)
+
+
+sys.modules.setdefault("isodate", types.SimpleNamespace(parse_duration=_parse_duration_stub))
 
 import api.app as app_module
 from api.app import create_app
@@ -75,6 +90,69 @@ class _FakeAuthService:
         if raw_key == "good-key":
             return {"user_id": self.user_id}
         return None
+
+
+class _FakeJanitorTask:
+    def __init__(self):
+        self.cancelled = False
+
+    def cancel(self):
+        self.cancelled = True
+
+    def __await__(self):
+        async def _done():
+            return None
+
+        return _done().__await__()
+
+
+@pytest.mark.asyncio
+async def test_create_app_starts_and_stops_sandbox_janitor(monkeypatch) -> None:
+    janitor_task = _FakeJanitorTask()
+    create_task = MagicMock(side_effect=lambda coro: (coro.close(), janitor_task)[1])
+    cleanup_calls = []
+    monkeypatch.setenv("SANDBOX_BACKEND", "local_docker")
+    monkeypatch.setenv("SANDBOX_IDLE_TIMEOUT_SECONDS", "1800")
+    monkeypatch.setenv("SANDBOX_AGENT_BASE_URL", "http://127.0.0.1:8080")
+    monkeypatch.setenv("AGENT_HOME_DIR", "/tmp/agent-home")
+    monkeypatch.setenv("SANDBOX_API_TOKEN", "secret")
+    monkeypatch.setattr(app_module.asyncio, "create_task", create_task)
+    monkeypatch.setattr(
+        app_module,
+        "run_sandbox_janitor_once",
+        AsyncMock(side_effect=lambda provider, idle_timeout: cleanup_calls.append((provider, idle_timeout))),
+    )
+
+    app = create_app(_FakeQueue(), _FakeDedup(), dashboard_data_provider=_FakeDashboardProvider())
+    server = TestServer(app)
+    client = TestClient(server)
+
+    await client.start_server()
+    await client.close()
+
+    assert create_task.called
+    assert len(cleanup_calls) == 1
+    assert cleanup_calls[0][1] == 1800
+    assert janitor_task.cancelled is True
+
+
+@pytest.mark.asyncio
+async def test_create_app_ignores_startup_cleanup_failures(monkeypatch) -> None:
+    janitor_task = _FakeJanitorTask()
+    monkeypatch.setenv("SANDBOX_BACKEND", "local_docker")
+    monkeypatch.setenv("SANDBOX_IDLE_TIMEOUT_SECONDS", "1800")
+    monkeypatch.setenv("SANDBOX_AGENT_BASE_URL", "http://127.0.0.1:8080")
+    monkeypatch.setenv("AGENT_HOME_DIR", "/tmp/agent-home")
+    monkeypatch.setenv("SANDBOX_API_TOKEN", "secret")
+    monkeypatch.setattr(app_module.asyncio, "create_task", MagicMock(side_effect=lambda coro: (coro.close(), janitor_task)[1]))
+    monkeypatch.setattr(app_module, "run_sandbox_janitor_once", AsyncMock(side_effect=RuntimeError("boom")))
+
+    app = create_app(_FakeQueue(), _FakeDedup(), dashboard_data_provider=_FakeDashboardProvider())
+    server = TestServer(app)
+    client = TestClient(server)
+
+    await client.start_server()
+    await client.close()
 
 
 class _FakeSchedule:

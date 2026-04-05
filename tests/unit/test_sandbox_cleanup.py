@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
-from sandbox.cleanup import SandboxJanitor
+import pytest
+
+from sandbox.cleanup import SandboxJanitor, run_sandbox_janitor_forever
 from sandbox.models import SandboxHandle
 from sandbox.registry import SandboxRegistry
 
@@ -25,3 +29,92 @@ def test_janitor_collects_idle_handles_past_cutoff():
     expired = SandboxJanitor(idle_timeout_seconds=1800).expired_idle_handles(registry)
 
     assert [item.sandbox_id for item in expired] == ["sandbox-1"]
+
+
+@pytest.mark.asyncio
+async def test_janitor_destroy_expired_idle_handles():
+    handle = SandboxHandle(
+        sandbox_id="sandbox-1",
+        owner_id="user-1",
+        scope="session",
+        scope_key="thread-1",
+        profile="default",
+        endpoint="http://sandbox.local",
+        backend_type="fake",
+        workspace_host_path="/tmp/host",
+        workspace_container_path="/workspace",
+        metadata={"last_used_at": (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()},
+    )
+    destroyed = []
+
+    class FakeProvider:
+        def __init__(self):
+            self.registry = SandboxRegistry(idle={handle.sandbox_id: handle})
+
+        async def destroy(self, sandbox_handle):
+            destroyed.append(sandbox_handle.sandbox_id)
+            self.registry.idle.pop(sandbox_handle.sandbox_id, None)
+
+    janitor = SandboxJanitor(idle_timeout_seconds=1800)
+
+    await janitor.destroy_expired_idle_handles(FakeProvider())
+
+    assert destroyed == ["sandbox-1"]
+
+
+@pytest.mark.asyncio
+async def test_janitor_destroy_expired_idle_handles_skips_destroy_errors(caplog):
+    handle = SandboxHandle(
+        sandbox_id="sandbox-1",
+        owner_id="user-1",
+        scope="session",
+        scope_key="thread-1",
+        profile="default",
+        endpoint="http://sandbox.local",
+        backend_type="fake",
+        workspace_host_path="/tmp/host",
+        workspace_container_path="/workspace",
+        metadata={"last_used_at": (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()},
+    )
+
+    class FakeProvider:
+        def __init__(self):
+            self.registry = SandboxRegistry(idle={handle.sandbox_id: handle})
+
+        async def destroy(self, sandbox_handle):
+            raise RuntimeError("boom")
+
+    janitor = SandboxJanitor(idle_timeout_seconds=1800)
+
+    destroyed = await janitor.destroy_expired_idle_handles(FakeProvider())
+
+    assert destroyed == []
+
+
+@pytest.mark.asyncio
+async def test_janitor_forever_survives_invalid_timestamp_then_cancellation():
+    handle = SandboxHandle(
+        sandbox_id="sandbox-1",
+        owner_id="user-1",
+        scope="session",
+        scope_key="thread-1",
+        profile="default",
+        endpoint="http://sandbox.local",
+        backend_type="fake",
+        workspace_host_path="/tmp/host",
+        workspace_container_path="/workspace",
+        metadata={"last_used_at": "not-a-date"},
+    )
+
+    class FakeProvider:
+        def __init__(self):
+            self.registry = SandboxRegistry(idle={handle.sandbox_id: handle})
+
+        async def destroy(self, sandbox_handle):
+            raise AssertionError("should not destroy")
+
+    task = asyncio.create_task(run_sandbox_janitor_forever(FakeProvider(), idle_timeout_seconds=1, interval_seconds=1))
+    await asyncio.sleep(0)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task

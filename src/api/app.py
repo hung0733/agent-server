@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from pathlib import Path
@@ -49,6 +50,8 @@ from db.dto.task_schedule_dto import TaskScheduleCreate, TaskScheduleUpdate
 from db.types import CollaborationStatus, TaskStatus, Priority, ScheduleType
 from db import AsyncSession, async_sessionmaker, create_engine
 from scheduler.task_scheduler import calculate_next_run
+from sandbox.cleanup import run_sandbox_janitor_forever, run_sandbox_janitor_once
+from sandbox.factory import get_sandbox_provider
 from utils.timezone import to_server_tz
 
 
@@ -69,6 +72,36 @@ DASHBOARD_PROVIDER_KEY = web.AppKey("dashboard_provider", DashboardDataProvider)
 FRONTEND_DIST_KEY = web.AppKey("frontend_dist", Path)
 AUTH_SERVICE_KEY = web.AppKey("auth_service", DashboardAuthService)
 AUTH_CONTEXT_KEY = web.AppKey("auth_context", dict)
+SANDBOX_JANITOR_TASK_KEY = web.AppKey("sandbox_janitor_task", object)
+
+
+def _sandbox_enabled() -> bool:
+    return bool(__import__("os").environ.get("SANDBOX_BACKEND"))
+
+
+async def _start_sandbox_janitor(app: web.Application) -> None:
+    if not _sandbox_enabled():
+        return
+    idle_timeout = int(__import__("os").environ["SANDBOX_IDLE_TIMEOUT_SECONDS"])
+    provider = get_sandbox_provider()
+    try:
+        await run_sandbox_janitor_once(provider, idle_timeout)
+    except Exception as exc:
+        logger.warning("sandbox.janitor.startup_cleanup_failed error=%s", exc)
+    app[SANDBOX_JANITOR_TASK_KEY] = asyncio.create_task(
+        run_sandbox_janitor_forever(provider, idle_timeout)
+    )
+    logger.info("sandbox.janitor.start idle_timeout_seconds=%s", idle_timeout)
+
+
+async def _stop_sandbox_janitor(app: web.Application) -> None:
+    task = app.get(SANDBOX_JANITOR_TASK_KEY)
+    if task is None:
+        return
+    task.cancel()
+    with __import__("contextlib").suppress(asyncio.CancelledError):
+        await task
+    logger.info("sandbox.janitor.stop")
 
 
 async def _require_auth(request: web.Request) -> dict:
@@ -1235,4 +1268,6 @@ def create_app(
             app.router.add_static("/assets", assets_path)
         app.router.add_get("/", _spa_entry)
         app.router.add_get(r"/{tail:(?!api|health|assets).*$}", _spa_entry)
+    app.on_startup.append(_start_sandbox_janitor)
+    app.on_cleanup.append(_stop_sandbox_janitor)
     return app
