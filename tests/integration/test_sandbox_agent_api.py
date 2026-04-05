@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import logging
+
 from fastapi.testclient import TestClient
 
 from sandbox_agent.app import create_app
@@ -89,3 +91,21 @@ def test_sandbox_agent_accepts_virtual_workspace_paths_and_rejects_patch_escape(
     assert read_result.status_code == 200
     assert read_result.json()["content"] == "virtual"
     assert patch_result.status_code == 400
+
+
+def test_sandbox_agent_logs_request_ids(tmp_path, caplog):
+    caplog.set_level(logging.INFO)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    client = TestClient(create_app(api_token="secret", workspace_root=str(workspace)))
+
+    response = client.post(
+        "/v1/files/write",
+        headers={"X-Sandbox-Token": "secret", "X-Sandbox-Request-Id": "req-1", "X-Sandbox-Id": "sandbox-1"},
+        json={"path": "notes/agent.txt", "content": "hello sandbox", "encoding": "utf-8"},
+    )
+
+    assert response.status_code == 200
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("sandbox.request.start request_id=req-1 sandbox_id=sandbox-1 method=POST path=/v1/files/write" in message for message in messages)
+    assert any("sandbox.file.write request_id=req-1 sandbox_id=sandbox-1 path=notes/agent.txt" in message for message in messages)

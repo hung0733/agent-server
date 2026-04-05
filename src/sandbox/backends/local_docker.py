@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 import subprocess
 from pathlib import Path
@@ -10,7 +11,11 @@ from typing import Awaitable, Callable
 import httpx
 
 from sandbox.backends.base import SandboxBackend
+from sandbox.logging import current_operation_id
 from sandbox.models import SandboxHandle, SandboxRequest
+
+
+logger = logging.getLogger(__name__)
 
 
 CommandRunner = Callable[[list[str]], Awaitable[str]]
@@ -171,6 +176,13 @@ class LocalDockerBackend(SandboxBackend):
                 "sandbox_token": self.sandbox_token,
             },
         )
+        logger.info(
+            "sandbox.local.discover sandbox_id=%s container_name=%s container_id=%s endpoint=%s",
+            request.sandbox_id,
+            container_name,
+            handle.metadata.get("container_id", ""),
+            handle.endpoint,
+        )
         self._handles[request.sandbox_id] = handle
         return handle
 
@@ -201,6 +213,13 @@ class LocalDockerBackend(SandboxBackend):
             suffix = ":ro" if mount.read_only else ""
             run_command.extend(["-v", f"{mount.source}:{mount.target}{suffix}"])
         run_command.append(self.image)
+        logger.info(
+            "sandbox.local.create.start sandbox_id=%s container_name=%s image=%s workspace_host_path=%s",
+            request.sandbox_id,
+            container_name,
+            self.image,
+            workspace_path,
+        )
         container_id = await self.command_runner(run_command)
         try:
             inspect_payload = await self._inspect_container(container_name)
@@ -228,19 +247,40 @@ class LocalDockerBackend(SandboxBackend):
                 "sandbox_token": self.sandbox_token,
             },
         )
+        logger.info(
+            "sandbox.local.create.ready sandbox_id=%s container_name=%s container_id=%s endpoint=%s",
+            request.sandbox_id,
+            container_name,
+            container_id.strip(),
+            endpoint,
+        )
         self._handles[request.sandbox_id] = handle
         return handle
 
     async def destroy(self, handle: SandboxHandle) -> None:
         container_id = handle.metadata.get("container_id") or handle.metadata.get("container_name")
         if container_id:
+            logger.info(
+                "sandbox.local.destroy sandbox_id=%s container_name=%s container_id=%s",
+                handle.sandbox_id,
+                handle.metadata.get("container_name", ""),
+                container_id,
+            )
             await self.command_runner([self.docker_bin, "rm", "-f", container_id])
         self._handles.pop(handle.sandbox_id, None)
+
+    def _request_headers(self, handle: SandboxHandle) -> dict[str, str]:
+        headers = {"X-Sandbox-Token": handle.metadata.get("sandbox_token", self.sandbox_token)}
+        operation_id = current_operation_id()
+        if operation_id:
+            headers["X-Sandbox-Request-Id"] = operation_id
+        headers["X-Sandbox-Id"] = handle.sandbox_id
+        return headers
 
     async def exec(self, handle: SandboxHandle, command: str, cwd: str, timeout: int) -> str:
         response = await self.client.post(
             f"{handle.endpoint}/v1/exec",
-            headers={"X-Sandbox-Token": handle.metadata.get("sandbox_token", self.sandbox_token)},
+            headers=self._request_headers(handle),
             json={"command": command, "cwd": cwd, "timeout": timeout},
         )
         response.raise_for_status()
@@ -249,7 +289,7 @@ class LocalDockerBackend(SandboxBackend):
     async def start_process(self, handle: SandboxHandle, command: str, cwd: str) -> dict:
         response = await self.client.post(
             f"{handle.endpoint}/v1/processes",
-            headers={"X-Sandbox-Token": handle.metadata.get("sandbox_token", self.sandbox_token)},
+            headers=self._request_headers(handle),
             json={"command": command, "cwd": cwd},
         )
         response.raise_for_status()
@@ -258,7 +298,7 @@ class LocalDockerBackend(SandboxBackend):
     async def get_process(self, handle: SandboxHandle, process_handle: str) -> dict:
         response = await self.client.get(
             f"{handle.endpoint}/v1/processes/{process_handle}",
-            headers={"X-Sandbox-Token": handle.metadata.get("sandbox_token", self.sandbox_token)},
+            headers=self._request_headers(handle),
         )
         response.raise_for_status()
         return response.json()
@@ -266,7 +306,7 @@ class LocalDockerBackend(SandboxBackend):
     async def kill_process(self, handle: SandboxHandle, process_handle: str) -> dict:
         response = await self.client.delete(
             f"{handle.endpoint}/v1/processes/{process_handle}",
-            headers={"X-Sandbox-Token": handle.metadata.get("sandbox_token", self.sandbox_token)},
+            headers=self._request_headers(handle),
         )
         response.raise_for_status()
         return response.json()

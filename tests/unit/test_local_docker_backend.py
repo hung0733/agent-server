@@ -47,6 +47,23 @@ class FakeHealthClient:
         return self.responses.pop(0)
 
 
+class FakeHttpClient:
+    def __init__(self):
+        self.calls = []
+
+    async def post(self, url: str, headers=None, json=None):
+        self.calls.append(("POST", url, headers or {}, json))
+        return FakeResponse(200, {"stdout": "ok", "handle": "proc-1", "status": "running"})
+
+    async def get(self, url: str, headers=None):
+        self.calls.append(("GET", url, headers or {}, None))
+        return FakeResponse(200, {"handle": "proc-1", "status": "running"})
+
+    async def delete(self, url: str, headers=None):
+        self.calls.append(("DELETE", url, headers or {}, None))
+        return FakeResponse(200, {"handle": "proc-1", "status": "killed"})
+
+
 @pytest.mark.asyncio
 async def test_discover_reads_existing_container_metadata(tmp_path):
     commands = []
@@ -268,3 +285,19 @@ async def test_local_backend_rejects_glob_escape_patterns(tmp_path, local_handle
 
     with pytest.raises(RuntimeError, match="glob"):
         await backend.find_files(local_handle, "../*.txt", ".", 10)
+
+
+@pytest.mark.asyncio
+async def test_local_backend_sends_request_id_headers(tmp_path, local_handle):
+    from sandbox.logging import operation_context
+
+    client = FakeHttpClient()
+    backend = LocalDockerBackend(base_url="http://127.0.0.1", host_workspace_root=tmp_path, client=client)
+
+    async with operation_context("op-123"):
+        await backend.exec(local_handle, "pwd", "/workspace", 10)
+
+    method, _url, headers, _json = client.calls[0]
+    assert method == "POST"
+    assert headers["X-Sandbox-Request-Id"] == "op-123"
+    assert headers["X-Sandbox-Id"] == local_handle.sandbox_id
