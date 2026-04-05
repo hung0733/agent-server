@@ -362,6 +362,9 @@ class Bulter(Agent):
             logger.info(_("✅ 冇搵到未摘要嘅記錄"))
             return {"total_groups": 0, "total_messages": 0, "total_chunks": 0}
 
+        endpoints = await LLMLevelEndpointDAO.get_by_agent_instance_id(agent_id=agent_id)
+        model_set = LLMSet.from_model(endpoints)
+
         total_messages = 0
         total_chunks = 0
         total_groups = 0
@@ -438,14 +441,11 @@ class Bulter(Agent):
                             last_time.isoformat(),
                         )
 
-                        endpoints = await LLMLevelEndpointDAO.get_by_agent_instance_id(
-                            agent_id=agent_id
-                        )
                         await Bulter._summary_ltm(
                             agent_id,
                             session_id,
                             chunk,
-                            LLMSet.from_model(endpoints),
+                            model_set,
                             receiver_agent_name,
                         )
 

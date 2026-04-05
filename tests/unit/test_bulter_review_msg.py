@@ -24,6 +24,7 @@ def _message(message_type: MessageType, content: str):
         message_type=message_type,
         content_json={"content": content},
         created_at=datetime.now(timezone.utc) - timedelta(minutes=1),
+        receiver_agent_id=None,
     )
 
 
@@ -595,3 +596,36 @@ class TestBulterReviewMsg:
         assert result["messages_marked_analyzed"] == 2
         assert mark_mock.await_count == 1
         assert create_session_mock.await_count == 2
+
+
+class TestBulterReviewLtm:
+    async def test_review_ltm_fetches_endpoints_once_per_agent(self, monkeypatch):
+        messages = [
+            _message(MessageType.request, "m1"),
+            _message(MessageType.response, "m2"),
+        ]
+        grouped = {"2026-04-05": {"session-1": messages}}
+
+        monkeypatch.setattr(
+            "db.dao.agent_message_dao.AgentMessageDAO.get_unsummarized_messages_grouped",
+            AsyncMock(return_value=grouped),
+        )
+        monkeypatch.setattr(
+            Bulter,
+            "_split_messages_by_tokens",
+            lambda *_args, **_kwargs: [[messages[0]], [messages[1]]],
+        )
+
+        get_endpoints_mock = AsyncMock(return_value=[])
+        monkeypatch.setattr(
+            "db.dao.llm_level_endpoint_dao.LLMLevelEndpointDAO.get_by_agent_instance_id",
+            get_endpoints_mock,
+        )
+        monkeypatch.setattr(Bulter, "_summary_ltm", AsyncMock(return_value=True))
+
+        result = await Bulter.review_ltm("agent-001")
+
+        assert result["total_groups"] == 1
+        assert result["total_messages"] == 2
+        assert result["total_chunks"] == 2
+        assert get_endpoints_mock.await_count == 1
