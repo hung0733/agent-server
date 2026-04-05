@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 
 from sandbox_agent.models import ExecRequest, ProcessRequest
 from sandbox_agent.process_manager import ProcessManager
@@ -12,8 +12,8 @@ def create_app(api_token: str) -> FastAPI:
     app = FastAPI()
     manager = ProcessManager()
 
-    def _require_token(x_sandbox_token: str = Header(default="")) -> None:
-        if x_sandbox_token != api_token:
+    def _require_token(request: Request) -> None:
+        if request.headers.get("X-Sandbox-Token", "") != api_token:
             raise HTTPException(status_code=401, detail="unauthorized")
 
     @app.get("/health")

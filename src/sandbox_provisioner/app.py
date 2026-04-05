@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 
 
@@ -23,8 +23,8 @@ def build_provisioner_app(api_token: str = "") -> FastAPI:
     app = FastAPI()
     sandboxes: dict[str, ProvisionerSandbox] = {}
 
-    def _require_token(x_provisioner_token: str = Header(default="")) -> None:
-        if api_token and x_provisioner_token != api_token:
+    def _require_token(request: Request) -> None:
+        if api_token and request.headers.get("X-Provisioner-Token", "") != api_token:
             raise HTTPException(status_code=401, detail="unauthorized")
 
     @app.get("/health")

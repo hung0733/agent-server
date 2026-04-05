@@ -33,6 +33,7 @@ Local backend 會將以上路徑映射到 `AGENT_HOME_DIR/{user_id}` 下面的 p
 - deterministic container name
 - bind mount workspace
 - HTTP sandbox agent endpoint
+- backend now performs `docker inspect`, `docker run`, health polling, and `docker rm -f`
 
 ### Remote Provisioner
 

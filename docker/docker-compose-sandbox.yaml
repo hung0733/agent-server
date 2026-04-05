@@ -3,6 +3,8 @@ services:
     build:
       context: ..
       dockerfile: docker/sandbox/Dockerfile
+    env_file:
+      - ../.env.example
     environment:
       PYTHONPATH: /app/src
     ports:
@@ -17,6 +19,8 @@ services:
     build:
       context: ..
       dockerfile: docker/provisioner/Dockerfile
+    env_file:
+      - ../.env.example
     environment:
       PYTHONPATH: /app/src
     ports:
