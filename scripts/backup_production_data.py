@@ -19,6 +19,32 @@ def _require_env(name: str) -> str:
     return value
 
 
+def _build_docker_pg_dump_command(
+    *,
+    host: str,
+    port: str,
+    user: str,
+    password: str,
+    database: str,
+) -> list[str]:
+    return [
+        "docker",
+        "exec",
+        "-e",
+        f"PGPASSWORD={password}",
+        "agent-postgres",
+        "pg_dump",
+        "--format=custom",
+        "--host",
+        host,
+        "--port",
+        port,
+        "--username",
+        user,
+        database,
+    ]
+
+
 def main() -> int:
     load_dotenv()
 
@@ -34,29 +60,23 @@ def main() -> int:
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     backup_path = backup_dir / f"production_backup_{database}_{timestamp}.dump"
 
-    env = os.environ.copy()
-    env["PGPASSWORD"] = password
-
-    command = [
-        "pg_dump",
-        "--format=custom",
-        "--file",
-        str(backup_path),
-        "--host",
-        host,
-        "--port",
-        port,
-        "--username",
-        user,
-        database,
-    ]
+    command = _build_docker_pg_dump_command(
+        host=host,
+        port=port,
+        user=user,
+        password=password,
+        database=database,
+    )
 
     try:
-        subprocess.run(command, check=True, env=env)
+        with backup_path.open("wb") as backup_file:
+            subprocess.run(command, check=True, stdout=backup_file)
     except FileNotFoundError as exc:
-        raise RuntimeError("pg_dump is not installed or not in PATH") from exc
+        raise RuntimeError("docker is not installed or not in PATH") from exc
     except subprocess.CalledProcessError as exc:
-        raise RuntimeError(f"pg_dump failed with exit code {exc.returncode}") from exc
+        raise RuntimeError(
+            f"docker pg_dump failed with exit code {exc.returncode}"
+        ) from exc
 
     print(backup_path)
     return 0

@@ -39,13 +39,17 @@ from db import create_engine
 from db.dao.agent_instance_dao import AgentInstanceDAO
 from db.dao.agent_tool_dao import AgentTypeToolDAO, AgentInstanceToolDAO
 from db.dao.agent_type_dao import AgentTypeDAO
+from db.dao.task_dao import TaskDAO
+from db.dao.tool_call_dao import ToolCallDAO
 from db.dao.tool_dao import ToolDAO
 from db.dao.tool_version_dao import ToolVersionDAO
 from db.dao.user_dao import UserDAO
 from db.dto.agent_tool_dto import AgentTypeToolCreate, AgentInstanceToolCreate
 from db.dto.agent_dto import AgentTypeCreate, AgentInstanceCreate
+from db.dto.task_dto import TaskCreate
 from db.dto.tool_dto import ToolCreate, ToolVersionCreate
 from db.dto.user_dto import UserCreate
+from db.types import TaskStatus
 from i18n import _
 from tools.tools import get_tools
 
@@ -112,6 +116,22 @@ async def test_agent_instance(db_session: AsyncSession, test_user: UUID, test_ag
     )
     instance = await AgentInstanceDAO.create(instance_dto)
     return instance.id
+
+
+@pytest_asyncio.fixture
+async def test_task(
+    db_session: AsyncSession, test_user: UUID, test_agent_instance: UUID
+):
+    """Create a task for tool_call persistence integration tests."""
+    task = await TaskDAO.create(
+        TaskCreate(
+            user_id=test_user,
+            agent_id=test_agent_instance,
+            task_type="message",
+            status=TaskStatus.pending,
+        )
+    )
+    return task.id
 
 
 @pytest_asyncio.fixture
@@ -824,6 +844,36 @@ class TestToolConfiguration:
 
 class TestToolEndToEnd:
     """End-to-end integration tests."""
+
+    async def test_get_tools_persists_executed_tool_calls(
+        self,
+        agent_with_all_tools: UUID,
+        test_task: UUID,
+        test_tools: dict[str, UUID],
+    ):
+        """Test that executed tools persist rows into tool_calls."""
+        tools = await get_tools(str(agent_with_all_tools), task_id=str(test_task))
+        agents_list_tool = next(t for t in tools if t.name == "agents_list")
+
+        result = await agents_list_tool.ainvoke({})
+
+        assert isinstance(result, str)
+
+        persisted_calls = await ToolCallDAO.get_by_task_id(test_task)
+        matching_calls = [
+            call
+            for call in persisted_calls
+            if call.tool_id == test_tools["agents_list"] and call.input == {}
+        ]
+
+        assert len(matching_calls) == 1
+        latest_call = matching_calls[0]
+        assert latest_call.task_id == test_task
+        assert latest_call.status == "completed"
+        assert latest_call.input == {}
+        assert latest_call.output is not None
+        assert latest_call.duration_ms is not None
+        assert latest_call.duration_ms >= 0
 
     async def test_llm_can_use_all_filesystem_tools_in_sequence(
         self, db_session: AsyncSession, agent_with_all_tools: UUID

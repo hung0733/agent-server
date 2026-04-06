@@ -1,6 +1,8 @@
+from uuid import uuid4
+
 from langchain_core.messages import AIMessage, HumanMessage, RemoveMessage, SystemMessage, ToolMessage
 
-from graph.butler import _build_messages_with_token_budget, _compact_react_state_if_needed
+from graph.butler import _build_messages_with_token_budget, _compact_react_state_if_needed, _task_id_from_config
 
 
 class TestGraphButlerPromptBudget:
@@ -157,3 +159,10 @@ class TestGraphButlerPromptBudget:
 
         assert [type(message) for message in result] == [SystemMessage, HumanMessage]
         assert [message.content for message in result] == ["system", "m1"]
+
+    def test_task_id_from_config_accepts_uuid_objects(self):
+        task_id = uuid4()
+
+        result = _task_id_from_config({"configurable": {"args": {"task_id": task_id}}})
+
+        assert result == str(task_id)

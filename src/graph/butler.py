@@ -124,6 +124,25 @@ def _build_messages_with_token_budget(
     return messages_to_send
 
 
+def _task_id_from_config(config: RunnableConfig) -> str | None:
+    configurable = config.get("configurable", {})  # type: ignore[arg-type]
+    if not isinstance(configurable, dict):
+        return None
+
+    args = configurable.get("args")
+    if not isinstance(args, dict):
+        return None
+
+    task_id = args.get("task_id")
+    if task_id in (None, ""):
+        return None
+
+    task_id_str = str(task_id).strip()
+    if task_id_str:
+        return task_id_str
+    return None
+
+
 def _message_summary_line(message: BaseMessage) -> str:
     content = str(message.content).strip()
     if len(content) > 240:
@@ -372,7 +391,7 @@ async def level_1_node(
     )
 
     # 2. 用你寫好嘅 DB Loader 攞 Tools
-    db_tools = await get_tools(agent_db_id)
+    db_tools = await get_tools(agent_db_id, task_id=_task_id_from_config(config))
     logger.info(
         _("載入了 %d 個工具: %s"),
         len(db_tools),
@@ -466,7 +485,7 @@ async def level_2_node(
     )
 
     # 2. 用你寫好嘅 DB Loader 攞 Tools
-    db_tools = await get_tools(agent_db_id)
+    db_tools = await get_tools(agent_db_id, task_id=_task_id_from_config(config))
     logger.info(
         _("載入了 %d 個工具: %s"),
         len(db_tools),
@@ -560,7 +579,7 @@ async def level_3_node(
     )
 
     # 2. 用你寫好嘅 DB Loader 攞 Tools
-    db_tools = await get_tools(agent_db_id)
+    db_tools = await get_tools(agent_db_id, task_id=_task_id_from_config(config))
     logger.info(
         _("載入了 %d 個工具: %s"),
         len(db_tools),
@@ -726,7 +745,7 @@ async def dynamic_tool_node(
     agent_db_id: str = config["configurable"].get("agent_db_id", "")  # type: ignore
 
     # 2. 實時去 DB 攞最新嘅 Tools
-    db_tools = await get_tools(agent_db_id)
+    db_tools = await get_tools(agent_db_id, task_id=_task_id_from_config(config))
 
     # 3. 即場初始化 LangGraph 內建嘅 ToolNode
     # ⚠️ 注意：只入 db_tools！唔好入 `submit_final_answer`，因為嗰個係假 tool 用來截胡嘅

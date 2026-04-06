@@ -17,6 +17,7 @@ import asyncio
 import importlib
 import inspect
 import logging
+import time
 from typing import Any, Callable, List, Optional
 from uuid import UUID
 
@@ -25,8 +26,10 @@ from pydantic import BaseModel, Field, create_model
 
 from db.dao.agent_instance_dao import AgentInstanceDAO
 from db.dao.agent_tool_dao import AgentInstanceToolDAO
+from db.dao.tool_call_dao import ToolCallDAO
 from db.dao.tool_dao import ToolDAO
 from db.dao.tool_version_dao import ToolVersionDAO
+from db.dto.tool_call_dto import ToolCallCreate, ToolCallUpdate
 from i18n import _
 
 logger = logging.getLogger(__name__)
@@ -97,6 +100,34 @@ def _make_executor(
     """
     module_path, func_name = implementation_ref.rsplit(":", 1)
 
+    def _tool_task_id() -> UUID | None:
+        raw_task_id = merged_config.get("task_id")
+        if raw_task_id in (None, ""):
+            return None
+        try:
+            return UUID(str(raw_task_id))
+        except (TypeError, ValueError, AttributeError):
+            logger.warning(_("⚠️ 工具執行缺少有效 task_id，跳過 tool_calls 記錄: %s"), raw_task_id)
+            return None
+
+    def _tool_input(kwargs: dict[str, Any]) -> dict[str, Any]:
+        return {
+            key: value
+            for key, value in kwargs.items()
+            if key not in {"_config", "agent_db_id"}
+        }
+
+    def _normalize_tool_output(result: Any) -> dict[str, Any]:
+        if isinstance(result, dict):
+            return result
+        if hasattr(result, "model_dump") and callable(result.model_dump):
+            return result.model_dump()
+        if isinstance(result, (str, int, float, bool)) or result is None:
+            return {"content": result}
+        if isinstance(result, (list, tuple)):
+            return {"content": list(result)}
+        return {"content": str(result)}
+
     async def _arun(**kwargs: Any) -> str:
         module = importlib.import_module(module_path)
         fn = getattr(module, func_name)
@@ -105,15 +136,68 @@ def _make_executor(
             kwargs.setdefault("agent_db_id", agent_db_id)
         if "_config" in sig.parameters:
             kwargs["_config"] = merged_config
-        result = fn(**kwargs)
-        if asyncio.iscoroutine(result):
-            result = await result
-        return str(result)
+
+        task_id = _tool_task_id()
+        tool_call_id = None
+        tool_input = _tool_input(kwargs)
+        started_at = time.monotonic()
+
+        if task_id is not None:
+            try:
+                created_call = await ToolCallDAO.create(
+                    ToolCallCreate(
+                        task_id=task_id,
+                        tool_id=merged_config["tool_id"],
+                        tool_version_id=merged_config.get("tool_version_id"),
+                        input=tool_input,
+                        status="running",
+                    )
+                )
+                tool_call_id = created_call.id
+            except Exception as exc:
+                logger.warning(_("⚠️ 建立 tool_calls 記錄失敗: %s"), exc)
+
+        try:
+            result = fn(**kwargs)
+            if asyncio.iscoroutine(result):
+                result = await result
+
+            if tool_call_id is not None:
+                duration_ms = max(0, int((time.monotonic() - started_at) * 1000))
+                try:
+                    await ToolCallDAO.update(
+                        ToolCallUpdate(
+                            id=tool_call_id,
+                            status="completed",
+                            output=_normalize_tool_output(result),
+                            error_message=None,
+                            duration_ms=duration_ms,
+                        )
+                    )
+                except Exception as exc:
+                    logger.warning(_("⚠️ 更新 tool_calls 成功記錄失敗: %s"), exc)
+
+            return str(result)
+        except Exception as exc:
+            if tool_call_id is not None:
+                duration_ms = max(0, int((time.monotonic() - started_at) * 1000))
+                try:
+                    await ToolCallDAO.update(
+                        ToolCallUpdate(
+                            id=tool_call_id,
+                            status="failed",
+                            error_message=str(exc),
+                            duration_ms=duration_ms,
+                        )
+                    )
+                except Exception as update_exc:
+                    logger.warning(_("⚠️ 更新 tool_calls 失敗記錄失敗: %s"), update_exc)
+            raise
 
     return _arun
 
 
-async def get_tools(agent_db_id: str) -> List[StructuredTool]:
+async def get_tools(agent_db_id: str, task_id: str | None = None) -> List[StructuredTool]:
     """Load and return all effective LangChain tools for an agent instance.
 
     Resolves the two-layer tool grant system (type-level + instance overrides),
@@ -162,6 +246,9 @@ async def get_tools(agent_db_id: str) -> List[StructuredTool]:
             **override_map.get(tool_id, {}),
             "user_id": user_id,  # Inject user_id for path security in system tools
             "agent_db_id": agent_db_id,
+            "task_id": task_id,
+            "tool_id": tool_id,
+            "tool_version_id": getattr(version, "id", None),
             "sandbox_scope": "session",
             "sandbox_scope_key": agent_db_id,
         }
