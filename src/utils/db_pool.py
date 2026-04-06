@@ -129,10 +129,10 @@ class PoolConfig:
     dsn: str
     min_size: int = 10
     max_size: int = 20
-    command_timeout: int = 60
+    command_timeout: int = 180
     max_queries: int = 50000
     max_inactive_connection_lifetime: int = 300
-    timeout: int = 30
+    timeout: int = 60
     server_settings: Optional[dict[str, str]] = None
 
 

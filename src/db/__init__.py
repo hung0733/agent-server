@@ -62,6 +62,8 @@ def create_engine(
     max_size: Optional[int] = None,
     echo: bool = False,
     poolclass: Optional[type] = None,
+    command_timeout: Optional[int] = None,
+    timeout: Optional[int] = None,
 ) -> AsyncEngine:
     """Create an async SQLAlchemy engine for PostgreSQL.
     
@@ -71,6 +73,8 @@ def create_engine(
         max_size: Maximum pool size (passed to asyncpg via connect_args).
         echo: If True, enable SQL query logging.
         poolclass: SQLAlchemy pool class to use. Defaults to NullPool.
+        command_timeout: Timeout for SQL commands in seconds (default: 180).
+        timeout: Timeout for connection acquisition in seconds (default: 60).
         
     Returns:
         AsyncEngine instance configured for async operations with asyncpg.
@@ -83,6 +87,9 @@ def create_engine(
         
         # With pool settings
         engine = create_engine(min_size=5, max_size=10)
+        
+        # With custom timeout settings
+        engine = create_engine(command_timeout=300, timeout=120)
     """
     if dsn is None:
         dsn = get_dsn()
@@ -95,6 +102,10 @@ def create_engine(
         connect_args["min_size"] = min_size
     if max_size is not None:
         connect_args["max_size"] = max_size
+    
+    # Add timeout settings (defaults optimized for long-running operations)
+    connect_args["command_timeout"] = command_timeout if command_timeout is not None else 180
+    connect_args["timeout"] = timeout if timeout is not None else 60
     
     # App tables live in public schema only
     connect_args["server_settings"] = {"search_path": "public"}
