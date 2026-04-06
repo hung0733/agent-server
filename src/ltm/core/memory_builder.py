@@ -374,6 +374,17 @@ Now process the above dialogues. Return ONLY the JSON array, no other explanatio
         # Extract JSON
         data = self.llm_client.extract_json(response)
 
+        if isinstance(data, dict):
+            for key in ("entries", "memories", "items", "data"):
+                candidate = data.get(key)
+                if isinstance(candidate, list):
+                    data = candidate
+                    break
+            else:
+                list_values = [value for value in data.values() if isinstance(value, list)]
+                if len(list_values) == 1:
+                    data = list_values[0]
+
         if not isinstance(data, list):
             raise ValueError(f"Expected JSON array but got: {type(data)}")
 
