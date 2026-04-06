@@ -35,6 +35,17 @@ def _make_task() -> Task:
     )
 
 
+class _FakeSessionContext:
+    def __init__(self, session):
+        self._session = session
+
+    async def __aenter__(self):
+        return self._session
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
 @pytest.mark.asyncio
 async def test_tick_executes_pending_queue_tasks(monkeypatch):
     scheduler = TaskScheduler()
@@ -321,6 +332,68 @@ async def test_execute_schedule_success_resets_retry_count(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_execute_schedule_reuses_one_session_for_scheduler_dao_calls(monkeypatch):
+    scheduler = TaskScheduler()
+    current_time = datetime(2026, 4, 4, 4, 9, 20, tzinfo=timezone.utc)
+    expected_next_run = datetime(2026, 4, 4, 17, 0, 0, tzinfo=timezone.utc)
+    template_task = _make_task()
+    execution_task = _make_task()
+    queue_entry = SimpleNamespace(id=uuid4())
+    schedule = SimpleNamespace(
+        id=uuid4(),
+        task_template_id=template_task.id,
+        next_run_at=current_time,
+        schedule_expression="0 17 * * *",
+        schedule_type=ScheduleType.cron,
+        retry_count=0,
+    )
+    fake_session = object()
+    fake_engine = AsyncMock()
+
+    monkeypatch.setattr("scheduler.task_scheduler.create_engine", lambda: fake_engine, raising=False)
+    monkeypatch.setattr(
+        "scheduler.task_scheduler.async_sessionmaker",
+        lambda *_args, **_kwargs: (lambda: _FakeSessionContext(fake_session)),
+        raising=False,
+    )
+
+    get_by_id = AsyncMock(return_value=template_task)
+    create_task = AsyncMock(return_value=execution_task)
+    dependencies_met = AsyncMock(return_value=True)
+    create_queue = AsyncMock(return_value=queue_entry)
+    update_task = AsyncMock()
+    update_queue = AsyncMock()
+    update_schedule = AsyncMock()
+
+    monkeypatch.setattr("scheduler.task_scheduler.TaskDAO.get_by_id", get_by_id)
+    monkeypatch.setattr("scheduler.task_scheduler.TaskDAO.create", create_task)
+    monkeypatch.setattr("scheduler.task_scheduler.TaskDependencyDAO.are_dependencies_met", dependencies_met)
+    monkeypatch.setattr("scheduler.task_scheduler.TaskQueueDAO.create", create_queue)
+    monkeypatch.setattr("scheduler.task_scheduler.TaskDAO.update", update_task)
+    monkeypatch.setattr("scheduler.task_scheduler.TaskQueueDAO.update", update_queue)
+    monkeypatch.setattr("scheduler.task_scheduler.TaskScheduleDAO.update", update_schedule)
+    monkeypatch.setattr(
+        "scheduler.task_scheduler.TaskExecutor.execute_task",
+        AsyncMock(return_value={"success": True}),
+    )
+    monkeypatch.setattr(
+        "scheduler.task_scheduler.calculate_next_run",
+        lambda *_args, **_kwargs: expected_next_run,
+    )
+
+    await scheduler._execute_schedule(schedule, current_time)
+
+    assert get_by_id.await_args.kwargs["session"] is fake_session
+    assert create_task.await_args.kwargs["session"] is fake_session
+    assert dependencies_met.await_args.kwargs["session"] is fake_session
+    assert create_queue.await_args.kwargs["session"] is fake_session
+    assert update_task.await_args_list[0].kwargs["session"] is fake_session
+    assert update_queue.await_args_list[0].kwargs["session"] is fake_session
+    assert update_schedule.await_args.kwargs["session"] is fake_session
+    fake_engine.dispose.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_execute_schedule_failure_after_five_attempts_uses_one_hour_backoff(monkeypatch):
     scheduler = TaskScheduler()
     current_time = datetime(2026, 4, 4, 4, 9, 20, tzinfo=timezone.utc)
@@ -395,6 +468,42 @@ async def test_execute_agent_to_agent_queue_failure_requeues_with_backoff(monkey
     assert queue_retry_update.status == TaskStatus.pending
     assert queue_retry_update.retry_count == 1
     assert queue_retry_update.scheduled_at == current_time + timedelta(seconds=30)
+
+
+@pytest.mark.asyncio
+async def test_execute_queue_entry_reuses_one_session_for_scheduler_dao_calls(monkeypatch):
+    scheduler = TaskScheduler()
+    current_time = datetime(2026, 4, 4, 4, 9, 20, tzinfo=timezone.utc)
+    task = _make_task()
+    queue_entry = SimpleNamespace(id=uuid4(), task_id=task.id, status=TaskStatus.pending)
+    fake_session = object()
+    fake_engine = AsyncMock()
+
+    monkeypatch.setattr("scheduler.task_scheduler.create_engine", lambda: fake_engine, raising=False)
+    monkeypatch.setattr(
+        "scheduler.task_scheduler.async_sessionmaker",
+        lambda *_args, **_kwargs: (lambda: _FakeSessionContext(fake_session)),
+        raising=False,
+    )
+
+    dependencies_met = AsyncMock(return_value=True)
+    update_task = AsyncMock()
+    update_queue = AsyncMock()
+
+    monkeypatch.setattr("scheduler.task_scheduler.TaskDependencyDAO.are_dependencies_met", dependencies_met)
+    monkeypatch.setattr("scheduler.task_scheduler.TaskDAO.update", update_task)
+    monkeypatch.setattr("scheduler.task_scheduler.TaskQueueDAO.update", update_queue)
+    monkeypatch.setattr(
+        "scheduler.task_scheduler.TaskExecutor.execute_task",
+        AsyncMock(return_value={"success": True}),
+    )
+
+    await scheduler._execute_queue_entry(queue_entry, task, current_time)
+
+    assert dependencies_met.await_args.kwargs["session"] is fake_session
+    assert update_task.await_args_list[0].kwargs["session"] is fake_session
+    assert update_queue.await_args_list[0].kwargs["session"] is fake_session
+    fake_engine.dispose.assert_awaited_once()
 
 
 def test_seconds_until_next_minute_boundary_aligns_to_second_zero():
