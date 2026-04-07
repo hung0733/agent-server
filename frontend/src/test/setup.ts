@@ -55,6 +55,14 @@ beforeEach(() => {
         }),
       );
     }
+    if (url.match(/\/api\/dashboard\/schedules\/[^/]+\/run$/) && method === "POST") {
+      return Promise.resolve(
+        new Response(JSON.stringify({ success: true, taskId: "test-task-id" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    }
     if (url.includes("/api/dashboard/agent-types")) {
       return Promise.resolve(
         new Response(JSON.stringify(agentTypesPayload), {
