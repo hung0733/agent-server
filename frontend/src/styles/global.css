@@ -1429,6 +1429,14 @@ textarea {
   color: #ffb4a8;
 }
 
+.settings-success {
+  background: var(--color-success-bg, #d4edda);
+  border: 1px solid var(--color-success-border, #c3e6cb);
+  color: var(--color-success-text, #155724);
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
 .settings-secret-panel {
   margin-bottom: 16px;
   display: grid;
