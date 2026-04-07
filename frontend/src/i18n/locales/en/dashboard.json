@@ -195,5 +195,9 @@
   "agents.schedule.none": "Not set",
   "agents.schedule.deleteConfirm": "Delete this schedule?",
   "agents.schedule.loadError": "Unable to load schedules",
-  "agents.schedule.missingAgents": "No agents available for message schedules."
+  "agents.schedule.missingAgents": "No agents available for message schedules.",
+  "agents.schedule.executeButton": "Run",
+  "agents.schedule.runSuccess": "Task started",
+  "agents.schedule.runError": "Execution failed",
+  "agents.schedule.missingAgentError": "Schedule missing Agent, please configure Agent first"
 }

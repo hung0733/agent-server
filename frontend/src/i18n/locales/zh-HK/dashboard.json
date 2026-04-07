@@ -195,5 +195,9 @@
   "agents.schedule.none": "未設定",
   "agents.schedule.deleteConfirm": "確定刪除此排程？",
   "agents.schedule.loadError": "無法載入排程",
-  "agents.schedule.missingAgents": "未有可用員工，無法建立 message 排程。"
+  "agents.schedule.missingAgents": "未有可用員工，無法建立 message 排程。",
+  "agents.schedule.executeButton": "執行",
+  "agents.schedule.runSuccess": "任務已啟動",
+  "agents.schedule.runError": "執行失敗",
+  "agents.schedule.missingAgentError": "排程缺少 Agent，請先設定 Agent"
 }
