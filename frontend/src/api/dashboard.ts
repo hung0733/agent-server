@@ -119,6 +119,12 @@ export function refreshMessageSchedule(
   return mutateJson(`/api/dashboard/schedules/message/${scheduleId}/refresh`, "POST", {});
 }
 
+export function executeSchedule(
+  scheduleId: string,
+): Promise<{ success: boolean; taskId?: string; queueId?: string }> {
+  return mutateJson(`/api/dashboard/schedules/${scheduleId}/run`, "POST", {});
+}
+
 export function fetchSTM(): Promise<STMPayload> {
   return requestJson<STMPayload>("/api/dashboard/stm");
 }
