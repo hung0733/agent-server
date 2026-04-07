@@ -155,6 +155,12 @@ export default function ScheduleTab() {
     setPayload(resource);
   }, [resource]);
 
+  useEffect(() => {
+    if (!successMessage) return;
+    const timer = setTimeout(() => setSuccessMessage(null), 3000);
+    return () => clearTimeout(timer);
+  }, [successMessage]);
+
   const agentOptions = useMemo(
     () => agentsResource.agents.filter((agent) => agent.isActive),
     [agentsResource.agents],
@@ -259,7 +265,6 @@ export default function ScheduleTab() {
       const response = await executeSchedule(item.id);
       if (response.success) {
         setSuccessMessage(t("agents.schedule.runSuccess"));
-        setTimeout(() => setSuccessMessage(null), 3000);
       }
     } catch (runError) {
       const message = runError instanceof Error ? runError.message : t("agents.schedule.runError");
