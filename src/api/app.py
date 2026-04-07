@@ -44,12 +44,14 @@ from db.dao.memory_block_dao import MemoryBlockDAO
 from db.dto.memory_block_dto import MemoryBlockCreate, MemoryBlockUpdate
 from db.dto.collaboration_dto import CollaborationSessionCreate
 from db.dao.task_dao import TaskDAO
+from db.dao.task_queue_dao import TaskQueueDAO
 from db.dao.task_schedule_dao import TaskScheduleDAO
 from db.dto.task_dto import TaskCreate, TaskUpdate
+from db.dto.task_queue_dto import TaskQueueCreate, now_utc
 from db.dto.task_schedule_dto import TaskScheduleCreate, TaskScheduleUpdate
 from db.types import CollaborationStatus, TaskStatus, Priority, ScheduleType
 from db import AsyncSession, async_sessionmaker, create_engine
-from scheduler.task_scheduler import calculate_next_run
+from scheduler.task_scheduler import calculate_next_run, priority_to_int
 from sandbox.cleanup import run_sandbox_janitor_forever, run_sandbox_janitor_once
 from sandbox.factory import get_sandbox_provider
 from utils.timezone import to_server_tz
@@ -808,6 +810,59 @@ async def _dashboard_refresh_message_schedule(request: web.Request) -> web.Respo
     )
 
 
+async def _dashboard_run_schedule(request: web.Request) -> web.Response:
+    """Run a schedule immediately by creating task and queue entry."""
+    auth_context = await _require_auth(request)
+    schedule_id = UUID(request.match_info["schedule_id"])
+    
+    # Load schedule context
+    schedule, task, task_type, agent = await _load_schedule_context(
+        schedule_id, auth_context["user_id"]
+    )
+    
+    # Determine execution agent_id
+    execution_agent_id = task.agent_id
+    if execution_agent_id is None:
+        payload = dict(task.payload or {})
+        payload_agent_id = payload.get("agent_instance_id")
+        if payload_agent_id:
+            execution_agent_id = UUID(str(payload_agent_id))
+    
+    if execution_agent_id is None:
+        raise _json_http_error(400, "schedule_missing_agent")
+    
+    # Create execution task
+    current_time = now_utc()
+    execution_task = await TaskDAO.create(
+        TaskCreate(
+            user_id=task.user_id,
+            agent_id=execution_agent_id,
+            task_type=task.task_type,
+            status=TaskStatus.pending,
+            priority=task.priority,
+            payload=dict(task.payload or {}),
+            session_id=task.session_id,
+            parent_task_id=task.id,
+        )
+    )
+    
+    # Create queue entry
+    queue_entry = await TaskQueueDAO.create(
+        TaskQueueCreate(
+            task_id=execution_task.id,
+            status=TaskStatus.pending,
+            priority=priority_to_int(task.priority),
+            scheduled_at=current_time,
+        )
+    )
+    
+    return web.json_response({
+        "success": True,
+        "taskId": str(execution_task.id),
+        "queueId": str(queue_entry.id),
+    })
+
+
 def _serialize_endpoint(endpoint) -> dict:
     return {
         "id": str(endpoint.id),
@@ -1239,6 +1294,7 @@ def create_app(
     app.router.add_patch("/api/dashboard/schedules/message/{schedule_id}", _dashboard_update_message_schedule)
     app.router.add_delete("/api/dashboard/schedules/message/{schedule_id}", _dashboard_delete_message_schedule)
     app.router.add_post("/api/dashboard/schedules/message/{schedule_id}/refresh", _dashboard_refresh_message_schedule)
+    app.router.add_post("/api/dashboard/schedules/{schedule_id}/run", _dashboard_run_schedule)
     app.router.add_get("/api/dashboard/stm", _dashboard_stm)
     app.router.add_get("/api/dashboard/ltm", _dashboard_ltm)
     app.router.add_get("/api/dashboard/settings", _dashboard_settings)
