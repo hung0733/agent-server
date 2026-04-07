@@ -25,6 +25,7 @@ sys.modules.setdefault("isodate", types.SimpleNamespace(parse_duration=_parse_du
 
 import api.app as app_module
 from api.app import create_app
+from db.types import TaskStatus
 
 
 class _FakeQueue:
@@ -568,6 +569,12 @@ async def test_dashboard_run_schedule_valid(monkeypatch) -> None:
     assert payload["success"] is True
     assert payload["taskId"] == str(execution_task_id)
     assert payload["queueId"] == str(queue_id)
+
+    assert app_module.TaskDAO.create.await_count == 1
+    created_task_dto = app_module.TaskDAO.create.await_args.args[0]
+    assert created_task_dto.status == TaskStatus.pending
+
+    assert app_module.TaskQueueDAO.create.await_count == 1
 
 
 @pytest.mark.asyncio
