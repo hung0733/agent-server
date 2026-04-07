@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import {
   createMessageSchedule,
   deleteMessageSchedule,
+  executeSchedule,
   fetchAgents,
   fetchSchedules,
   refreshMessageSchedule,
@@ -59,6 +60,7 @@ function ScheduleCard({
   onEdit,
   onToggle,
   onRefresh,
+  onRun,
   onDelete,
 }: {
   item: ScheduleItem;
@@ -66,6 +68,7 @@ function ScheduleCard({
   onEdit?: () => void;
   onToggle?: () => void;
   onRefresh?: () => void;
+  onRun?: () => void;
   onDelete?: () => void;
 }) {
   const { t } = useTranslation();
@@ -104,24 +107,33 @@ function ScheduleCard({
           </dd>
         </div>
       </dl>
-      {!readOnly ? (
-        <div className="schedule-card__actions">
-          <button type="button" onClick={onEdit}>
-            {t("agents.schedule.editButton")}
+      <div className="schedule-card__actions">
+        {!readOnly ? (
+          <>
+            <button type="button" onClick={onEdit}>
+              {t("agents.schedule.editButton")}
+            </button>
+            <button type="button" onClick={onToggle}>
+              {item.isActive
+                ? t("agents.schedule.disableButton")
+                : t("agents.schedule.enableButton")}
+            </button>
+            <button type="button" onClick={onRefresh}>
+              {t("agents.schedule.refreshButton")}
+            </button>
+          </>
+        ) : null}
+        {onRun ? (
+          <button type="button" onClick={onRun}>
+            {t("agents.schedule.executeButton")}
           </button>
-          <button type="button" onClick={onToggle}>
-            {item.isActive
-              ? t("agents.schedule.disableButton")
-              : t("agents.schedule.enableButton")}
-          </button>
-          <button type="button" onClick={onRefresh}>
-            {t("agents.schedule.refreshButton")}
-          </button>
+        ) : null}
+        {!readOnly ? (
           <button type="button" onClick={onDelete}>
             {t("agents.schedule.deleteButton")}
           </button>
-        </div>
-      ) : null}
+        ) : null}
+      </div>
     </article>
   );
 }
@@ -137,6 +149,7 @@ export default function ScheduleTab() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   useEffect(() => {
     setPayload(resource);
@@ -239,6 +252,21 @@ export default function ScheduleTab() {
     }
   }
 
+  async function handleRun(item: ScheduleItem) {
+    setError(null);
+    setSuccessMessage(null);
+    try {
+      const response = await executeSchedule(item.id);
+      if (response.success) {
+        setSuccessMessage(t("agents.schedule.runSuccess"));
+        setTimeout(() => setSuccessMessage(null), 3000);
+      }
+    } catch (runError) {
+      const message = runError instanceof Error ? runError.message : t("agents.schedule.runError");
+      setError(message === "schedule_missing_agent" ? t("agents.schedule.missingAgentError") : message);
+    }
+  }
+
   async function handleDelete(item: ScheduleItem) {
     if (!window.confirm(t("agents.schedule.deleteConfirm"))) {
       return;
@@ -270,6 +298,7 @@ export default function ScheduleTab() {
 
   return (
     <section className="schedule-tab">
+      {successMessage ? <div className="card settings-success">{successMessage}</div> : null}
       {error ? <div className="card settings-error">{error}</div> : null}
 
       <article className="schedule-section">
@@ -391,6 +420,7 @@ export default function ScheduleTab() {
               onEdit={() => handleEdit(item)}
               onToggle={() => void handleToggle(item)}
               onRefresh={() => void handleRefresh(item)}
+              onRun={() => void handleRun(item)}
               onDelete={() => void handleDelete(item)}
             />
           ))}
@@ -406,7 +436,7 @@ export default function ScheduleTab() {
             <div className="card agents-placeholder">{t("agents.schedule.emptyMethod")}</div>
           ) : null}
           {payload.methodSchedules.map((item) => (
-            <ScheduleCard key={item.id} item={item} readOnly />
+            <ScheduleCard key={item.id} item={item} readOnly onRun={() => void handleRun(item)} />
           ))}
         </div>
       </article>
