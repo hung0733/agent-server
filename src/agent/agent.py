@@ -157,9 +157,9 @@ class Agent:
             old_messages = messages[:split_idx]
 
             context = (
-                ""
-                if summary is not None
-                else f"[本對話階段的舊有記憶 (供參考，請避免重複提取)]\n{summary}"
+                f"[本對話階段的舊有記憶 (供參考，請避免重複提取)]\n{summary}\n"
+                if summary
+                else ""
             )
 
             dialogue_text = ""
@@ -218,6 +218,45 @@ class Agent:
 
 現在請處理上述的 [當前視窗的最新對話紀錄]。嚴格遵守點列式輸出，嚴禁包含任何開場白、結語或其他解釋。
 """
+
+            STM_PROMPT_TOKEN_BUDGET = 24000
+            
+            prompt_tokens = Tools.get_token_count(prompt)
+            dialogue_tokens = Tools.get_token_count(dialogue_text)
+            context_tokens = Tools.get_token_count(context)
+            old_msgs_tokens = sum(Tools.get_token_count(m.content) for m in old_messages)
+            
+            logger.info(
+                _("🔍 背景任務：Prompt診斷 - prompt=%d, dialogue=%d, context=%d, old_msgs=%d, budget=%d"),
+                prompt_tokens, dialogue_tokens, context_tokens, old_msgs_tokens, STM_PROMPT_TOKEN_BUDGET
+            )
+            
+            if prompt_tokens > STM_PROMPT_TOKEN_BUDGET:
+                logger.warning(
+                    _("⚠️ 背景任務：Prompt token (%d) 超過預算 (%d)，開始動態縮減..."),
+                    prompt_tokens, STM_PROMPT_TOKEN_BUDGET
+                )
+                
+                max_dialogue_tokens = STM_PROMPT_TOKEN_BUDGET - Tools.get_token_count(prompt.replace(dialogue_text, ""))
+                truncated_lines = []
+                current_tokens = 0
+                
+                for line in dialogue_text.split("\n"):
+                    line_tokens = Tools.get_token_count(line)
+                    if current_tokens + line_tokens <= max_dialogue_tokens:
+                        truncated_lines.append(line)
+                        current_tokens += line_tokens
+                    else:
+                        break
+                
+                dialogue_text = "\n".join(truncated_lines)
+                prompt = prompt.replace(dialogue_text, dialogue_text)
+                
+                prompt_tokens = Tools.get_token_count(prompt)
+                logger.info(
+                    _("✅ 背景任務：縮減完成 - 新 prompt token=%d"),
+                    prompt_tokens
+                )
 
             for level in range(2, 0, -1):
                 models = model_set.level[level]
