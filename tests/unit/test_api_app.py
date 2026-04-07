@@ -167,12 +167,14 @@ class _FakeSchedule:
 
 
 class _FakeTask:
-    def __init__(self, task_id, user_id, agent_id, task_type, payload):
+    def __init__(self, task_id, user_id, agent_id, task_type, payload, priority="normal", session_id=None):
         self.id = task_id
         self.user_id = user_id
         self.agent_id = agent_id
         self.task_type = task_type
         self.payload = payload
+        self.priority = priority
+        self.session_id = session_id
 
 
 @pytest.mark.asyncio
@@ -497,6 +499,180 @@ async def test_refresh_message_schedule_updates_next_run(monkeypatch) -> None:
     assert response.status == 200
     assert payload["schedule"]["id"] == str(schedule_id)
     assert payload["schedule"]["taskType"] == "message"
+
+
+@pytest.mark.asyncio
+async def test_dashboard_run_schedule_valid(monkeypatch) -> None:
+    """Test running a schedule with valid agent_id."""
+    user_id = uuid4()
+    task_id = uuid4()
+    schedule_id = uuid4()
+    agent_id = uuid4()
+    execution_task_id = uuid4()
+    queue_id = uuid4()
+
+    monkeypatch.setattr(
+        app_module.TaskScheduleDAO,
+        "get_by_id",
+        AsyncMock(return_value=_FakeSchedule(schedule_id, task_id)),
+    )
+    monkeypatch.setattr(
+        app_module.TaskDAO,
+        "get_by_id",
+        AsyncMock(
+            return_value=_FakeTask(
+                task_id,
+                user_id,
+                agent_id,
+                "message",
+                {"prompt": "test"},
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        app_module.AgentInstanceDAO,
+        "get_by_id",
+        AsyncMock(return_value=type("Agent", (), {"id": agent_id, "name": "main", "agent_id": "agent-main"})()),
+    )
+    monkeypatch.setattr(
+        app_module.TaskDAO,
+        "create",
+        AsyncMock(return_value=type("Task", (), {"id": execution_task_id, "agent_id": agent_id, "parent_task_id": task_id})()),
+    )
+    monkeypatch.setattr(
+        app_module.TaskQueueDAO,
+        "create",
+        AsyncMock(return_value=type("Queue", (), {"id": queue_id, "task_id": execution_task_id})()),
+    )
+
+    app = create_app(
+        _FakeQueue(),
+        _FakeDedup(),
+        dashboard_data_provider=_FakeDashboardProvider(),
+        auth_service=_FakeAuthService(user_id),
+    )
+    server = TestServer(app)
+    client = TestClient(server)
+
+    await client.start_server()
+    try:
+        response = await client.post(
+            f"/api/dashboard/schedules/{schedule_id}/run",
+            headers={"X-API-Key": "good-key"},
+        )
+        payload = await response.json()
+    finally:
+        await client.close()
+
+    assert response.status == 200
+    assert payload["success"] is True
+    assert payload["taskId"] == str(execution_task_id)
+    assert payload["queueId"] == str(queue_id)
+
+
+@pytest.mark.asyncio
+async def test_dashboard_run_schedule_missing_agent(monkeypatch) -> None:
+    """Test running a schedule without agent_id returns error."""
+    user_id = uuid4()
+    task_id = uuid4()
+    schedule_id = uuid4()
+
+    monkeypatch.setattr(
+        app_module.TaskScheduleDAO,
+        "get_by_id",
+        AsyncMock(return_value=_FakeSchedule(schedule_id, task_id)),
+    )
+    monkeypatch.setattr(
+        app_module.TaskDAO,
+        "get_by_id",
+        AsyncMock(
+            return_value=_FakeTask(
+                task_id,
+                user_id,
+                None,
+                "message",
+                {},
+            )
+        ),
+    )
+
+    app = create_app(
+        _FakeQueue(),
+        _FakeDedup(),
+        dashboard_data_provider=_FakeDashboardProvider(),
+        auth_service=_FakeAuthService(user_id),
+    )
+    server = TestServer(app)
+    client = TestClient(server)
+
+    await client.start_server()
+    try:
+        response = await client.post(
+            f"/api/dashboard/schedules/{schedule_id}/run",
+            headers={"X-API-Key": "good-key"},
+        )
+        payload = await response.json()
+    finally:
+        await client.close()
+
+    assert response.status == 400
+    assert payload["error"] == "schedule_missing_agent"
+
+
+@pytest.mark.asyncio
+async def test_dashboard_run_schedule_not_found(monkeypatch) -> None:
+    """Test running a non-existent schedule returns 404."""
+    user_id = uuid4()
+    fake_schedule_id = uuid4()
+
+    monkeypatch.setattr(
+        app_module.TaskScheduleDAO,
+        "get_by_id",
+        AsyncMock(return_value=None),
+    )
+
+    app = create_app(
+        _FakeQueue(),
+        _FakeDedup(),
+        dashboard_data_provider=_FakeDashboardProvider(),
+        auth_service=_FakeAuthService(user_id),
+    )
+    server = TestServer(app)
+    client = TestClient(server)
+
+    await client.start_server()
+    try:
+        response = await client.post(
+            f"/api/dashboard/schedules/{fake_schedule_id}/run",
+            headers={"X-API-Key": "good-key"},
+        )
+        payload = await response.json()
+    finally:
+        await client.close()
+
+    assert response.status == 404
+    assert payload["error"] == "schedule_not_found"
+
+
+@pytest.mark.asyncio
+async def test_dashboard_run_schedule_unauthorized() -> None:
+    """Test running schedule without API key returns 401."""
+    app = create_app(_FakeQueue(), _FakeDedup(), dashboard_data_provider=_FakeDashboardProvider())
+    server = TestServer(app)
+    client = TestClient(server)
+
+    await client.start_server()
+    try:
+        fake_schedule_id = uuid4()
+        response = await client.post(
+            f"/api/dashboard/schedules/{fake_schedule_id}/run",
+        )
+        payload = await response.json()
+    finally:
+        await client.close()
+
+    assert response.status == 401
+    assert payload["error"] == "unauthorized"
 
 
 @pytest.mark.asyncio
