@@ -14,20 +14,22 @@ import os
 import re
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
+from alembic import command
+from alembic.config import Config
 import httpx
 from dotenv import load_dotenv
+from sqlalchemy import select
 
 load_dotenv()
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
 
-from db.config import async_session_factory, init_db, close_db
-from db.entity.agent import AgentEntity
-from db.entity.memory_block import MemoryBlockEntity
-from db.entity.session import SessionEntity
-from db.entity.user import UserEntity
-from i18n import _
+from backend.db.session import async_session_factory, engine
+from backend.entities import Agent, AgentSession, LlmGroup, MemoryBlock, UserAcc
+from backend.i18n import t
 
 logger = logging.getLogger(__name__)
 
@@ -65,62 +67,7 @@ async def call_llm(messages: list[dict[str, str]]) -> str:
 # Bootstrap System Prompt
 # ---------------------------------------------------------------------------
 
-BOOTSTRAP_SYSTEM_PROMPT = _(
-    """你正在執行 AI Agent 的 Bootstrap 流程。你的任務是透過對話了解用戶，然後生成一份 SOUL.md。
-
-## 規則
-1. **每次只問 1-3 個問題**，不要一次問太多。
-2. **像朋友一樣對話**，不要像審問。真誠反應、幽默、好奇心。
-3. **逐步深入**，每輪對話應該感覺比上一輪更了解用戶。
-4. **不要暴露模板**，用戶是在聊天，不是在填表。
-
-## 對話階段
-你需要了解以下資訊（按順序進行，但可跳過用戶已自願提供的部分）：
-
-1. **語言**：用戶偏好什麼語言？
-2. **用戶背景**：姓名、職業/背景、痛點、希望 AI 叫什麼名字、關係定位（夥伴/助手/其他）
-3. **性格**：核心特質（3-5 個行為規則，不是形容詞）、溝通風格、是否需要 AI 反駁/挑戰、自主程度
-4. **深度**：長期願景、失敗哲學、邊界/底線
-
-## 生成 SOUL.md
-當你收集到足夠資訊後，生成 SOUL.md。格式如下：
-
-```markdown
-**Identity**
-
-[AI 名稱] — [用戶姓名] 的 [關係定位]，不是 [對比]。目標：[長期願景]。處理 [痛點領域]，讓 [用戶姓名] 專注於 [重要事項]。
-
-**Core Traits**
-
-[特質 1 — 行為規則]
-[特質 2 — 行為規則]
-[特質 3 — 行為規則]
-[特質 4 — 失敗處理規則]
-[特質 5 — 可選]
-
-**Communication**
-
-[語氣描述]。預設語言：[語言]。[其他風格說明]。
-
-**Growth**
-
-Learn [用戶姓名] through every conversation — thinking patterns, preferences, blind spots, aspirations. Over time, anticipate needs and act on [用戶姓名]'s behalf with increasing accuracy. Early stage: proactively ask casual/personal questions after tasks to deepen understanding of who [用戶姓名] is. Full of curiosity, willing to explore.
-
-**Lessons Learned**
-
-_(Mistakes and insights recorded here to avoid repeating them.)_
-```
-
-## 重要規則
-- SOUL.md **必須用英文寫**，不論用戶用什麼語言對話。
-- 總字數不超過 300 字。
-- 核心特質是**行為規則**，不是形容詞。寫 "argue position, push back" 而不是 "honest and brave"。
-- 生成後請用戶確認，如有需要可修改。
-- 當用戶確認後，在最最後一行輸出標記 `__SOUL_CONFIRMED__`，然後在下一行開始輸出完整的 SOUL.md 內容。
-- 在 SOUL.md 結束後，輸出 `__END_OF_SOUL__` 標記。
-
-請用溫暖、友善的方式開始對話，先問候用戶，然後開始了解他們。"""
-)
+BOOTSTRAP_SYSTEM_PROMPT = t("scripts.new_agent.bootstrap_system_prompt")
 
 
 # ---------------------------------------------------------------------------
@@ -152,14 +99,12 @@ async def run_bootstrap_conversation(agent_name: str) -> str:
         {"role": "system", "content": BOOTSTRAP_SYSTEM_PROMPT},
         {
             "role": "user",
-            "content": _(
-                f"你好！我想建立一個新的 AI Agent，名字叫做「{agent_name}」。讓我們開始 Bootstrap 對話吧！"
-            ),
+            "content": t("scripts.new_agent.bootstrap_user_start") % agent_name,
         },
     ]
 
-    print(_("\n" + "=" * 60))
-    print(_("[Bootstrap] 正在與 LLM 進行對話..."))
+    print("\n" + "=" * 60)
+    print(t("scripts.new_agent.bootstrap_start"))
     print("=" * 60 + "\n")
 
     max_rounds = 15
@@ -167,7 +112,7 @@ async def run_bootstrap_conversation(agent_name: str) -> str:
 
     while round_num < max_rounds:
         round_num += 1
-        print(_(f"--- 第 {round_num} 輪對話 ---"))
+        print(t("scripts.new_agent.round") % round_num)
 
         # Call LLM
         reply = await call_llm(messages)
@@ -175,25 +120,25 @@ async def run_bootstrap_conversation(agent_name: str) -> str:
         # Check if SOUL.md is ready
         soul_content = extract_soul_md(reply)
         if soul_content:
-            print(_("\n[Bootstrap] LLM 已生成 SOUL.md！"))
+            print(t("scripts.new_agent.bootstrap_ready"))
             print("-" * 40)
             print(soul_content)
             print("-" * 40)
             return soul_content
 
         # Print LLM reply
-        print(_("\n[Agent]:"), reply)
+        print("\n[Agent]:", reply)
         print()
 
         # Get user input
-        user_input = input(_("你的回覆（輸入 'quit' 結束）: ")).strip()
+        user_input = input(t("scripts.new_agent.reply_prompt")).strip()
         if user_input.lower() in ("quit", "exit", "q"):
-            raise KeyboardInterrupt(_("用戶中斷了 Bootstrap 對話"))
+            raise KeyboardInterrupt(t("scripts.new_agent.bootstrap_cancelled"))
 
         messages.append({"role": "assistant", "content": reply})
         messages.append({"role": "user", "content": user_input})
 
-    raise RuntimeError(_("對話超過最大輪數限制，無法完成 SOUL.md 生成"))
+    raise RuntimeError(t("scripts.new_agent.max_rounds_exceeded"))
 
 
 # ---------------------------------------------------------------------------
@@ -204,21 +149,18 @@ async def run_bootstrap_conversation(agent_name: str) -> str:
 async def ensure_user_exists(name: str) -> int:
     """確保用戶存在，不存在則創建。回傳 user.id（資料庫主鍵）。"""
     async with async_session_factory() as session:
-        # Try to find user by name
-        from sqlalchemy import select
-
-        stmt = select(UserEntity).where(UserEntity.name == name)
+        stmt = select(UserAcc).where(UserAcc.name == name)
         result = await session.execute(stmt)
         user = result.scalar_one_or_none()
 
         if user:
-            logger.info(_("找到現有用戶：%s (id=%s)"), name, user.id)
+            logger.info(t("scripts.new_agent.existing_user"), name, user.id)
             return user.id
 
         # Create new user
         import uuid
 
-        user = UserEntity(
+        user = UserAcc(
             user_id=f"user_{uuid.uuid4().hex[:12]}",
             name=name,
         )
@@ -226,23 +168,48 @@ async def ensure_user_exists(name: str) -> int:
         await session.flush()
         await session.refresh(user)
         await session.commit()
-        logger.info(_("創建新用戶：%s (id=%s)"), name, user.id)
+        logger.info(t("scripts.new_agent.user_created"), name, user.id)
         return user.id
+
+
+async def ensure_llm_group_exists(user_db_id: int, name: str = "default") -> int:
+    """確保用戶有 LLM group，回傳 llm_group.id。"""
+    async with async_session_factory() as session:
+        stmt = select(LlmGroup).where(
+            LlmGroup.user_id == user_db_id,
+            LlmGroup.name == name,
+        )
+        result = await session.execute(stmt)
+        group = result.scalar_one_or_none()
+
+        if group:
+            logger.info(t("scripts.new_agent.existing_llm_group"), name, group.id)
+            return group.id
+
+        group = LlmGroup(user_id=user_db_id, name=name)
+        session.add(group)
+        await session.flush()
+        await session.refresh(group)
+        await session.commit()
+        logger.info(t("scripts.new_agent.llm_group_created"), name, group.id)
+        return group.id
 
 
 async def create_agent_in_db(
     user_db_id: int,
+    llm_group_id: int,
     agent_id: str,
     name: str,
     agent_type: str = "agent",
 ) -> int:
     """在資料庫中創建 Agent 記錄。回傳 agent.id（資料庫主鍵）。"""
     async with async_session_factory() as session:
-        agent = AgentEntity(
+        agent = Agent(
             user_id=user_db_id,
             agent_id=agent_id,
             name=name,
             is_active=True,
+            llm_group_id=llm_group_id,
             agent_type=agent_type,
         )
         session.add(agent)
@@ -250,7 +217,7 @@ async def create_agent_in_db(
         await session.refresh(agent)
         await session.commit()
         logger.info(
-            _("創建 Agent：%s (id=%s, agent_id=%s, type=%s)"),
+            t("scripts.new_agent.agent_created"),
             name,
             agent.id,
             agent.agent_id,
@@ -267,25 +234,26 @@ async def create_default_session(
     session_id = f"default-{agent_uuid}"
 
     async with async_session_factory() as session:
-        default_session = SessionEntity(
+        default_session = AgentSession(
             recv_agent_id=agent_db_id,
             session_id=session_id,
-            name="預設對話",
+            name=t("scripts.new_agent.default_session_name"),
             session_type="chat",
+            sender_agent_id=agent_db_id,
             is_confidential=False,
         )
         session.add(default_session)
         await session.flush()
         await session.refresh(default_session)
         await session.commit()
-        logger.info(_("創建預設 Session：%s (id=%s)"), session_id, default_session.id)
+        logger.info(t("scripts.new_agent.session_created"), session_id, default_session.id)
         return session_id
 
 
 async def save_soul_to_db(agent_db_id: int, soul_content: str) -> None:
     """將 SOUL.md 儲存至 memory_block 表。"""
     async with async_session_factory() as session:
-        memory_block = MemoryBlockEntity(
+        memory_block = MemoryBlock(
             agent_id=agent_db_id,
             memory_type="SOUL",
             content=soul_content,
@@ -295,7 +263,14 @@ async def save_soul_to_db(agent_db_id: int, soul_content: str) -> None:
         await session.flush()
         await session.refresh(memory_block)
         await session.commit()
-        logger.info(_("SOUL.md 已儲存至 memory_block (id=%s)"), memory_block.id)
+        logger.info(t("scripts.new_agent.soul_saved"), memory_block.id)
+
+
+async def init_db() -> None:
+    """套用資料庫 migration，確保 schema 與 ORM model 一致。"""
+    alembic_cfg = Config(str(PROJECT_ROOT / "alembic.ini"))
+    alembic_cfg.set_main_option("script_location", str(PROJECT_ROOT / "alembic"))
+    await asyncio.to_thread(command.upgrade, alembic_cfg, "head")
 
 
 # ---------------------------------------------------------------------------
@@ -306,39 +281,40 @@ async def save_soul_to_db(agent_db_id: int, soul_content: str) -> None:
 async def main() -> None:
     """主流程：收集輸入 -> Bootstrap 對話 -> 儲存至 DB。"""
     print("=" * 60)
-    print(_("🤖  New Agent 建立工具"))
+    print(t("scripts.new_agent.title"))
     print("=" * 60)
     print()
 
     # Step 1: Get agent name
-    agent_name = input(_("請輸入 Agent 名稱: ")).strip()
+    agent_name = input(t("scripts.new_agent.enter_agent_name")).strip()
     if not agent_name:
-        print(_("錯誤：Agent 名稱不能為空"))
+        print(t("scripts.new_agent.agent_name_empty"))
         sys.exit(1)
 
     # Step 2: Get user name (for DB)
-    user_name = input(_("請輸入你的名稱（用於資料庫）: ")).strip()
+    user_name = input(t("scripts.new_agent.enter_user_name")).strip()
     if not user_name:
         user_name = "default_user"
 
     # Step 3: Select agent type
     print()
-    print(_("請選擇 Agent 類型："))
+    print(t("scripts.new_agent.select_agent_type"))
     print("  1) agent")
     print("  2) supervisor")
-    type_choice = input(_("請輸入選項 (1-2，預設 1): ")).strip()
+    type_choice = input(t("scripts.new_agent.enter_option")).strip()
     if type_choice == "2":
         agent_type = "supervisor"
     else:
         agent_type = "agent"
-    print(_("已選擇 Agent 類型：%s") % agent_type)
+    print(t("scripts.new_agent.agent_type_selected") % agent_type)
     print()
-    print(_("正在初始化資料庫..."))
+    print(t("scripts.new_agent.init_db"))
     await init_db()
 
     try:
         # Ensure user exists
         user_db_id = await ensure_user_exists(user_name)
+        llm_group_id = await ensure_llm_group_exists(user_db_id)
 
         # Create agent record
         import uuid
@@ -346,11 +322,15 @@ async def main() -> None:
         agent_uuid = str(uuid.uuid4())
         agent_id_str = f"agent-{agent_uuid}"
         agent_db_id = await create_agent_in_db(
-            user_db_id, agent_id_str, agent_name, agent_type
+            user_db_id,
+            llm_group_id,
+            agent_id_str,
+            agent_name,
+            agent_type,
         )
 
         # Create default session
-        session_id = f"default-{agent_uuid}"
+        session_id = await create_default_session(agent_db_id, agent_uuid)
 
         # Run bootstrap conversation
         soul_content = await run_bootstrap_conversation(agent_name)
@@ -360,23 +340,23 @@ async def main() -> None:
 
         print()
         print("=" * 60)
-        print(_("✅ Agent 建立完成！"))
-        print(f"   {_('名稱')}: {agent_name}")
-        print(f"   {_('Agent ID')}: {agent_id_str}")
-        print(f"   {_('Agent 類型')}: {agent_type}")
-        print(f"   {_('Session ID')}: {session_id}")
-        print(f"   {_('SOUL.md')}: {_('已儲存至資料庫')}")
+        print(t("scripts.new_agent.complete"))
+        print(f"   {t('scripts.new_agent.name')}: {agent_name}")
+        print(f"   {t('scripts.new_agent.agent_id')}: {agent_id_str}")
+        print(f"   {t('scripts.new_agent.agent_type')}: {agent_type}")
+        print(f"   {t('scripts.new_agent.session_id')}: {session_id}")
+        print(f"   SOUL.md: {t('scripts.new_agent.soul_status')}")
         print("=" * 60)
 
     except KeyboardInterrupt:
-        print(_("\n\n操作已取消"))
+        print(t("scripts.new_agent.operation_cancelled"))
         sys.exit(130)
     except Exception as e:
-        logger.error(_("建立 Agent 時發生錯誤：%s"), e, exc_info=True)
-        print(f"\n{_('錯誤')}：{e}")
+        logger.error(t("scripts.new_agent.error_creating_agent"), e, exc_info=True)
+        print(f"\n{t('scripts.new_agent.error')}: {e}")
         sys.exit(1)
     finally:
-        await close_db()
+        await engine.dispose()
 
 
 if __name__ == "__main__":
