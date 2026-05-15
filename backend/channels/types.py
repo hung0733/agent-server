@@ -46,6 +46,8 @@ class WhatsAppInboundMessage(ChannelModel):
 
 class ReceivedMessage(ChannelModel):
     instance: str | None = None
+    agent_id: str | None = None
+    session_id: str | None = None
     remote_jid: str | None = None
     phone_no: str | None = None
     content: str | None = None

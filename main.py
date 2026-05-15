@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 from sqlalchemy import text
 
 from backend.channels import EvolutionWhatsAppChannel
-from backend.channels.types import ReceivedMessage, WhatsAppInboundMessage
+from backend.channels.evolution_handler import run_whatsapp_listener
 from backend.db.session import engine
 from backend.i18n import t
 from logger_setup import setup_logging
@@ -27,42 +27,6 @@ async def check_database(db_engine: Any = engine) -> None:
         raise
 
     logger.info(t("main.db_health_check_ok"))
-
-
-def extract_message_metadata(
-    message: WhatsAppInboundMessage,
-) -> tuple[str | None, str | None]:
-    data = message.data if isinstance(message.data, dict) else {}
-    key = data.get("key") if isinstance(data.get("key"), dict) else {}
-    message_id = key.get("id") or data.get("messageId")
-    remote_jid = (
-        key.get("remoteJid") or data.get("remoteJid") or message.raw.get("sender")
-    )
-    return message_id, remote_jid
-
-
-def log_inbound_message(message: WhatsAppInboundMessage) -> None:
-    received_message = EvolutionWhatsAppChannel().to_received_message(message)
-    log_received_message(received_message)
-
-
-def log_received_message(message: ReceivedMessage) -> None:
-    logger.info(
-        t("main.whatsapp_message_received"),
-        message.instance,
-        message.message_id,
-        message.remote_jid,
-        message.phone_no,
-        message.content_type,
-        message.has_text,
-        message.has_media,
-    )
-
-
-async def run_whatsapp_listener(channel: EvolutionWhatsAppChannel) -> None:
-    logger.info(t("main.whatsapp_listener_started"))
-    async for message in channel.listen_messages():
-        log_inbound_message(message)
 
 
 def _install_signal_handlers(shutdown_event: asyncio.Event) -> None:

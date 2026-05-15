@@ -3,7 +3,6 @@ import asyncio
 import pytest
 
 import main as main_module
-from backend.channels.types import WhatsAppInboundMessage
 
 
 class FakeConnection:
@@ -33,13 +32,12 @@ class FakeEngine:
 
 
 class FakeChannel:
-    def __init__(self, messages=None):
-        self.messages = list(messages or [])
+    def __init__(self):
         self.closed = False
 
     async def listen_messages(self):
-        for message in self.messages:
-            yield message
+        if False:
+            yield None
 
     async def close(self):
         self.closed = True
@@ -54,92 +52,18 @@ async def test_check_database_runs_select_one():
     assert engine.executed == ["select 1"]
 
 
-def test_extract_message_metadata_from_whatsapp_payload():
-    message = WhatsAppInboundMessage(
-        event="messages.upsert",
-        instance="sales-agent",
-        data={"key": {"id": "msg-1", "remoteJid": "85298765432@s.whatsapp.net"}},
-        raw={"instance": "sales-agent"},
-    )
-
-    assert main_module.extract_message_metadata(message) == ("msg-1", "85298765432@s.whatsapp.net")
-
-
-def test_log_received_message_includes_content_metadata(monkeypatch):
-    calls = []
-    monkeypatch.setattr(main_module.logger, "info", lambda *args: calls.append(args))
-    received_message = main_module.EvolutionWhatsAppChannel().to_received_message(
-        WhatsAppInboundMessage(
-            event="messages.upsert",
-            instance="sales-agent",
-            data={
-                "key": {"id": "msg-1", "remoteJid": "85298765432@s.whatsapp.net"},
-                "message": {"imageMessage": {"caption": "image text"}},
-            },
-            raw={"instance": "sales-agent"},
-        )
-    )
-
-    main_module.log_received_message(received_message)
-
-    assert calls[0][1:] == (
-        "sales-agent",
-        "msg-1",
-        "85298765432@s.whatsapp.net",
-        "85298765432",
-        "image",
-        True,
-        True,
-    )
-
-
-@pytest.mark.asyncio
-async def test_run_whatsapp_listener_logs_inbound_metadata(monkeypatch):
-    calls = []
-    monkeypatch.setattr(main_module.logger, "info", lambda *args: calls.append(args))
-    channel = FakeChannel(
-        [
-            WhatsAppInboundMessage(
-                event="messages.upsert",
-                instance="sales-agent",
-                data={"key": {"id": "msg-1", "remoteJid": "85298765432@s.whatsapp.net"}},
-                raw={"instance": "sales-agent"},
-            )
-        ]
-    )
-
-    await main_module.run_whatsapp_listener(channel)
-
-    assert any(
-        args[1:]
-        == (
-            "sales-agent",
-            "msg-1",
-            "85298765432@s.whatsapp.net",
-            "85298765432",
-            "unknown",
-            False,
-            False,
-        )
-        for args in calls
-    )
-
-
 @pytest.mark.asyncio
 async def test_main_starts_listener_and_cleans_up(monkeypatch):
     engine = FakeEngine()
-    channel = FakeChannel(
-        [
-            WhatsAppInboundMessage(
-                event="messages.upsert",
-                instance="sales-agent",
-                data={"key": {"id": "msg-1", "remoteJid": "85298765432@s.whatsapp.net"}},
-                raw={"instance": "sales-agent"},
-            )
-        ]
-    )
+    channel = FakeChannel()
     setup_calls = []
+    listener_calls = []
     monkeypatch.setattr(main_module, "_install_signal_handlers", lambda shutdown_event: None)
+
+    async def run_listener(received_channel):
+        listener_calls.append(received_channel)
+
+    monkeypatch.setattr(main_module, "run_whatsapp_listener", run_listener)
 
     await main_module.main(
         db_engine=engine,
@@ -149,6 +73,7 @@ async def test_main_starts_listener_and_cleans_up(monkeypatch):
     )
 
     assert setup_calls == [True]
+    assert listener_calls == [channel]
     assert engine.executed == ["select 1"]
     assert channel.closed is True
     assert engine.disposed is True
