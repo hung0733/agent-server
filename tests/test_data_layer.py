@@ -108,9 +108,11 @@ def test_dto_validation_and_from_attributes():
             "is_sub_agent": False,
             "phone_no": None,
             "whatsapp_key": None,
+            "whatsapp_instance": None,
         },
     )()
     assert AgentRead.model_validate(agent_obj).agent_id == "agent-1"
+    assert AgentRead.model_validate(agent_obj).whatsapp_instance is None
 
     assert isinstance(datetime.now(timezone.utc), datetime)
 

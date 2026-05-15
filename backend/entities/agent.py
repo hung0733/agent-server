@@ -17,6 +17,7 @@ class Agent(Base):
     is_sub_agent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     phone_no: Mapped[str | None] = mapped_column(String(50))
     whatsapp_key: Mapped[str | None] = mapped_column(String(1024))
+    whatsapp_instance: Mapped[str | None] = mapped_column(String(255))
 
     user = relationship("UserAcc", back_populates="agents")
     llm_group = relationship("LlmGroup", back_populates="agents")

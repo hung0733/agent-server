@@ -11,6 +11,7 @@ class AgentCreate(BaseModel):
     is_sub_agent: bool = False
     phone_no: str | None = None
     whatsapp_key: str | None = None
+    whatsapp_instance: str | None = None
 
 
 class AgentUpdate(BaseModel):
@@ -23,6 +24,7 @@ class AgentUpdate(BaseModel):
     is_sub_agent: bool | None = None
     phone_no: str | None = None
     whatsapp_key: str | None = None
+    whatsapp_instance: str | None = None
 
 
 class AgentRead(AgentCreate):
