@@ -246,7 +246,9 @@ async def create_default_session(
         await session.flush()
         await session.refresh(default_session)
         await session.commit()
-        logger.info(t("scripts.new_agent.session_created"), session_id, default_session.id)
+        logger.info(
+            t("scripts.new_agent.session_created"), session_id, default_session.id
+        )
         return session_id
 
 
@@ -334,6 +336,10 @@ async def main() -> None:
 
         # Run bootstrap conversation
         soul_content = await run_bootstrap_conversation(agent_name)
+
+        soul_content = soul_content.replace("[Your Name]", user_name).replace(
+            "[You]", user_name
+        )
 
         # Save SOUL.md to DB
         await save_soul_to_db(agent_db_id, soul_content)

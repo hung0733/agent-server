@@ -7,7 +7,7 @@ import uuid
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 
-from backend.dao import AgentSessionDAO
+from backend.dao import AgentSessionDAO, MemoryBlockDAO
 from backend.db.session import async_session_factory
 from backend.dto.agent import SUMMARY_TRIGGER_TOKEN, SUMMARY_USAGE_TOKEN
 from backend.graph.graph_node import GraphNode
@@ -93,7 +93,33 @@ class Agent:
         return agent
 
     async def prepare_sys_prompt(self):
-        self.sys_prompt = ""
+        memory_types = ("SOUL", "USER_PROFILE", "IDENTITY", "SYS_PROMPT")
+
+        async with async_session_factory() as session:
+            memory_blocks = await MemoryBlockDAO(
+                session
+            ).list_by_agent_id_and_memory_types(self.agent_db_id, memory_types)
+
+        tagged_memory_types = ("SOUL", "USER_PROFILE", "IDENTITY")
+        tagged_sys_prompt = "\n\n".join(
+            f"<{memory_block.memory_type}>\n{content}\n</{memory_block.memory_type}>"
+            for memory_block in memory_blocks
+            if memory_block.memory_type in tagged_memory_types
+            for content in [(memory_block.content or "").strip()]
+            if content
+        )
+
+        raw_sys_prompt = "\n\n".join(
+            content
+            for memory_block in memory_blocks
+            if memory_block.memory_type == "SYS_PROMPT"
+            for content in [(memory_block.content or "").strip()]
+            if content
+        )
+
+        self.sys_prompt = "\n\n".join(
+            prompt_part for prompt_part in (tagged_sys_prompt, raw_sys_prompt) if prompt_part
+        )
 
     async def init_llm_models(self):
         self.models = await LLMSet.from_model(self.agent_db_id)
