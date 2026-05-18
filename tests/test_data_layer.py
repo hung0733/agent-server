@@ -6,18 +6,27 @@ from urllib.parse import quote_plus
 import pytest
 from dotenv import load_dotenv
 from sqlalchemy import text
-from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from backend.dao import AgentDAO, AgentSessionDAO, LlmGroupDAO, UserAccDAO
+from backend.dao import (
+    AgentDAO,
+    AgentSessionDAO,
+    LlmEndpointDAO,
+    LlmGroupDAO,
+    LlmLevelDAO,
+    UserAccDAO,
+)
 from backend.db.base import Base
+from backend.llm.llm import LLMSet
 import backend.entities  # noqa: F401
 from backend.dto import (
     AgentCreate,
     AgentRead,
     AgentSessionCreate,
     AgentUpdate,
+    LlmEndpointCreate,
     LlmGroupCreate,
+    LlmLevelCreate,
     LlmGroupRead,
     UserAccCreate,
     UserAccRead,
@@ -50,31 +59,53 @@ def build_test_database_url() -> str:
     port = getenv("POSTGRES_TEST_PORT", getenv("POSTGRES_PORT", "5432"))
     user = getenv("POSTGRES_TEST_USER", getenv("POSTGRES_USER", "postgres"))
     password = quote_plus(getenv("POSTGRES_TEST_PASSWORD", getenv("POSTGRES_PASSWORD", "")))
-    database = getenv("POSTGRES_TEST_DB", f"{getenv('POSTGRES_DB', 'postgres')}_test")
+    database = getenv("POSTGRES_TEST_DB", getenv("POSTGRES_DB", "postgres"))
     return f"postgresql+asyncpg://{user}:{password}@{host}:{port}/{database}"
 
 
-def assert_test_database_url(url: str) -> None:
-    database = make_url(url).database or ""
-    if "test" not in database.lower():
-        pytest.fail(f"Database pytest must use a test DB; got database name {database!r}.")
+def get_test_schema() -> str:
+    return getenv("TEST_SCHEMA", "test")
 
 
-async def ensure_test_database_exists(url: str) -> None:
-    parsed_url = make_url(url)
-    database = parsed_url.database or ""
-    if not re.fullmatch(r"[A-Za-z0-9_]+", database):
-        pytest.fail(f"Test database name must be a simple identifier; got {database!r}.")
+def assert_test_schema(schema: str) -> None:
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", schema):
+        pytest.fail(f"TEST_SCHEMA must be a simple PostgreSQL identifier; got {schema!r}.")
+    if "test" not in schema.lower():
+        pytest.fail(f"TEST_SCHEMA must clearly be a test schema; got {schema!r}.")
 
-    maintenance_db = getenv("POSTGRES_MAINTENANCE_DB", "postgres")
-    maintenance_url = parsed_url.set(database=maintenance_db)
-    engine = create_async_engine(maintenance_url, isolation_level="AUTOCOMMIT")
+
+def bind_metadata_to_schema(schema: str) -> dict[str, str | None]:
+    assert_test_schema(schema)
+    original_schemas = {name: table.schema for name, table in Base.metadata.tables.items()}
+    for table in Base.metadata.tables.values():
+        table.schema = schema
+    return original_schemas
+
+
+def restore_metadata_schemas(original_schemas: dict[str, str | None]) -> None:
+    for name, original_schema in original_schemas.items():
+        Base.metadata.tables[name].schema = original_schema
+
+
+async def recreate_test_schema(url: str, schema: str) -> None:
+    assert_test_schema(schema)
+    engine = create_async_engine(url, isolation_level="AUTOCOMMIT")
 
     try:
         async with engine.connect() as conn:
-            exists = await conn.scalar(text("select 1 from pg_database where datname = :database"), {"database": database})
-            if not exists:
-                await conn.execute(text(f'create database "{database}"'))
+            await conn.execute(text(f'drop schema if exists "{schema}" cascade'))
+            await conn.execute(text(f'create schema "{schema}"'))
+    finally:
+        await engine.dispose()
+
+
+async def drop_test_schema(url: str, schema: str) -> None:
+    assert_test_schema(schema)
+    engine = create_async_engine(url, isolation_level="AUTOCOMMIT")
+
+    try:
+        async with engine.connect() as conn:
+            await conn.execute(text(f'drop schema if exists "{schema}" cascade'))
     finally:
         await engine.dispose()
 
@@ -129,20 +160,22 @@ def test_dto_validation_and_from_attributes():
 @pytest.mark.asyncio
 async def test_dao_crud_happy_path():
     test_database_url = build_test_database_url()
-    assert_test_database_url(test_database_url)
-    await ensure_test_database_exists(test_database_url)
+    test_schema = get_test_schema()
+    await recreate_test_schema(test_database_url, test_schema)
 
+    original_schemas = bind_metadata_to_schema(test_schema)
     engine = create_async_engine(test_database_url)
     async_session = async_sessionmaker(engine, expire_on_commit=False)
 
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
 
     try:
         async with async_session() as session:
             user_dao = UserAccDAO(session)
             group_dao = LlmGroupDAO(session)
+            endpoint_dao = LlmEndpointDAO(session)
+            level_dao = LlmLevelDAO(session)
             agent_dao = AgentDAO(session)
             session_dao = AgentSessionDAO(session)
 
@@ -161,6 +194,44 @@ async def test_dao_crud_happy_path():
             assert await user_dao.get_by_user_id("u-1") == user
             assert await agent_dao.get_by_agent_id("agent-1") == agent
             assert await group_dao.list_by_user_id(user.id) == [group]
+
+            normal_endpoint = await endpoint_dao.create(
+                LlmEndpointCreate(
+                    user_id=user.id,
+                    name="normal",
+                    endpoint="http://normal.example/v1",
+                    model_name="normal-model",
+                )
+            )
+            confidential_endpoint = await endpoint_dao.create(
+                LlmEndpointCreate(
+                    user_id=user.id,
+                    name="confidential",
+                    endpoint="http://confidential.example/v1",
+                    model_name="confidential-model",
+                )
+            )
+            await level_dao.create(
+                LlmLevelCreate(
+                    llm_group_id=group.id,
+                    llm_endpoint_id=normal_endpoint.id,
+                    level=2,
+                    seq_no=1,
+                )
+            )
+            await level_dao.create(
+                LlmLevelCreate(
+                    llm_group_id=group.id,
+                    llm_endpoint_id=confidential_endpoint.id,
+                    level=3,
+                    is_confidential=True,
+                    seq_no=1,
+                )
+            )
+
+            levels, sec_levels = await LLMSet._load_levels(session, agent.id)
+            assert [endpoint.id for endpoint in levels[2]] == [normal_endpoint.id]
+            assert [endpoint.id for endpoint in sec_levels[3]] == [confidential_endpoint.id]
 
             updated_agent = await agent_dao.update(agent, AgentUpdate(name="Renamed Agent"))
             assert updated_agent.name == "Renamed Agent"
@@ -210,8 +281,6 @@ async def test_dao_crud_happy_path():
             await agent_dao.delete(updated_agent)
             assert await agent_dao.get_by_id(agent.id) is None
     finally:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.drop_all)
-            await conn.execute(text("drop table if exists alembic_version"))
-
-    await engine.dispose()
+        await engine.dispose()
+        restore_metadata_schemas(original_schemas)
+        await drop_test_schema(test_database_url, test_schema)

@@ -14,7 +14,7 @@ class GraphStore:
     pool: Any = None
 
     @staticmethod
-    async def init_langgraph_checkpointer():
+    async def init_langgraph_checkpointer(use_test_schema: bool = False):
         """Initialize LangGraph AsyncPostgresSaver and run schema migrations.
 
         Returns an AsyncConnectionPool-backed checkpointer for use across
@@ -23,7 +23,7 @@ class GraphStore:
         from psycopg_pool import AsyncConnectionPool
         from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
-        dsn = GraphStore._build_langgraph_dsn()
+        dsn = GraphStore._build_langgraph_dsn(use_test_schema=use_test_schema)
 
         pool = AsyncConnectionPool(
             conninfo=dsn,
@@ -34,7 +34,7 @@ class GraphStore:
         await pool.open()
 
         # Ensure the langgraph schema exists before setup() creates tables
-        schema = _require_env("LANGGRAPH_SCHEMA")
+        schema = GraphStore._get_langgraph_schema(use_test_schema=use_test_schema)
         async with pool.connection() as conn:
             await conn.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')  # type: ignore
 
@@ -46,22 +46,28 @@ class GraphStore:
 
         logger.info(
             t("graph.store.checkpointer_initialized"),
-            _require_env("LANGGRAPH_SCHEMA"),
+            schema,
         )
         return checkpointer, pool
 
     @staticmethod
-    def _build_langgraph_dsn() -> str:
-        """Build a psycopg3-compatible DSN with LANGGRAPH_SCHEMA as search_path."""
+    def _build_langgraph_dsn(use_test_schema: bool = False) -> str:
+        """Build a psycopg3-compatible DSN with the LangGraph search_path."""
         host = _require_env("POSTGRES_HOST")
         port = _require_env("POSTGRES_PORT")
         user = _require_env("POSTGRES_USER")
         password = _require_env("POSTGRES_PASSWORD")
         database = _require_env("POSTGRES_DB")
-        schema = _require_env("LANGGRAPH_SCHEMA")
+        schema = GraphStore._get_langgraph_schema(use_test_schema=use_test_schema)
 
         options_val = quote(f"-c search_path={schema},public", safe="")
         return f"postgresql://{user}:{password}@{host}:{port}/{database}?options={options_val}"
+
+    @staticmethod
+    def _get_langgraph_schema(use_test_schema: bool = False) -> str:
+        if use_test_schema:
+            return _require_env("TEST_LANGGRAPH_SCHEMA")
+        return _require_env("LANGGRAPH_SCHEMA")
 
 
 def _require_env(name: str) -> str:

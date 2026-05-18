@@ -161,3 +161,100 @@ async def test_missing_agent_or_session_does_not_enqueue(monkeypatch):
 
     assert queue.payloads == []
     assert warnings
+
+
+@pytest.mark.asyncio
+async def test_log_inbound_message_sends_agent_response_to_whatsapp(monkeypatch):
+    stream_tasks = set()
+    sent_messages = []
+
+    class ResponseQueue:
+        async def create_msg_queue(self, payload):
+            yield StreamChunk(chunk_type="content", content="你")
+            yield StreamChunk(chunk_type="content", content="好")
+            yield StreamChunk(chunk_type="done")
+
+    class FakeChannel:
+        async def send_text(self, number, text, **options):
+            sent_messages.append((number, text, options))
+            return {"ok": True}
+
+    async def resolve_agent_session(message):
+        return "agent-123", "default-123"
+
+    monkeypatch.setattr(evolution_handler, "resolve_whatsapp_agent_session", resolve_agent_session)
+
+    await log_inbound_message(
+        inbound(
+            {
+                "key": {"id": "msg-1", "remoteJid": "85298765432@s.whatsapp.net"},
+                "message": {"conversation": "hi"},
+            }
+        ),
+        ResponseQueue(),
+        channel=FakeChannel(),
+        stream_tasks=stream_tasks,
+    )
+
+    for task in tuple(stream_tasks):
+        await task
+
+    assert sent_messages == [("85298765432", "你好", {})]
+
+
+@pytest.mark.asyncio
+async def test_log_inbound_message_replies_with_inbound_instance(monkeypatch):
+    stream_tasks = set()
+    posts = []
+
+    class ResponseQueue:
+        async def create_msg_queue(self, payload):
+            yield StreamChunk(chunk_type="content", content="pong")
+            yield StreamChunk(chunk_type="done")
+
+    class FakeHttpClient:
+        async def post(self, url, headers=None, json=None):
+            posts.append({"url": url, "headers": headers, "json": json})
+
+            class Response:
+                def raise_for_status(self):
+                    return None
+
+                def json(self):
+                    return {"ok": True}
+
+            return Response()
+
+    async def resolve_agent_session(message):
+        return "agent-123", "default-123"
+
+    monkeypatch.setattr(evolution_handler, "resolve_whatsapp_agent_session", resolve_agent_session)
+    channel = EvolutionWhatsAppChannel(
+        api_url="http://evolution.test",
+        global_api_key="global-key",
+        http_client=FakeHttpClient(),
+    )
+
+    await log_inbound_message(
+        inbound(
+            {
+                "key": {"id": "msg-1", "remoteJid": "85298765432@s.whatsapp.net"},
+                "message": {"conversation": "ping"},
+            },
+            instance="Moss",
+        ),
+        ResponseQueue(),
+        channel=channel,
+        stream_tasks=stream_tasks,
+    )
+
+    for task in tuple(stream_tasks):
+        await task
+
+    assert posts == [
+        {
+            "url": "http://evolution.test/message/sendText/Moss",
+            "headers": {"apikey": "global-key"},
+            "json": {"number": "85298765432", "text": "pong"},
+        }
+    ]

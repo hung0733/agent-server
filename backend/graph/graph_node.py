@@ -1,6 +1,9 @@
-from typing import Annotated, TypedDict
+from typing import Annotated, Any, Dict, Optional, TypedDict
 
 from langchain_core.messages import BaseMessage, HumanMessage
+from langchain_core.runnables import RunnableConfig
+
+from backend.llm.llm import LLMSet
 
 
 def _replace_with_last(left: list, right: list):
@@ -29,3 +32,34 @@ class MessageState(TypedDict):
     """Minimal state for nodes that only need messages."""
 
     messages: Annotated[list[BaseMessage], _replace_with_last]
+
+class GraphNode:
+    @staticmethod
+    def prepare_chat_node_config(
+        thread_id: str,
+        models: LLMSet,
+        sys_prompt: str,
+        involves_secrets: bool,
+        think_mode: Optional[bool],
+        step_id: str = "",
+        args: Optional[Dict[str, Any]] = None,
+        sender_name: str = "",
+        recv_name: str = "",
+        stm_trigger_token: int = 0,
+        stm_summary_token: int = 0,
+    ) -> RunnableConfig:
+        return {
+            "configurable": {
+                "thread_id": thread_id,
+                "models": models,
+                "sys_prompt": sys_prompt,
+                "involves_secrets": involves_secrets,
+                "think_mode": think_mode,
+                "args": args,
+                "step_id": step_id,
+                "sender_name": sender_name,
+                "recv_name": recv_name,
+                "stm_trigger_token": stm_trigger_token,
+                "stm_summary_token": stm_summary_token,
+            }
+        }

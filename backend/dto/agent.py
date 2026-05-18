@@ -1,5 +1,7 @@
 from pydantic import BaseModel, ConfigDict
 
+SUMMARY_TRIGGER_TOKEN: int = 10000
+SUMMARY_USAGE_TOKEN: int = 5000
 
 class AgentCreate(BaseModel):
     user_id: int

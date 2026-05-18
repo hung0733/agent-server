@@ -59,6 +59,7 @@ async def log_inbound_message(
     message: WhatsAppInboundMessage,
     message_queue: MessageQueue | None = None,
     *,
+    channel: EvolutionWhatsAppChannel | None = None,
     stream_tasks: set[asyncio.Task[None]] | None = None,
     http_client: httpx.AsyncClient | None = None,
 ) -> None:
@@ -67,16 +68,54 @@ async def log_inbound_message(
     if message_queue:
         payload = await build_llm_message_payload(received_message, http_client=http_client)
         if payload:
-            task = asyncio.create_task(_drain_message_stream(message_queue, payload))
+            task = asyncio.create_task(
+                _drain_message_stream(
+                    message_queue,
+                    payload,
+                    channel=_build_reply_channel(channel, received_message.instance),
+                    phone_no=received_message.phone_no,
+                )
+            )
             if stream_tasks is not None:
                 stream_tasks.add(task)
                 task.add_done_callback(stream_tasks.discard)
     log_received_message(received_message)
 
 
-async def _drain_message_stream(message_queue: MessageQueue, payload: MessagePayload) -> None:
-    async for _chunk in message_queue.create_msg_queue(payload):
-        pass
+async def _drain_message_stream(
+    message_queue: MessageQueue,
+    payload: MessagePayload,
+    *,
+    channel: EvolutionWhatsAppChannel | None = None,
+    phone_no: str | None = None,
+) -> None:
+    response_parts: list[str] = []
+    async for chunk in message_queue.create_msg_queue(payload):
+        if chunk.chunk_type == "content" and chunk.content:
+            response_parts.append(chunk.content)
+
+    response_text = "".join(response_parts)
+    if channel and phone_no and response_text:
+        await channel.send_text(phone_no, response_text)
+
+
+def _build_reply_channel(
+    channel: EvolutionWhatsAppChannel | None,
+    instance: str | None,
+) -> EvolutionWhatsAppChannel | None:
+    if not channel or not instance:
+        return channel
+    if not isinstance(channel, EvolutionWhatsAppChannel):
+        return channel
+    if channel.whatsapp_instance == instance:
+        return channel
+    return EvolutionWhatsAppChannel(
+        whatsapp_instance=instance,
+        whatsapp_key=channel.whatsapp_key or channel.global_api_key,
+        api_url=channel.api_url,
+        global_api_key=channel.global_api_key,
+        http_client=channel._http_client,
+    )
 
 
 def log_received_message(message: ReceivedMessage) -> None:
@@ -116,6 +155,7 @@ async def run_whatsapp_listener(
             await log_inbound_message(
                 message,
                 message_queue,
+                channel=channel,
                 stream_tasks=stream_tasks,
                 http_client=http_client,
             )
