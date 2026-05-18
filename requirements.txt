@@ -37,3 +37,6 @@ croniter>=1.3.0
 
 # OpenAI SDK
 openai>=1.0.0
+
+# Sandbox
+opensandbox>=0.1.8
