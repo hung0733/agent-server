@@ -11,6 +11,7 @@ DEFAULT_LOCALE = "zh_HK"
 
 _MESSAGES = {
     "zh_HK": {
+        "agent.not_found": "找不到 Agent 或 Session：agent_id=%s session_id=%s",
         "channels.evolution.duplicate_message_skipped": "已略過短時間內重覆收到的 WhatsApp 訊息",
         "channels.evolution.invalid_media_type": "訊息媒體類型必須是 image、video、audio 或 document",
         "channels.evolution.missing_global_api_key": "需要設定 EVOLUTION_API_KEY 或 whatsapp_key",
@@ -133,6 +134,7 @@ _(Mistakes and insights recorded here to avoid repeating them.)_
         "scripts.new_agent.user_created": "創建新用戶：%s (id=%s)",
     },
     "en": {
+        "agent.not_found": "Agent or session not found: agent_id=%s session_id=%s",
         "channels.evolution.duplicate_message_skipped": "Skipped duplicated WhatsApp message received within the TTL window",
         "channels.evolution.invalid_media_type": "Message media type must be image, video, audio, or document",
         "channels.evolution.missing_global_api_key": "EVOLUTION_API_KEY or whatsapp_key is required",

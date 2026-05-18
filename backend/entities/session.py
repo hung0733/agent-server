@@ -12,7 +12,7 @@ class AgentSession(Base):
     session_id: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     session_type: Mapped[str] = mapped_column(String(100), nullable=False)
-    sender_agent_id: Mapped[int] = mapped_column(ForeignKey("agent.id"), nullable=False, index=True)
+    sender_agent_id: Mapped[int | None] = mapped_column(ForeignKey("agent.id"), nullable=True, index=True)
     is_confidential: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 
     recv_agent = relationship("Agent", back_populates="recv_sessions", foreign_keys=[recv_agent_id])

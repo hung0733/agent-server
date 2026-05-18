@@ -6,7 +6,7 @@ class AgentSessionCreate(BaseModel):
     session_id: str
     name: str
     session_type: str
-    sender_agent_id: int
+    sender_agent_id: int | None = None
     is_confidential: bool = False
 
 

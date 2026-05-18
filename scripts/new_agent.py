@@ -239,7 +239,7 @@ async def create_default_session(
             session_id=session_id,
             name=t("scripts.new_agent.default_session_name"),
             session_type="chat",
-            sender_agent_id=agent_db_id,
+            sender_agent_id=None,
             is_confidential=False,
         )
         session.add(default_session)

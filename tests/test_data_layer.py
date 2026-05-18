@@ -9,12 +9,13 @@ from sqlalchemy import text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from backend.dao import AgentDAO, LlmGroupDAO, UserAccDAO
+from backend.dao import AgentDAO, AgentSessionDAO, LlmGroupDAO, UserAccDAO
 from backend.db.base import Base
 import backend.entities  # noqa: F401
 from backend.dto import (
     AgentCreate,
     AgentRead,
+    AgentSessionCreate,
     AgentUpdate,
     LlmGroupCreate,
     LlmGroupRead,
@@ -114,6 +115,14 @@ def test_dto_validation_and_from_attributes():
     assert AgentRead.model_validate(agent_obj).agent_id == "agent-1"
     assert AgentRead.model_validate(agent_obj).whatsapp_instance is None
 
+    session_create = AgentSessionCreate(
+        recv_agent_id=1,
+        session_id="session-1",
+        name="Default",
+        session_type="chat",
+    )
+    assert session_create.sender_agent_id is None
+
     assert isinstance(datetime.now(timezone.utc), datetime)
 
 
@@ -135,6 +144,7 @@ async def test_dao_crud_happy_path():
             user_dao = UserAccDAO(session)
             group_dao = LlmGroupDAO(session)
             agent_dao = AgentDAO(session)
+            session_dao = AgentSessionDAO(session)
 
             user = await user_dao.create(UserAccCreate(user_id="u-1", name="Alice"))
             group = await group_dao.create(LlmGroupCreate(user_id=user.id, name="default"))
@@ -155,6 +165,48 @@ async def test_dao_crud_happy_path():
             updated_agent = await agent_dao.update(agent, AgentUpdate(name="Renamed Agent"))
             assert updated_agent.name == "Renamed Agent"
 
+            user_to_agent_session = await session_dao.create(
+                AgentSessionCreate(
+                    recv_agent_id=updated_agent.id,
+                    session_id="session-user-agent",
+                    name="User Chat",
+                    session_type="chat",
+                )
+            )
+            user_to_agent_runtime = await session_dao.get_agent_runtime_data(
+                updated_agent.agent_id,
+                user_to_agent_session.session_id,
+            )
+            assert user_to_agent_runtime is not None
+            assert user_to_agent_runtime[-1] == "Alice"
+
+            sender_agent = await agent_dao.create(
+                AgentCreate(
+                    user_id=user.id,
+                    agent_id="agent-2",
+                    name="Sender Agent",
+                    llm_group_id=group.id,
+                    agent_type="assistant",
+                )
+            )
+            agent_to_agent_session = await session_dao.create(
+                AgentSessionCreate(
+                    recv_agent_id=updated_agent.id,
+                    session_id="session-agent-agent",
+                    name="Agent Chat",
+                    session_type="chat",
+                    sender_agent_id=sender_agent.id,
+                )
+            )
+            agent_to_agent_runtime = await session_dao.get_agent_runtime_data(
+                updated_agent.agent_id,
+                agent_to_agent_session.session_id,
+            )
+            assert agent_to_agent_runtime is not None
+            assert agent_to_agent_runtime[-1] == "Sender Agent"
+
+            await session_dao.delete(user_to_agent_session)
+            await session_dao.delete(agent_to_agent_session)
             await agent_dao.delete(updated_agent)
             assert await agent_dao.get_by_id(agent.id) is None
     finally:
