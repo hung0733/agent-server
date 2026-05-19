@@ -3,30 +3,38 @@ import asyncio
 import pytest
 
 from backend.llm.types import StreamChunk
-from backend.queues.message_queue import MessagePayload, MessageQueue
+from backend.queues.message_queue import MessageQueue, MsgQueueTask
 
 
-def payload(message: str) -> MessagePayload:
-    return {
-        "agent_id": "agent-1",
-        "session_id": "session-1",
-        "message": message,
-        "files": None,
-    }
+class RecordingTask(MsgQueueTask):
+    def __init__(self, message: str):
+        super().__init__(
+            message=message,
+            agent_id="agent-1",
+            session_id="session-1",
+        )
+        self.chunks = []
+
+    async def callback(self, chunk):
+        self.chunks.append(chunk)
 
 
 @pytest.mark.asyncio
-async def test_create_msg_queue_yields_stream_chunks_and_done():
-    async def handler(item):
-        yield StreamChunk(chunk_type="content", content=item["message"])
+async def test_enqueue_dispatches_tasks_fifo():
+    started = []
 
-    queue = MessageQueue(handler)
+    async def handler(task):
+        started.append(task.message)
 
-    chunks = [chunk async for chunk in queue.create_msg_queue(payload("hello"))]
+    queue = MessageQueue(handler, max_concurrency=1)
+
+    await queue.enqueue(RecordingTask("first"))
+    await queue.enqueue(RecordingTask("second"))
+    await queue.enqueue(RecordingTask("third"))
+    await queue._queue.join()
     await queue.stop()
 
-    assert [chunk.chunk_type for chunk in chunks] == ["content", "done"]
-    assert chunks[0].content == "hello"
+    assert started == ["first", "second", "third"]
 
 
 @pytest.mark.asyncio
@@ -36,7 +44,7 @@ async def test_message_queue_limits_concurrency_to_two():
     entered = asyncio.Event()
     release = asyncio.Event()
 
-    async def handler(item):
+    async def handler(task):
         nonlocal active, max_active
         active += 1
         max_active = max(max_active, active)
@@ -44,38 +52,58 @@ async def test_message_queue_limits_concurrency_to_two():
             entered.set()
         await release.wait()
         active -= 1
-        yield StreamChunk(chunk_type="content", content=item["message"])
 
     queue = MessageQueue(handler, max_concurrency=2)
 
-    tasks = [
-        asyncio.create_task(_collect(queue.create_msg_queue(payload(str(index)))))
-        for index in range(3)
-    ]
+    await queue.enqueue(RecordingTask("first"))
+    await queue.enqueue(RecordingTask("second"))
+    await queue.enqueue(RecordingTask("third"))
     await asyncio.wait_for(entered.wait(), timeout=1)
     assert max_active == 2
 
     release.set()
-    await asyncio.gather(*tasks)
+    await queue._queue.join()
     await queue.stop()
+
+
+@pytest.mark.parametrize("max_concurrency", [0, 3])
+def test_message_queue_rejects_invalid_concurrency(max_concurrency):
+    async def handler(task):
+        return None
+
+    with pytest.raises(ValueError):
+        MessageQueue(handler, max_concurrency=max_concurrency)
 
 
 @pytest.mark.asyncio
-async def test_concurrent_streams_do_not_mix_chunks():
-    async def handler(item):
-        yield StreamChunk(chunk_type="content", content=item["message"])
+async def test_handler_calls_task_callback_with_chunks_and_done():
+    async def handler(task):
+        await task.callback(StreamChunk(chunk_type="content", content=task.message))
+        await task.callback(StreamChunk(chunk_type="done"))
 
-    queue = MessageQueue(handler, max_concurrency=2)
+    queue = MessageQueue(handler)
+    task = RecordingTask("hello")
 
-    first, second = await asyncio.gather(
-        _collect(queue.create_msg_queue(payload("first"))),
-        _collect(queue.create_msg_queue(payload("second"))),
-    )
+    await queue.enqueue(task)
+    await queue._queue.join()
     await queue.stop()
 
-    assert [chunk.content for chunk in first if chunk.content] == ["first"]
-    assert [chunk.content for chunk in second if chunk.content] == ["second"]
+    assert [chunk.chunk_type for chunk in task.chunks] == ["content", "done"]
+    assert task.chunks[0].content == "hello"
 
 
-async def _collect(stream):
-    return [chunk async for chunk in stream]
+@pytest.mark.asyncio
+async def test_handler_exception_callbacks_error_done():
+    async def handler(task):
+        raise RuntimeError("boom")
+
+    queue = MessageQueue(handler)
+    task = RecordingTask("hello")
+
+    await queue.enqueue(task)
+    await queue._queue.join()
+    await queue.stop()
+
+    assert len(task.chunks) == 1
+    assert task.chunks[0].chunk_type == "done"
+    assert task.chunks[0].data == {"error": "boom"}

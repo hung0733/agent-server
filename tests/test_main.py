@@ -4,6 +4,7 @@ import pytest
 
 import main as main_module
 from backend.llm.types import StreamChunk
+from backend.queues.msg_queue_handle import handle_agent_message
 
 
 class FakeConnection:
@@ -54,21 +55,45 @@ async def test_check_database_runs_select_one():
 
 
 @pytest.mark.asyncio
-async def test_main_starts_listener_and_cleans_up(monkeypatch):
+async def test_main_starts_message_queue_listener_and_cleans_up(monkeypatch):
     engine = FakeEngine()
     channel = FakeChannel()
     setup_calls = []
     migration_calls = []
     listener_calls = []
+    queue_calls = []
+    graph_calls = []
     monkeypatch.setattr(main_module, "_install_signal_handlers", lambda shutdown_event: None)
 
-    async def run_listener(received_channel, llm_stream_handler=None):
-        listener_calls.append((received_channel, llm_stream_handler))
+    class FakeQueue:
+        def __init__(self, handler, max_concurrency):
+            self.handler = handler
+            self.max_concurrency = max_concurrency
+            queue_calls.append(("init", handler, max_concurrency))
 
-    monkeypatch.setattr(main_module, "run_whatsapp_listener", run_listener)
+        def start(self):
+            queue_calls.append(("start", self))
+
+        async def stop(self):
+            queue_calls.append(("stop", self))
+
+    async def run_listener(received_channel, message_queue=None):
+        listener_calls.append((received_channel, message_queue))
 
     async def upgrade_database_schema():
         migration_calls.append(True)
+
+    async def init_checkpointer():
+        graph_calls.append("init")
+
+    class FakePool:
+        async def close(self):
+            graph_calls.append("close")
+
+    monkeypatch.setattr(main_module, "MessageQueue", FakeQueue)
+    monkeypatch.setattr(main_module, "run_whatsapp_listener", run_listener)
+    monkeypatch.setattr(main_module.GraphStore, "init_langgraph_checkpointer", init_checkpointer)
+    monkeypatch.setattr(main_module.GraphStore, "pool", FakePool())
 
     await main_module.main(
         db_engine=engine,
@@ -78,9 +103,16 @@ async def test_main_starts_listener_and_cleans_up(monkeypatch):
         shutdown_event=asyncio.Event(),
     )
 
+    queue = listener_calls[0][1]
     assert setup_calls == [True]
     assert migration_calls == [True]
-    assert listener_calls == [(channel, main_module.send_agent_message)]
+    assert queue_calls == [
+        ("init", main_module.handle_agent_message, 2),
+        ("start", queue),
+        ("stop", queue),
+    ]
+    assert listener_calls == [(channel, queue)]
+    assert graph_calls == ["init", "close"]
     assert engine.executed == ["select 1"]
     assert channel.closed is True
     assert engine.disposed is True
@@ -123,34 +155,46 @@ async def test_upgrade_database_schema_runs_alembic_upgrade(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_send_agent_message_calls_agent_send(monkeypatch):
+async def test_handle_agent_message_calls_agent_send(monkeypatch):
     calls = []
+    chunks = []
+
+    class FakeTask:
+        agent_id = "agent-1"
+        session_id = "session-1"
+        message = "hello"
+        files = [{"mimetype": "text/plain", "filename": "a.txt", "bytes": b"a"}]
+
+        async def callback(self, chunk):
+            chunks.append(chunk)
 
     class FakeAgent:
         async def send(self, message, think_mode, metadata):
             calls.append((message, think_mode, metadata))
             yield StreamChunk(chunk_type="content", content="ok")
+            yield StreamChunk(chunk_type="text_end")
 
     async def get_agent(agent_id, session_id):
         calls.append((agent_id, session_id))
         return FakeAgent()
 
-    monkeypatch.setattr(main_module.Agent, "get_agent", get_agent)
+    monkeypatch.setattr(main_module.handle_agent_message.__globals__["Agent"], "get_agent", get_agent)
 
-    chunks = [
-        chunk
-        async for chunk in main_module.send_agent_message(
-            {
-                "agent_id": "agent-1",
-                "session_id": "session-1",
-                "message": "hello",
-                "files": None,
-            }
-        )
-    ]
+    await handle_agent_message(FakeTask())
 
     assert calls == [
         ("agent-1", "session-1"),
-        ("hello", False, {"source": "whatsapp"}),
+        (
+            "hello",
+            False,
+            {
+                "source": "whatsapp",
+                "files": [{"mimetype": "text/plain", "filename": "a.txt", "bytes": b"a"}],
+            },
+        ),
     ]
-    assert chunks == [StreamChunk(chunk_type="content", content="ok")]
+    assert chunks == [
+        StreamChunk(chunk_type="content", content="ok"),
+        StreamChunk(chunk_type="text_end"),
+        StreamChunk(chunk_type="done"),
+    ]

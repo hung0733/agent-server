@@ -258,6 +258,11 @@ class Agent:
                         content=content,
                         timestamp=time.time(),
                     )
+                    if msg.additional_kwargs.get("text_done"):
+                        yield StreamChunk(
+                            chunk_type="text_end",
+                            timestamp=time.time(),
+                        )
             elif isinstance(msg, ToolMessage):
                 content = (
                     msg.content if isinstance(msg.content, str) else str(msg.content)

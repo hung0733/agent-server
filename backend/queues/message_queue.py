@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 import logging
-from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import TypedDict
 
 from backend.i18n import t
@@ -19,28 +19,26 @@ class FilePayload(TypedDict):
     bytes: bytes
 
 
-class MessagePayload(TypedDict):
+@dataclass
+class MsgQueueTask:
+    message: str
     agent_id: str
     session_id: str
-    message: str
-    files: list[FilePayload] | None
+    files: list[FilePayload] | None = None
+
+    async def callback(self, chunk: StreamChunk) -> None:
+        return None
 
 
-LLMStreamResult = AsyncIterator[StreamChunk] | Awaitable[AsyncIterator[StreamChunk] | None] | None
-LLMStreamHandler = Callable[[MessagePayload], LLMStreamResult]
-
-
-class _QueueRequest(TypedDict):
-    payload: MessagePayload
-    response_queue: asyncio.Queue[StreamChunk]
+MsgQueueHandler = Callable[[MsgQueueTask], Awaitable[None]]
 
 
 class MessageQueue:
-    def __init__(self, llm_stream_handler: LLMStreamHandler, max_concurrency: int = 2) -> None:
-        if max_concurrency < 1:
-            raise ValueError("max_concurrency must be at least 1")
-        self._llm_stream_handler = llm_stream_handler
-        self._queue: asyncio.Queue[_QueueRequest] = asyncio.Queue()
+    def __init__(self, handler: MsgQueueHandler, max_concurrency: int = 2) -> None:
+        if max_concurrency < 1 or max_concurrency > 2:
+            raise ValueError("max_concurrency must be between 1 and 2")
+        self._handler = handler
+        self._queue: asyncio.Queue[MsgQueueTask] = asyncio.Queue()
         self._max_concurrency = max_concurrency
         self._workers: list[asyncio.Task[None]] = []
 
@@ -62,53 +60,29 @@ class MessageQueue:
                 pass
         self._workers = []
 
-    async def create_msg_queue(self, payload: MessagePayload) -> AsyncGenerator[StreamChunk, None]:
-        if not payload["agent_id"] or not payload["session_id"]:
+    async def enqueue(self, task: MsgQueueTask) -> None:
+        if not task.agent_id or not task.session_id:
             raise ValueError("agent_id and session_id are required")
 
         self.start()
-        response_queue: asyncio.Queue[StreamChunk] = asyncio.Queue()
-        await self._queue.put({"payload": payload, "response_queue": response_queue})
-
-        while True:
-            chunk = await response_queue.get()
-            yield chunk
-            if chunk.chunk_type == "done":
-                break
+        await self._queue.put(task)
 
     async def _worker(self) -> None:
         while True:
-            request = await self._queue.get()
+            task = await self._queue.get()
             try:
-                await self._handle_request(request)
+                await self._handle_task(task)
             finally:
                 self._queue.task_done()
 
-    async def _handle_request(self, request: _QueueRequest) -> None:
-        response_queue = request["response_queue"]
+    async def _handle_task(self, task: MsgQueueTask) -> None:
         try:
-            result = self._llm_stream_handler(request["payload"])
-            if inspect.isawaitable(result):
-                result = await result
-            if result is not None:
-                async for chunk in result:
-                    await response_queue.put(chunk)
+            await self._handler(task)
         except Exception as exc:
             logger.exception(t("queues.message_queue.handler_failed"))
-            await response_queue.put(
+            await task.callback(
                 StreamChunk(
                     chunk_type="done",
                     data={"error": str(exc)},
                 )
             )
-            return
-
-        await response_queue.put(StreamChunk(chunk_type="done"))
-
-
-async def create_msg_queue(
-    message_queue: MessageQueue,
-    payload: MessagePayload,
-) -> AsyncGenerator[StreamChunk, None]:
-    async for chunk in message_queue.create_msg_queue(payload):
-        yield chunk

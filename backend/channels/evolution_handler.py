@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import asyncio
 import logging
-from collections.abc import Callable
+import time
 
 import httpx
 
@@ -10,11 +9,66 @@ from backend.channels import EvolutionWhatsAppChannel
 from backend.channels.evolution_media import build_evolution_files
 from backend.channels.types import ReceivedMessage, WhatsAppInboundMessage
 from backend.i18n import t
-from backend.queues.message_queue import LLMStreamHandler, MessagePayload, MessageQueue
+from backend.llm.types import StreamChunk
+from backend.queues.message_queue import FilePayload, MessageQueue, MsgQueueTask
 from backend.services.whatsapp_session import resolve_whatsapp_agent_session
 
 
 logger = logging.getLogger(__name__)
+
+
+class WhatsAppMsgQueueTask(MsgQueueTask):
+    def __init__(
+        self,
+        *,
+        message: str,
+        agent_id: str,
+        session_id: str,
+        files: list[FilePayload] | None = None,
+        channel: EvolutionWhatsAppChannel | None = None,
+        phone_no: str | None = None,
+    ) -> None:
+        super().__init__(
+            message=message,
+            agent_id=agent_id,
+            session_id=session_id,
+            files=files,
+        )
+        self._channel = channel
+        self._phone_no = phone_no
+        self._response_parts: list[str] = []
+        self._reply_sent = False
+
+    async def callback(self, chunk: StreamChunk) -> None:
+        if chunk.chunk_type == "content" and chunk.content:
+            self._response_parts.append(chunk.content)
+            return
+
+        if chunk.chunk_type in {"text_end", "done"}:
+            await self._send_reply_once()
+
+    async def _send_reply_once(self) -> None:
+        if self._reply_sent:
+            return
+
+        response_text = "".join(self._response_parts)
+        if not response_text:
+            return
+
+        self._reply_sent = True
+        if self._channel and self._phone_no:
+            started_at = time.perf_counter()
+            logger.info(
+                t("channels.evolution.reply_send_started"),
+                self._phone_no,
+                len(response_text),
+            )
+            await self._channel.send_text(self._phone_no, response_text)
+            logger.info(
+                t("channels.evolution.reply_send_completed"),
+                self._phone_no,
+                round((time.perf_counter() - started_at) * 1000),
+            )
 
 
 def extract_message_metadata(
@@ -32,11 +86,12 @@ async def enrich_received_message(message: ReceivedMessage) -> ReceivedMessage:
     return message
 
 
-async def build_llm_message_payload(
+async def build_msg_queue_task(
     message: ReceivedMessage,
     *,
+    channel: EvolutionWhatsAppChannel | None = None,
     http_client: httpx.AsyncClient | None = None,
-) -> MessagePayload | None:
+) -> MsgQueueTask | None:
     if not message.agent_id or not message.session_id:
         logger.warning(
             t("channels.evolution.message_queue_missing_required_fields"),
@@ -47,12 +102,14 @@ async def build_llm_message_payload(
         return None
 
     files = await build_evolution_files(message, http_client=http_client)
-    return {
-        "agent_id": message.agent_id,
-        "session_id": message.session_id,
-        "message": message.content or "",
-        "files": files,
-    }
+    return WhatsAppMsgQueueTask(
+        message=message.content or "",
+        agent_id=message.agent_id,
+        session_id=message.session_id,
+        files=files,
+        channel=channel,
+        phone_no=message.phone_no,
+    )
 
 
 async def log_inbound_message(
@@ -60,43 +117,19 @@ async def log_inbound_message(
     message_queue: MessageQueue | None = None,
     *,
     channel: EvolutionWhatsAppChannel | None = None,
-    stream_tasks: set[asyncio.Task[None]] | None = None,
     http_client: httpx.AsyncClient | None = None,
 ) -> None:
     received_message = EvolutionWhatsAppChannel().to_received_message(message)
     await enrich_received_message(received_message)
     if message_queue:
-        payload = await build_llm_message_payload(received_message, http_client=http_client)
-        if payload:
-            task = asyncio.create_task(
-                _drain_message_stream(
-                    message_queue,
-                    payload,
-                    channel=_build_reply_channel(channel, received_message.instance),
-                    phone_no=received_message.phone_no,
-                )
-            )
-            if stream_tasks is not None:
-                stream_tasks.add(task)
-                task.add_done_callback(stream_tasks.discard)
+        task = await build_msg_queue_task(
+            received_message,
+            channel=_build_reply_channel(channel, received_message.instance),
+            http_client=http_client,
+        )
+        if task:
+            await message_queue.enqueue(task)
     log_received_message(received_message)
-
-
-async def _drain_message_stream(
-    message_queue: MessageQueue,
-    payload: MessagePayload,
-    *,
-    channel: EvolutionWhatsAppChannel | None = None,
-    phone_no: str | None = None,
-) -> None:
-    response_parts: list[str] = []
-    async for chunk in message_queue.create_msg_queue(payload):
-        if chunk.chunk_type == "content" and chunk.content:
-            response_parts.append(chunk.content)
-
-    response_text = "".join(response_parts)
-    if channel and phone_no and response_text:
-        await channel.send_text(phone_no, response_text)
 
 
 def _build_reply_channel(
@@ -135,32 +168,15 @@ def log_received_message(message: ReceivedMessage) -> None:
 
 async def run_whatsapp_listener(
     channel: EvolutionWhatsAppChannel,
-    llm_stream_handler: LLMStreamHandler | None = None,
+    message_queue: MessageQueue | None = None,
     *,
-    message_queue_factory: Callable[[LLMStreamHandler], MessageQueue] | None = None,
     http_client: httpx.AsyncClient | None = None,
 ) -> None:
     logger.info(t("main.whatsapp_listener_started"))
-    message_queue = None
-    stream_tasks: set[asyncio.Task[None]] = set()
-    if llm_stream_handler:
-        if message_queue_factory:
-            message_queue = message_queue_factory(llm_stream_handler)
-        else:
-            message_queue = MessageQueue(llm_stream_handler)
-        message_queue.start()
-
-    try:
-        async for message in channel.listen_messages():
-            await log_inbound_message(
-                message,
-                message_queue,
-                channel=channel,
-                stream_tasks=stream_tasks,
-                http_client=http_client,
-            )
-    finally:
-        if stream_tasks:
-            await asyncio.gather(*stream_tasks, return_exceptions=True)
-        if message_queue:
-            await message_queue.stop()
+    async for message in channel.listen_messages():
+        await log_inbound_message(
+            message,
+            message_queue,
+            channel=channel,
+            http_client=http_client,
+        )

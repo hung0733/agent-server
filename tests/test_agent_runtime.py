@@ -1,7 +1,13 @@
 import asyncio
 
 import pytest
-from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, SystemMessage
+from langchain_core.messages import (
+    AIMessage,
+    AIMessageChunk,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
 
 from backend.agent.agent import Agent
 from backend.graph.agent import chat_node
@@ -25,6 +31,9 @@ class FakeLLM:
 class FakeModels:
     def __init__(self, llm):
         self.llm = llm
+
+    def getModel(self, level, is_sec=False):
+        return self.llm
 
     def getSysActModel(self):
         return self.llm
@@ -64,7 +73,7 @@ class FakeGraph:
         assert config["configurable"]["thread_id"] == "session-1"
         assert stream_mode == "messages"
         yield (AIMessageChunk(content="he"), {"node": "chat"})
-        yield AIMessage(content="llo")
+        yield AIMessage(content="llo", additional_kwargs={"text_done": True})
 
 
 class FakeAgent:
@@ -141,8 +150,8 @@ async def test_agent_proc_send_streams_content_chunks():
         )
     ]
 
-    assert [chunk.chunk_type for chunk in chunks] == ["content", "content"]
-    assert [chunk.content for chunk in chunks] == ["he", "llo"]
+    assert [chunk.chunk_type for chunk in chunks] == ["content", "content", "text_end"]
+    assert [chunk.content for chunk in chunks] == ["he", "llo", None]
 
 
 @pytest.mark.asyncio
@@ -154,7 +163,11 @@ async def test_chat_node_logs_content_lengths_and_tool_chunks(monkeypatch):
             return [
                 StreamChunk(chunk_type="content", content="he"),
                 StreamChunk(chunk_type="tool", content="search"),
-                StreamChunk(chunk_type="tool_result", content="result"),
+                StreamChunk(
+                    chunk_type="tool_result",
+                    content="result",
+                    data={"tool_call_id": "call-1"},
+                ),
                 StreamChunk(chunk_type="content", content="llo"),
             ]
 
@@ -170,10 +183,148 @@ async def test_chat_node_logs_content_lengths_and_tool_chunks(monkeypatch):
 
     result = await chat_node({"messages": [HumanMessage(content="hello")]}, config)
 
-    assert result["messages"][0].content == "hello"
+    assert isinstance(result["messages"][0], ToolMessage)
+    assert result["messages"][0].content == "result"
+    assert result["messages"][0].tool_call_id == "call-1"
     assert calls == [
         ("Agent graph chat node 收到 content chunk：content_length=%s", 2),
         ("Agent graph chat node 收到工具調用：tool_name=%s", "search"),
         ("Agent graph chat node 收到工具結果：content_length=%s", 6),
         ("Agent graph chat node 收到 content chunk：content_length=%s", 3),
+    ]
+
+
+def test_stream_chunks_to_content_joins_content_only():
+    content = GraphNode.stream_chunks_to_content(
+        [
+            StreamChunk(chunk_type="think", content="reason"),
+            StreamChunk(chunk_type="content", content="he"),
+            StreamChunk(chunk_type="tool", content="search"),
+            StreamChunk(chunk_type="content", content="llo"),
+            StreamChunk(chunk_type="done"),
+        ]
+    )
+
+    assert content == "hello"
+
+
+def test_stream_chunks_to_message_preserves_ai_message_fields():
+    message = GraphNode.stream_chunks_to_message(
+        [
+            StreamChunk(chunk_type="think", content="rea"),
+            StreamChunk(chunk_type="think", content="son"),
+            StreamChunk(chunk_type="content", content="he"),
+            StreamChunk(
+                chunk_type="tool",
+                data={
+                    "tool_call": {
+                        "id": "call-1",
+                        "name": "search",
+                        "args": {"query": "hello"},
+                    }
+                },
+            ),
+            StreamChunk(chunk_type="content", content="llo"),
+        ]
+    )
+
+    assert isinstance(message, AIMessage)
+    assert message.content == "hello"
+    assert message.additional_kwargs["reasoning_content"] == "reason"
+    assert message.tool_calls == [
+        {"name": "search", "args": {"query": "hello"}, "id": "call-1", "type": "tool_call"}
+    ]
+
+
+def test_stream_chunks_to_message_parses_openai_tool_call_arguments():
+    message = GraphNode.stream_chunks_to_message(
+        [
+            StreamChunk(
+                chunk_type="tool",
+                data={
+                    "id": "call-1",
+                    "function": {"name": "search", "arguments": "{\"query\": \"hello\"}"},
+                },
+            )
+        ]
+    )
+
+    assert isinstance(message, AIMessage)
+    assert message.tool_calls == [
+        {"name": "search", "args": {"query": "hello"}, "id": "call-1", "type": "tool_call"}
+    ]
+
+
+def test_stream_chunks_to_message_returns_tool_message():
+    message = GraphNode.stream_chunks_to_message(
+        [
+            StreamChunk(
+                chunk_type="tool_result",
+                content="result",
+                data={"tool_call_id": "call-1"},
+            )
+        ]
+    )
+
+    assert isinstance(message, ToolMessage)
+    assert message.content == "result"
+    assert message.tool_call_id == "call-1"
+
+
+def test_stream_chunks_to_message_requires_tool_call_id_for_tool_result():
+    with pytest.raises(ValueError, match="tool_call_id"):
+        GraphNode.stream_chunks_to_message(
+            [StreamChunk(chunk_type="tool_result", content="result")]
+        )
+
+
+def test_stream_chunks_to_message_rejects_non_object_tool_arguments():
+    with pytest.raises(ValueError, match="arguments"):
+        GraphNode.stream_chunks_to_message(
+            [
+                StreamChunk(
+                    chunk_type="tool",
+                    data={
+                        "id": "call-1",
+                        "function": {"name": "search", "arguments": "[]"},
+                    },
+                )
+            ]
+        )
+
+
+@pytest.mark.asyncio
+async def test_chat_node_preserves_reasoning_and_tool_calls():
+    class ToolLLM:
+        async def ainvoke(self, messages):
+            return [
+                StreamChunk(chunk_type="think", content="reason"),
+                StreamChunk(chunk_type="content", content="hello"),
+                StreamChunk(
+                    chunk_type="tool",
+                    data={
+                        "id": "call-1",
+                        "function": {"name": "search", "arguments": "{\"query\": \"hello\"}"},
+                    },
+                ),
+            ]
+
+    config = GraphNode.prepare_chat_node_config(
+        thread_id="session-1",
+        models=FakeModels(ToolLLM()),
+        sys_prompt="",
+        involves_secrets=False,
+        think_mode=False,
+        args={},
+    )
+
+    result = await chat_node({"messages": [HumanMessage(content="hello")]}, config)
+    message = result["messages"][0]
+
+    assert isinstance(message, AIMessage)
+    assert message.content == "hello"
+    assert message.additional_kwargs["reasoning_content"] == "reason"
+    assert message.additional_kwargs["text_done"] is True
+    assert message.tool_calls == [
+        {"name": "search", "args": {"query": "hello"}, "id": "call-1", "type": "tool_call"}
     ]

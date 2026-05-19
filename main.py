@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import signal
-from collections.abc import AsyncIterator, Awaitable
+from collections.abc import Awaitable
 from contextlib import suppress
 from pathlib import Path
 from typing import Any, Callable
@@ -13,14 +13,13 @@ from alembic.config import Config
 from dotenv import load_dotenv
 from sqlalchemy import text
 
-from backend.agent.agent import Agent
 from backend.channels import EvolutionWhatsAppChannel
 from backend.channels.evolution_handler import run_whatsapp_listener
 from backend.db.session import engine
 from backend.graph.graph_store import GraphStore
 from backend.i18n import t
-from backend.llm.types import StreamChunk
-from backend.queues.message_queue import MessagePayload
+from backend.queues.message_queue import MessageQueue
+from backend.queues.msg_queue_handle import handle_agent_message
 from logger_setup import setup_logging
 
 logger = logging.getLogger(__name__)
@@ -54,16 +53,6 @@ def _install_signal_handlers(shutdown_event: asyncio.Event) -> None:
             loop.add_signal_handler(sig, shutdown_event.set)
 
 
-async def send_agent_message(payload: MessagePayload) -> AsyncIterator[StreamChunk]:
-    agent = await Agent.get_agent(payload["agent_id"], payload["session_id"])
-    async for chunk in agent.send(
-        payload["message"],
-        think_mode=False,
-        metadata={"source": "whatsapp"},
-    ):
-        yield chunk
-
-
 async def main(
     *,
     db_engine: Any = engine,
@@ -78,17 +67,18 @@ async def main(
 
     await check_database(db_engine)
     await upgrade_database_schema_func()
+    await GraphStore.init_langgraph_checkpointer()
 
     channel = channel_factory()
+    message_queue = MessageQueue(handle_agent_message, max_concurrency=2)
+    message_queue.start()
     shutdown_event = shutdown_event or asyncio.Event()
     _install_signal_handlers(shutdown_event)
 
     listener_task = asyncio.create_task(
-        run_whatsapp_listener(channel, llm_stream_handler=send_agent_message)
+        run_whatsapp_listener(channel, message_queue=message_queue)
     )
     shutdown_task = asyncio.create_task(shutdown_event.wait())
-
-    await GraphStore.init_langgraph_checkpointer()
 
     try:
         done, pending = await asyncio.wait(
@@ -106,6 +96,7 @@ async def main(
             await listener_task
         with suppress(asyncio.CancelledError):
             await shutdown_task
+        await message_queue.stop()
         await channel.close()
         await db_engine.dispose()
         await GraphStore.pool.close()
