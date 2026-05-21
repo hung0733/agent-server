@@ -41,5 +41,14 @@ croniter>=1.3.0
 # OpenAI SDK
 openai>=1.0.0
 
+# Vector Database
+qdrant-client>=1.12.0
+
+# Chinese text segmentation
+jieba>=0.42
+
+# Retry logic
+tenacity>=9.0
+
 # Sandbox
 opensandbox>=0.1.8
