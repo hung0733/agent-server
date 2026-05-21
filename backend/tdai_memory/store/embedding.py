@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from typing import Any
 
 import openai
@@ -12,8 +13,7 @@ from tenacity import (
     wait_exponential,
 )
 
-from backend.i18n import t
-from backend.tdai_memory.config import EmbeddingConfig
+from tdai_memory.config import EmbeddingConfig
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +25,15 @@ _MODEL_DIMENSIONS: dict[str, int] = {
 
 _DEFAULT_DIMENSIONS = 1536
 _MAX_BATCH_SIZE = 256
+
+
+def _sanitize_and_normalize(vec: list[float]) -> list[float]:
+    sanitized = [0.0 if (v is None or math.isnan(v) or math.isinf(v)) else v for v in vec]
+    sq_norm = sum(v * v for v in sanitized)
+    if sq_norm > 0:
+        scale = 1.0 / math.sqrt(sq_norm)
+        sanitized = [v * scale for v in sanitized]
+    return sanitized
 
 
 class EmbeddingNotReadyError(Exception):
@@ -44,7 +53,7 @@ class EmbeddingService:
 
     async def embed(self, text: str) -> list[float]:
         text = text[: self._max_input_chars]
-        return await self._embed_single(text)
+        return _sanitize_and_normalize(await self._embed_single(text))
 
     async def embed_batch(self, texts: list[str]) -> list[list[float]]:
         truncated = [t[: self._max_input_chars] for t in texts]
@@ -52,7 +61,7 @@ class EmbeddingService:
         for i in range(0, len(truncated), _MAX_BATCH_SIZE):
             batch = truncated[i : i + _MAX_BATCH_SIZE]
             results.extend(await self._embed_batch(batch))
-        return results
+        return [_sanitize_and_normalize(r) for r in results]
 
     def get_dimensions(self) -> int:
         if self._dimensions_override > 0:
@@ -86,7 +95,7 @@ class EmbeddingService:
             error_msg = str(e).lower()
             if "maximum context length" in error_msg or "too long" in error_msg:
                 logger.warning(
-                    t("tdai_memory.embedding.text_too_long"),
+                    "Embedding text too long (%d chars), truncating by half and retrying",
                     len(text),
                 )
                 kwargs["input"] = text[: len(text) // 2]
@@ -112,7 +121,7 @@ class EmbeddingService:
             error_msg = str(e).lower()
             if "maximum context length" in error_msg or "too long" in error_msg:
                 logger.warning(
-                    t("tdai_memory.embedding.batch_too_long")
+                    "Batch embedding too long, truncating each text by half and retrying"
                 )
                 kwargs["input"] = [t[: len(t) // 2] for t in texts]
                 response = await self._client.embeddings.create(**kwargs)

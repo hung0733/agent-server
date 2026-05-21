@@ -1,93 +1,61 @@
-from __future__ import annotations
-
+import json
 import logging
-from typing import TYPE_CHECKING
-
 import openai
-
-from backend.i18n import t
-from backend.tdai_memory.config import MemoryConfig
-
-if TYPE_CHECKING:
-    from backend.tdai_memory.offload.manager import OffloadEntry
 
 logger = logging.getLogger(__name__)
 
-_SYSTEM_PROMPT = """You are a Mermaid flowchart generator. Given a list of tool calls and their summaries,
-generate a Mermaid JS flowchart (flowchart TD format) that shows the sequence and relationships of tool calls.
-
-Rules:
-- Each tool call should be a node
-- Nodes should show a short label (tool name + brief summary)
-- Connect nodes with arrows showing the flow
-- Use subgraphs to group related tool calls if applicable
-- Output ONLY the Mermaid diagram code, nothing else
-- The graph should be readable and well-organized
-
-Example output format:
-```mermaid
-flowchart TD
-    A[Tool A: Did something]
-    B[Tool B: Did something else]
-    C[Tool C: Combined results]
-    A --> B
-    B --> C
-```"""
-
 
 async def build_mermaid_flowchart(
-    entries: list[OffloadEntry],
+    entries: list,
     task_name: str,
     llm_client: openai.AsyncOpenAI,
-    config: MemoryConfig,
+    config,
 ) -> str | None:
-    if not entries:
-        return None
-
-    entry_lines = []
-    for i, e in enumerate(entries):
-        entry_lines.append(
-            f"{i + 1}. [{e.timestamp[:19]}] {e.tool_call} "
-            f"(score={e.score}): {e.summary[: config.offload.mermaid_entry_summary_chars]}"
-        )
-    entry_text = "\n".join(entry_lines)
-
-    user_prompt = f"Task: {task_name}\n\nTool calls:\n{entry_text}"
+    system_prompt = (
+        "You generate Mermaid flowcharts from offload entries. "
+        "Output ONLY a Mermaid flowchart in ```mermaid ... ``` format. "
+        "Use `flowchart TD` (top-down). "
+        "Node IDs must follow the pattern `{prefix}-N{number}`, e.g. `A-N1`, `B-N2`. "
+        "Include tool_call summaries as node labels using double-quoted strings with line breaks (`<br/>`). "
+        "Nodes should flow in chronological order. "
+        "Edges should connect sequentially and branch where tool calls depend on earlier results. "
+        "Use subgraphs to group related actions. "
+        "Keep the diagram concise and readable."
+    )
+    entries_json = json.dumps(entries, indent=2, ensure_ascii=False)
+    user_prompt = (
+        f"Task: {task_name}\n"
+        f"Offload entries (chronological):\n{entries_json}\n\n"
+        f"Generate a `flowchart TD` Mermaid diagram summarizing this execution flow."
+    )
 
     try:
         response = await llm_client.chat.completions.create(
             model=config.llm.model,
             messages=[
-                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            temperature=0.2,
-            max_tokens=config.llm.max_tokens,
-            timeout=config.llm.timeout_ms / 1000,
+            temperature=0.0,
+            timeout=config.llm.timeout_ms / 1000.0,
         )
-        content = response.choices[0].message.content or ""
+        content = response.choices[0].message.content.strip()
+
+        if "```mermaid" in content:
+            start = content.index("```mermaid") + len("```mermaid")
+            end = content.index("```", start)
+            mmd = content[start:end].strip()
+        elif "```" in content:
+            start = content.index("```") + 3
+            end = content.index("```", start)
+            raw = content[start:end].strip()
+            if raw.startswith("mermaid"):
+                raw = raw[len("mermaid"):].strip()
+            mmd = raw
+        else:
+            mmd = content
+
+        return mmd.strip() or None
     except Exception:
-        logger.exception(t("tdai_memory.offload.mermaid_failed"), task_name)
+        logger.warning("Failed to build Mermaid flowchart", exc_info=True)
         return None
-
-    content = content.strip()
-    if not content:
-        return None
-
-    if "```" in content:
-        lines = content.split("\n")
-        cleaned: list[str] = []
-        in_block = False
-        for line in lines:
-            if line.startswith("```"):
-                in_block = not in_block
-                continue
-            if in_block:
-                cleaned.append(line)
-        if cleaned:
-            content = "\n".join(cleaned).strip()
-
-    if not content.startswith("flowchart") and not content.startswith("graph"):
-        return None
-
-    return content

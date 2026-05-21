@@ -8,12 +8,13 @@ from uuid import uuid4
 
 import openai
 
-from backend.i18n import t
-from backend.tdai_memory.config import MemoryConfig
-from backend.tdai_memory.models import MemoryRecord
-from backend.tdai_memory.store.embedding import EmbeddingService
-from backend.tdai_memory.store.postgres import PostgresStore
-from backend.tdai_memory.store.qdrant import QdrantStore
+from tdai_memory.config import MemoryConfig
+from tdai_memory.models import MemoryRecord
+from tdai_memory.store.embedding import EmbeddingService
+from tdai_memory.store.postgres import PostgresStore
+from tdai_memory.store.qdrant import QdrantStore
+
+from ..utils.sanitize import sanitize_json_for_parse, should_extract_l1
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,7 @@ _EXTRACTION_PROMPT = """你是一个记忆提取助手。从对话中提取结�
 - 优先提取重要和可复用的信息
 - 不要提取无意义或临时的闲聊内容
 - 如果某类没有可提取的记忆，留空数组
+- 每条记忆需包含 source_message_ids: 引用该记忆来源的对话消息序号列表（从 1 开始）
 - 对于 episodic 类型，如果提到活动时间，请在 metadata 字段中包含 activity_start_time 和 activity_end_time (ISO 8601)
 - 每条记忆的 priority 值为 0-100：
   - 80-100: 非常重要的长期信息或核心指令
@@ -43,6 +45,7 @@ _EXTRACTION_PROMPT = """你是一个记忆提取助手。从对话中提取结�
       "content": "记忆内容",
       "type": "persona|episodic|instruction",
       "priority": 80,
+      "source_message_ids": [1, 2],
       "metadata": {}
     }
   ]
@@ -66,7 +69,7 @@ def _parse_llm_extraction_response(response_text: str) -> list[dict]:
     try:
         data = json.loads(text)
     except json.JSONDecodeError:
-        logger.warning(t("tdai_memory.pipeline.l1_parse_json_failed"))
+        logger.warning("Failed to parse LLM JSON response")
         return []
 
     if not isinstance(data, dict) or "memories" not in data:
@@ -113,21 +116,39 @@ async def run_l1_extraction(
     data_dir: str,
     checkpoint_cursor: str | None = None,
 ) -> list[MemoryRecord]:
-    after_timestamp_ms = 0
+    after_recorded_at_epoch_ms = 0
     if checkpoint_cursor:
         dt = datetime.fromisoformat(checkpoint_cursor)
-        after_timestamp_ms = int(dt.timestamp() * 1000)
+        after_recorded_at_epoch_ms = int(dt.timestamp() * 1000)
 
     l0_messages = await postgres.query_l0_for_l1(
-        agent_id, session_key, after_timestamp_ms=after_timestamp_ms, limit=100
+        agent_id, session_key, after_recorded_at_epoch_ms=after_recorded_at_epoch_ms, limit=100
     )
 
     if not l0_messages:
-        logger.debug(t("tdai_memory.pipeline.l1_no_l0_messages"), agent_id, session_key)
+        logger.debug("No L0 messages for agent=%s session=%s", agent_id, session_key)
         return []
 
-    conversation_lines = [f"[{m['role']}]: {m['message_text']}" for m in l0_messages]
-    conversation_text = "\n".join(conversation_lines)
+    l0_msgs_for_check = [
+        {"role": m["role"], "content": m["message_text"]} for m in l0_messages
+    ]
+    if not should_extract_l1(l0_msgs_for_check):
+        logger.debug("L0 messages failed quality gate for agent=%s", agent_id)
+        return []
+
+    split_idx = int(len(l0_messages) * 0.7)
+    background = l0_messages[:split_idx][-50:]
+    new = l0_messages[split_idx:][-30:]
+
+    def _build_section(messages, label):
+        lines = [f"[{m['role']}]: {m['message_text']}" for m in messages]
+        return f"## {label}\n" + "\n".join(lines)
+
+    conversation_text = (
+        _build_section(background, "背景对话")
+        + "\n\n"
+        + _build_section(new, "新对话")
+    )
 
     existing_records = await postgres.query_l1_records(agent_id, limit=50)
     if existing_records:
@@ -154,16 +175,17 @@ async def run_l1_extraction(
     )
 
     response_text = response.choices[0].message.content or ""
+    response_text = sanitize_json_for_parse(response_text)
     extracted = _parse_llm_extraction_response(response_text)
 
     if not extracted:
-        logger.debug(t("tdai_memory.pipeline.l1_no_memories_extracted"), agent_id)
+        logger.debug("No memories extracted for agent=%s", agent_id)
         return []
 
     max_memories = config.extraction.max_memories_per_session
     now_iso = datetime.now(timezone.utc).isoformat()
-    results: list[MemoryRecord] = []
 
+    new_memories: list[MemoryRecord] = []
     for item in extracted[:max_memories]:
         record = MemoryRecord(
             id=f"mem_{uuid4().hex[:12]}",
@@ -172,6 +194,7 @@ async def run_l1_extraction(
             type=item["type"],
             priority=item["priority"],
             scene_name="",
+            source_message_ids=item.get("source_message_ids", []),
             timestamps=[now_iso],
             created_at=now_iso,
             updated_at=now_iso,
@@ -179,93 +202,35 @@ async def run_l1_extraction(
             session_id="",
             metadata=item.get("metadata", {}),
         )
+        new_memories.append(record)
 
-        if not config.extraction.enable_dedup:
-            await postgres.upsert_l1(record)
-            await qdrant.upsert_l1(record, None)
-            results.append(record)
-            continue
+    from .l1_dedup import batch_dedup
 
+    final_memories = await batch_dedup(
+        agent_id=agent_id,
+        new_memories=new_memories,
+        postgres=postgres,
+        qdrant=qdrant,
+        embedding=embedding,
+        llm_client=llm_client,
+        config=config,
+    )
+
+    results: list[MemoryRecord] = []
+    for mem in final_memories:
         try:
-            query_vector = await embedding.embed(record.content)
+            await postgres.upsert_l1(mem)
+            if embedding.is_ready():
+                emb = await embedding.embed(mem.content)
+                await qdrant.upsert_l1(mem, emb)
+            else:
+                await qdrant.upsert_l1(mem, None)
+            results.append(mem)
         except Exception:
-            logger.exception(t("tdai_memory.pipeline.l1_embed_failed"), record.id)
-            await postgres.upsert_l1(record)
-            await qdrant.upsert_l1(record, None)
-            results.append(record)
-            continue
-
-        search_results = await qdrant.search_l1(agent_id, query_vector, limit=5)
-
-        if not search_results or search_results[0]["score"] < 0.7:
-            await postgres.upsert_l1(record)
-            await qdrant.upsert_l1(record, query_vector)
-            results.append(record)
-            continue
-
-        top = search_results[0]
-        existing_id = top["id"]
-        existing_content = top.get("content", "")
-        existing_type = top.get("type", record.type)
-        existing_priority = top.get("priority", record.priority)
-        existing_timestamps = list(top.get("timestamps", []))
-        existing_created_at = top.get("created_at", now_iso)
-        existing_session_key = top.get("session_key", "")
-        existing_session_id = top.get("session_id", "")
-
-        if top["score"] > 0.85:
-            updated = MemoryRecord(
-                id=existing_id,
-                agent_id=agent_id,
-                content=existing_content,
-                type=existing_type,
-                priority=existing_priority,
-                scene_name="",
-                timestamps=existing_timestamps + [now_iso],
-                created_at=existing_created_at,
-                updated_at=now_iso,
-                session_key=existing_session_key,
-                session_id=existing_session_id,
-            )
-            await postgres.upsert_l1(updated)
-            results.append(updated)
-            logger.debug(
-                t("tdai_memory.pipeline.l1_dedup_match"),
-                record.id,
-                existing_id,
-                top["score"],
-            )
-        else:
-            merged_content = f"{existing_content}\n{record.content}"
-            merged = MemoryRecord(
-                id=existing_id,
-                agent_id=agent_id,
-                content=merged_content,
-                type=existing_type,
-                priority=existing_priority,
-                scene_name="",
-                timestamps=existing_timestamps + [now_iso],
-                created_at=existing_created_at,
-                updated_at=now_iso,
-                session_key=existing_session_key,
-                session_id=existing_session_id,
-            )
-            await postgres.upsert_l1(merged)
-            try:
-                merged_vector = await embedding.embed(merged_content)
-                await qdrant.upsert_l1(merged, merged_vector)
-            except Exception:
-                logger.exception(t("tdai_memory.pipeline.l1_reembed_failed"), existing_id)
-            results.append(merged)
-            logger.debug(
-                t("tdai_memory.pipeline.l1_merge"),
-                record.id,
-                existing_id,
-                top["score"],
-            )
+            logger.exception("Failed to upsert memory %s", mem.id)
 
     logger.info(
-        t("tdai_memory.pipeline.l1_done"),
+        "L1 extraction done: agent=%s session=%s raw=%d results=%d",
         agent_id, session_key, len(extracted), len(results),
     )
     return results

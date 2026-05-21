@@ -1,60 +1,49 @@
-from __future__ import annotations
-
 import json
 import logging
-
 import openai
-
-from backend.i18n import t
-from backend.tdai_memory.config import MemoryConfig
 
 logger = logging.getLogger(__name__)
 
-_SYSTEM_PROMPT = """Summarize the tool call result concisely. Include:
-1. What the tool did
-2. Key findings/output
-3. A replaceability score (0-10): how easy is it to replace this result with the summary?
-   0 = summary perfectly captures everything, 10 = must read the full result
-
-Return JSON: {"summary": "...", "score": N}"""
 
 async def summarize_tool_result(
     tool_name: str,
     tool_input: dict,
     result_text: str,
     llm_client: openai.AsyncOpenAI,
-    config: MemoryConfig,
+    config,
 ) -> tuple[str, int]:
-    truncated = result_text[: config.offload.summarizer_max_result_chars]
-    user_prompt = json.dumps(
-        {"tool_name": tool_name, "tool_input": tool_input, "result_text": truncated},
-        ensure_ascii=False,
+    truncated = result_text[:4000]
+    system_prompt = (
+        "You are a tool output summarizer. Given a tool call and its result, produce a concise summary "
+        "and a replaceability score (0-10). The replaceability score indicates how well the summary "
+        "captures the essential information: 0 means the summary captures everything needed and the "
+        "full result can be safely discarded; 10 means the summary is insufficient and the full result "
+        "must be read to understand the output.\n\n"
+        "Output ONLY a JSON object with no extra text:\n"
+        '{"summary": "<concise summary>", "score": <integer 0-10>}'
+    )
+    user_prompt = (
+        f"Tool: {tool_name}\n"
+        f"Arguments: {json.dumps(tool_input)}\n"
+        f"Result:\n{truncated}"
     )
 
     try:
         response = await llm_client.chat.completions.create(
             model=config.llm.model,
             messages=[
-                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            response_format={"type": "json_object"},
-            temperature=0.1,
-            max_tokens=config.llm.max_tokens,
-            timeout=config.llm.timeout_ms / 1000,
+            temperature=0.0,
+            timeout=config.llm.timeout_ms / 1000.0,
         )
-        content = response.choices[0].message.content or ""
+        content = response.choices[0].message.content.strip()
+        parsed = json.loads(content)
+        summary = parsed["summary"]
+        score = int(parsed["score"])
+        return summary, min(max(score, 0), 10)
     except Exception:
-        logger.exception(t("tdai_memory.offload.summarization_failed"), tool_name)
-        return f"Tool '{tool_name}' executed.", 10
-
-    try:
-        data = json.loads(content)
-        summary = str(data.get("summary", f"Tool '{tool_name}' executed."))
-        score = int(data.get("score", 5))
-        score = max(0, min(10, score))
-    except (json.JSONDecodeError, ValueError, TypeError):
-        logger.warning(t("tdai_memory.offload.summary_parse_failed"))
-        return f"Tool '{tool_name}' executed.", 5
-
-    return summary, score
+        logger.warning("Failed to summarize tool result for %s", tool_name, exc_info=True)
+        fallback = truncated[:200] + ("..." if len(truncated) > 200 else "")
+        return fallback, 10

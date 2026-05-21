@@ -5,13 +5,14 @@ import json
 import logging
 import os
 import re
+import time
+from datetime import datetime, timezone
 
-from backend.i18n import t
-from backend.tdai_memory.config import MemoryConfig
-from backend.tdai_memory.models import RecalledMemory, RecallResult
-from backend.tdai_memory.store.embedding import EmbeddingService
-from backend.tdai_memory.store.postgres import PostgresStore
-from backend.tdai_memory.store.qdrant import QdrantStore
+from tdai_memory.config import MemoryConfig
+from tdai_memory.models import RecalledMemory, RecallResult
+from tdai_memory.store.embedding import EmbeddingService
+from tdai_memory.store.postgres import PostgresStore
+from tdai_memory.store.qdrant import QdrantStore
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,19 @@ _SCENE_NAV_SECTION_RE = re.compile(r"## 📑 场景导航.*?(?=\Z)", re.DOTALL)
 _RRF_K = 60
 _RRF_SCORE_THRESHOLD = 0.01
 
+TOOLS_GUIDE = """<memory-tools-guide>
+你可以使用以下記憶工具來檢索歷史記憶：
+
+- **tdai_memory_search** — 搜尋結構化記憶（用戶畫像、事件記憶、指令記憶）。支持 keyword / embedding / hybrid 三種策略。
+- **tdai_conversation_search** — 搜尋原始對話記錄（L0 層）。支持 keyword / embedding 策略。
+
+使用建議：
+1. 當用戶提到過去發生的事、偏好、或你感覺需要回顧歷史時，主動調用記憶工具。
+2. 每次調用最多 3 次，如果 3 次都無相關結果，停止搜索，直接基於當前上下文回答。
+3. 搜尋時使用簡潔的關鍵詞（2-8 個字），不要用完整句子。
+4. 如果用戶明確要求搜尋特定記憶，優先使用 tdai_memory_search。
+</memory-tools-guide>"""
+
 
 def _sanitize_text(user_text: str) -> str:
     text = _GATEWAY_METADATA_RE.sub("", user_text)
@@ -43,6 +57,14 @@ def _strip_scene_nav_markup(content: str) -> str:
     content = _SCENE_NAV_LINK_RE.sub("", content)
     content = _SCENE_NAV_SECTION_RE.sub("", content)
     return content.strip()
+
+
+def _format_timestamp(iso_str: str) -> str:
+    try:
+        dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
+        return dt.strftime("%Y-%m-%d %H:%M")
+    except (ValueError, TypeError):
+        return iso_str
 
 
 def _rrf_fusion(
@@ -76,23 +98,40 @@ def _rrf_fusion(
             )
 
     fused = sorted(merged.values(), key=lambda x: x["_rrf_score"], reverse=True)
-    return fused
+    return fuseds
 
 
 def _build_memory_line(item: dict) -> str:
     mem_type = item.get("type", "")
     scene_name = item.get("scene_name", "")
     content = item.get("content", "")
-    line = f"- [{mem_type}|{scene_name}] {content}"
 
-    metadata = item.get("metadata") or {}
+    tags = []
+    if mem_type:
+        tags.append(mem_type)
+    if scene_name:
+        tags.append(scene_name)
+    tag_str = "|".join(tags)
+    line = f"- [{tag_str}] {content}" if tag_str else f"- {content}"
+
+    metadata = item.get("metadata")
+    if isinstance(metadata, str):
+        try:
+            metadata = json.loads(metadata)
+        except (json.JSONDecodeError, TypeError):
+            metadata = {}
+
     if isinstance(metadata, dict):
         start = metadata.get("activity_start_time")
         end = metadata.get("activity_end_time")
-        if start or end:
-            start_str = start if start else "?"
-            end_str = end if end else "?"
-            line += f" (活动时间: {start_str} ~ {end_str})"
+        if start and end and start == end:
+            line += f" (活动时间: {_format_timestamp(start)})"
+        elif start and end:
+            line += f" (活动时间: {_format_timestamp(start)} ~ {_format_timestamp(end)})"
+        elif start:
+            line += f" (活动时间: {_format_timestamp(start)}起)"
+        elif end:
+            line += f" (活动时间: 至{_format_timestamp(end)})"
 
     return line
 
@@ -129,7 +168,9 @@ async def _do_hybrid_recall(
             keyword_task, embedding_task
         )
     except Exception:
-        logger.warning(t("tdai_memory.recall.hybrid_embedding_failed"))
+        logger.warning(
+            "Embedding failed during hybrid recall, falling back to keyword-only"
+        )
         keyword_results = await postgres.search_l1_fts(
             agent_id, user_text, limit=limit
         )
@@ -201,50 +242,66 @@ async def perform_auto_recall(
     data_dir: str,
     config: MemoryConfig,
 ) -> RecallResult:
-    sanitized = _sanitize_text(user_text)
+    t_start = time.monotonic()
 
-    if len(sanitized) < 2:
-        return RecallResult()
+    sanitized = _sanitize_text(user_text)
+    do_search = len(sanitized) >= 2
+    logger.debug("Recall sanitized %d→%d chars", len(user_text), len(sanitized))
 
     agent_dir = os.path.join(data_dir, agent_id)
-
-    recall_coro = _perform_recall(
-        agent_id=agent_id,
-        sanitized_text=sanitized,
-        postgres=postgres,
-        qdrant=qdrant,
-        embedding=embedding,
-        config=config,
-    )
-
-    try:
-        results, strategy = await asyncio.wait_for(
-            recall_coro,
-            timeout=config.recall.timeout_ms / 1000.0,
-        )
-    except asyncio.TimeoutError:
-        logger.warning(
-            t("tdai_memory.recall.timed_out"),
-            config.recall.timeout_ms,
-            agent_id,
-        )
-        return RecallResult()
-
-    recalled_memories = _results_to_recalled(results)
 
     persona_content, soul_content, identity_content = await asyncio.gather(
         _read_file_async(os.path.join(agent_dir, "persona.md")),
         _read_file_async(os.path.join(agent_dir, "SOUL.md")),
         _read_file_async(os.path.join(agent_dir, "IDENTITY.md")),
     )
-
     scene_nav_text = await _load_scene_nav(agent_dir)
 
-    prepend_context = _build_prepend_context(recalled_memories)
+    recalled_memories: list[RecalledMemory] = []
+    strategy = "hybrid"
+    prepend_context: str | None = None
+
+    if do_search:
+        recall_coro = _perform_recall(
+            agent_id=agent_id,
+            sanitized_text=sanitized,
+            postgres=postgres,
+            qdrant=qdrant,
+            embedding=embedding,
+            config=config,
+        )
+
+        try:
+            results, strategy = await asyncio.wait_for(
+                recall_coro,
+                timeout=config.recall.timeout_ms / 1000.0,
+            )
+            recalled_memories = _results_to_recalled(results)
+            prepend_context = _build_prepend_context(recalled_memories)
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Auto-recall timed out after %dms for agent=%s",
+                config.recall.timeout_ms,
+                agent_id,
+            )
+
     append_system_context = _build_append_context(
         persona_content, soul_content, identity_content, scene_nav_text
     )
 
+    if not prepend_context and not append_system_context:
+        logger.debug("Recall empty result for agent=%s (%.0fms)", agent_id, (time.monotonic() - t_start) * 1000)
+        return RecallResult()
+
+    logger.debug(
+        "Recall done: agent=%s strategy=%s memories=%d persona=%s soul=%s identity=%s scene=%s (%.0fms)",
+        agent_id, strategy, len(recalled_memories),
+        "yes" if persona_content else "no",
+        "yes" if soul_content else "no",
+        "yes" if identity_content else "no",
+        "yes" if scene_nav_text else "no",
+        (time.monotonic() - t_start) * 1000,
+    )
     return RecallResult(
         prepend_context=prepend_context,
         append_system_context=append_system_context,
@@ -278,7 +335,10 @@ async def _perform_recall(
             )
             return results, "embedding"
         except Exception:
-            logger.warning(t("tdai_memory.recall.embedding_failed"), agent_id)
+            logger.warning(
+                "Embedding recall failed, falling back to keyword for agent=%s",
+                agent_id,
+            )
             results = await _do_keyword_recall(agent_id, sanitized_text, postgres, config)
             return results, "keyword"
 
@@ -288,7 +348,10 @@ async def _perform_recall(
         )
         return results, "hybrid"
     except Exception:
-        logger.warning(t("tdai_memory.recall.hybrid_failed"), agent_id)
+        logger.warning(
+            "Hybrid recall failed, falling back to keyword for agent=%s",
+            agent_id,
+        )
         results = await _do_keyword_recall(agent_id, sanitized_text, postgres, config)
         return results, "keyword"
 
@@ -315,7 +378,13 @@ async def _load_scene_nav(agent_dir: str) -> str | None:
         name = scene.get("name", "")
         if not name:
             continue
-        lines.append(f"- [🔍 {name}](scene_nav:{name})")
+        label = scene.get("label", name)
+        summary = scene.get("summary", "")
+        memory_count = scene.get("memory_count", 0)
+        if summary:
+            lines.append(f"- [🔍 {label}](scene_nav:{name}) — {summary} [{memory_count} memories]")
+        else:
+            lines.append(f"- [🔍 {label}](scene_nav:{name}) [{memory_count} memories]")
 
     if len(lines) == 1:
         return None
@@ -357,12 +426,9 @@ def _build_append_context(
     if scene_nav:
         parts.append("<scene-navigation>\n" + scene_nav + "\n</scene-navigation>")
 
-    parts.append(
-        "<memory-tools-guide>\n"
-        "You have access to memory tools: tdai_memory_search (search memories) and "
-        "tdai_conversation_search (search past conversations). Use them when the user "
-        "asks about past interactions or stored knowledge.\n"
-        "</memory-tools-guide>"
-    )
+    parts.append(TOOLS_GUIDE)
+
+    if not any(p != TOOLS_GUIDE for p in parts):
+        return None
 
     return "\n\n".join(parts)

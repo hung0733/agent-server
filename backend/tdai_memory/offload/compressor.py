@@ -1,136 +1,144 @@
-from __future__ import annotations
-
 import json
 import logging
-import os
-
 import openai
 
-from backend.tdai_memory.config import MemoryConfig
-from backend.tdai_memory.offload.manager import OffloadManager
-
 logger = logging.getLogger(__name__)
-
-
-def _estimate_tokens(text: str) -> int:
-    return max(1, len(text) // 2)
-
-
-def _estimate_context_tokens(context: list[dict]) -> int:
-    total = 0
-    for msg in context:
-        total += _estimate_tokens(str(msg.get("content", "")))
-    return total
 
 
 async def compress_context(
     agent_id: str,
     session_key: str,
     current_context: list[dict],
-    offload_manager: OffloadManager,
+    offload_manager,
     llm_client: openai.AsyncOpenAI,
-    config: MemoryConfig,
+    config,
     target_tokens: int,
 ) -> list[dict]:
-    current_tokens = _estimate_context_tokens(current_context)
-    if current_tokens <= target_tokens:
-        return current_context
+    result = _try_mild(current_context, offload_manager)
+    if _estimate_tokens(result) <= target_tokens:
+        return result
 
-    offload_dir = os.path.join(offload_manager.data_dir, agent_id, "offload")
-    jsonl_path = os.path.join(offload_dir, "offload.jsonl")
+    result = await _try_aggressive(result, offload_manager, llm_client, config, target_tokens)
+    if _estimate_tokens(result) <= target_tokens:
+        return result
 
-    import asyncio
+    result = await _try_emergency(result, offload_manager, target_tokens)
+    return result
 
-    def _load_entries() -> list[dict]:
-        if not os.path.exists(jsonl_path):
-            return []
-        entries: list[dict] = []
-        with open(jsonl_path, "r") as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    entries.append(json.loads(line))
-        return entries
 
-    entries_raw = await asyncio.to_thread(_load_entries)
-    entry_map: dict[str, dict] = {e["tool_call_id"]: e for e in entries_raw}
+def _estimate_tokens(messages: list[dict]) -> int:
+    total = 0
+    for msg in messages:
+        content = msg.get("content", "")
+        if isinstance(content, str):
+            total += len(content) // 2
+        elif isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and "text" in block:
+                    total += len(block["text"]) // 2
+    return total
 
-    def _try_mild(ctx: list[dict]) -> list[dict]:
-        compressed: list[dict] = []
-        for msg in ctx:
-            content = str(msg.get("content", ""))
-            role = str(msg.get("role", ""))
-            if role == "tool":
-                tool_call_id = str(msg.get("tool_call_id", ""))
-                e = entry_map.get(tool_call_id)
-                if e and e.get("score", 10) <= 3:
-                    compressed.append({
-                        **msg,
-                        "content": f"[Summary] {e['summary']}",
-                    })
-                else:
-                    compressed.append(msg)
-            else:
-                compressed.append(msg)
-        return compressed
 
-    def _try_aggressive(ctx: list[dict]) -> list[dict]:
-        compressed: list[dict] = []
-        for msg in ctx:
-            content = str(msg.get("content", ""))
-            role = str(msg.get("role", ""))
-            if role == "tool":
-                tool_call_id = str(msg.get("tool_call_id", ""))
-                e = entry_map.get(tool_call_id)
-                if e:
-                    compressed.append({
-                        **msg,
-                        "content": f"[Summary] {e['summary']}",
-                    })
-                else:
-                    compressed.append({
-                        **msg,
-                        "content": content[:800],
-                    })
-            else:
-                compressed.append(msg)
-        return compressed
+def _try_mild(context: list[dict], offload_manager) -> list[dict]:
+    threshold = int(len(context) * 0.3)
+    tail = context[threshold:]
 
-    def _try_emergency(ctx: list[dict]) -> list[dict]:
-        tool_msgs = [m for m in ctx if str(m.get("role", "")) == "tool"]
-        non_tool_msgs = [m for m in ctx if str(m.get("role", "")) != "tool"]
+    for msg in tail:
+        if msg.get("role") != "tool":
+            continue
+        entries = offload_manager.get_entries_for_message(msg)
+        if not entries:
+            continue
+        low_score_entries = [e for e in entries if e.get("replaceability_score", 10) <= 3]
+        if not low_score_entries:
+            continue
+        summaries = [e["summary"] for e in low_score_entries]
+        combined = " | ".join(summaries)
+        msg["content"] = f"[Summary: {combined}]"
 
-        keep = non_tool_msgs[-4:] if len(non_tool_msgs) >= 4 else non_tool_msgs
+    return context
 
-        mermaid_parts: list[str] = []
-        for m in tool_msgs:
-            tool_call_id = str(m.get("tool_call_id", ""))
-            e = entry_map.get(tool_call_id)
-            if e:
-                mermaid_parts.append(f"- {e['tool_call']}: {e['summary'][:120]}")
-            else:
-                content = str(m.get("content", ""))
-                mermaid_parts.append(f"- Tool call: {content[:120]}")
 
-        if mermaid_parts:
-            mermaid_block = {
-                "role": "system",
-                "content": "[Emergency context]\nTool call flow:\n" + "\n".join(mermaid_parts[-20:]),
-            }
-            return [mermaid_block] + keep
+async def _try_aggressive(
+    context: list[dict],
+    offload_manager,
+    llm_client,
+    config,
+    target_tokens: int,
+) -> list[dict]:
+    from .summarizer import summarize_tool_result
 
-        return keep
+    for msg in context:
+        if msg.get("role") != "tool":
+            continue
+        entries = offload_manager.get_entries_for_message(msg)
+        if entries:
+            best_entry = _pick_best_entry(entries)
+            msg["content"] = f"[Summary: {best_entry['summary']}]"
+        else:
+            content = msg.get("content", "")
+            if isinstance(content, str) and len(content) > 800:
+                msg["content"] = content[:800] + "..."
 
-    compressed = _try_mild(current_context)
-    if _estimate_context_tokens(compressed) <= target_tokens:
-        return compressed
+    i = 0
+    while i < len(context) and _estimate_tokens(context) > target_tokens:
+        msg = context[i]
+        role = msg.get("role", "")
+        if role == "tool":
+            if i + 1 < len(context) and context[i + 1].get("role") == "user":
+                del context[i : i + 2]
+                continue
+            del context[i]
+            continue
+        if role == "user" and i + 1 < len(context):
+            del context[i]
+            continue
+        if role == "assistant":
+            del context[i]
+            continue
+        i += 1
 
-    compressed = _try_aggressive(current_context)
-    while _estimate_context_tokens(compressed) > target_tokens and len(compressed) > 4:
-        compressed = compressed[2:]
+    return context
 
-    if _estimate_context_tokens(compressed) <= target_tokens:
-        return compressed
 
-    compressed = _try_emergency(current_context)
-    return compressed
+async def _try_emergency(
+    context: list[dict],
+    offload_manager,
+    target_tokens: int,
+) -> list[dict]:
+    non_tool = [msg for msg in context if msg.get("role") != "tool"]
+    tool_msgs = [msg for msg in context if msg.get("role") == "tool"]
+
+    if len(non_tool) > 4:
+        non_tool = non_tool[-4:]
+
+    tool_summaries = []
+    for msg in tool_msgs:
+        entries = offload_manager.get_entries_for_message(msg)
+        if entries:
+            e = _pick_best_entry(entries)
+            tool_summaries.append(f"- {e.get('call_id', '?'):>6}: {e['summary']}")
+        else:
+            content = msg.get("content", "")
+            if isinstance(content, str):
+                tool_summaries.append(f"- ???: {content[:120]}")
+
+    if tool_summaries:
+        flow_block = {
+            "role": "user",
+            "content": "<tool-flow-summary>\n" + "\n".join(tool_summaries) + "\n</tool-flow-summary>",
+        }
+        non_tool.insert(-1, flow_block)
+
+    return non_tool
+
+
+def _pick_best_entry(entries: list) -> dict:
+    best = entries[0]
+    best_score = best.get("replaceability_score", 10)
+    for e in entries[1:]:
+        score = e.get("replaceability_score", 10)
+        if score < best_score:
+            best = e
+            best_score = score
+    return best

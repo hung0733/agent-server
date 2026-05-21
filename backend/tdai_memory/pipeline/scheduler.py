@@ -2,23 +2,71 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 from datetime import datetime, timezone
 
 import openai
 
-from backend.i18n import t
-from backend.tdai_memory.config import MemoryConfig
-from backend.tdai_memory.models import PipelineSessionState
-from backend.tdai_memory.store.embedding import EmbeddingService
-from backend.tdai_memory.store.postgres import PostgresStore
-from backend.tdai_memory.store.qdrant import QdrantStore
-
+from ..config import MemoryConfig
+from ..models import PipelineSessionState
+from ..store.embedding import EmbeddingService
+from ..store.postgres import PostgresStore
+from ..store.qdrant import QdrantStore
 from .l1_extraction import run_l1_extraction
 from .l2_scenes import run_l2_scene_grouping
 from .l3_profile import run_l3_profile_generation
+from .metrics import report_metric
 
 logger = logging.getLogger(__name__)
+
+L1_MAX_RETRIES = 5
+L1_RETRY_DELAY = 30.0
+L2_MIN_L1_COUNT = 3
+_GC_MULTIPLIER = 3
+
+
+class SerialQueue:
+    def __init__(self, label: str) -> None:
+        self._label = label
+        self._queue: asyncio.Queue | None = None
+        self._worker: asyncio.Task | None = None
+        self._running = False
+
+    async def start(self) -> None:
+        self._queue = asyncio.Queue()
+        self._running = True
+        self._worker = asyncio.create_task(self._process())
+
+    async def stop(self) -> None:
+        self._running = False
+        if self._worker is not None:
+            self._worker.cancel()
+            try:
+                await self._worker
+            except asyncio.CancelledError:
+                pass
+
+    async def enqueue(self, coro_factory, *args):
+        if self._queue is not None and self._running:
+            await self._queue.put((coro_factory, args))
+
+    async def _process(self) -> None:
+        while self._running:
+            try:
+                item = await self._queue.get()
+            except (asyncio.CancelledError, RuntimeError):
+                return
+            if item is None:
+                self._queue.task_done()
+                return
+            coro_factory, args = item
+            try:
+                await coro_factory(*args)
+            except asyncio.CancelledError:
+                return
+            except Exception:
+                logger.exception("SerialQueue[%s] task failed", self._label)
+            finally:
+                self._queue.task_done()
 
 
 class PipelineScheduler:
@@ -38,154 +86,262 @@ class PipelineScheduler:
         self._config = config
         self._data_dir = data_dir
 
-        self._timers: dict[tuple[str, str], asyncio.Task] = {}
-        self._gc_task: asyncio.Task | None = None
+        self._sessions: dict[tuple[str, str], PipelineSessionState] = {}
+        self._idle_timers: dict[tuple[str, str], asyncio.Task] = {}
         self._l2_timers: dict[str, asyncio.Task] = {}
+        self._l1_queue = SerialQueue("L1")
+        self._l2_queue = SerialQueue("L2")
+        self._l3_queue = SerialQueue("L3")
 
-    async def start(self) -> None:
+        self._gc_task: asyncio.Task | None = None
+        self._running = False
+
+        self._l1_queued: dict[tuple[str, str], bool] = {}
+        self._l2_queued: bool = False
+        self._l3_running: bool = False
+        self._l3_pending: bool = False
+
+    async def start(self, restored_states: list[PipelineSessionState] | None = None) -> None:
+        await self._l1_queue.start()
+        await self._l2_queue.start()
+        await self._l3_queue.start()
+
+        if restored_states:
+            for state in restored_states:
+                key = (state.agent_id, state.session_key)
+                self._sessions[key] = state
+                if state.conversation_count > 0:
+                    self._schedule_idle_timeout(state.agent_id, state.session_key)
+
+        self._running = True
         self._gc_task = asyncio.create_task(self._gc_loop())
-        logger.info(t("tdai_memory.scheduler.started"))
+
+        for agent_id in {s.agent_id for s in self._sessions.values()}:
+            self._maybe_schedule_l2(agent_id)
+
+        logger.info("PipelineScheduler started with %d restored sessions", len(self._sessions))
 
     async def stop(self) -> None:
-        for key in list(self._timers.keys()):
-            self._timers[key].cancel()
-        self._timers.clear()
-        for key in list(self._l2_timers.keys()):
-            self._l2_timers[key].cancel()
+        self._running = False
+
+        for key, task in list(self._idle_timers.items()):
+            task.cancel()
+        self._idle_timers.clear()
+
+        for key, task in list(self._l2_timers.items()):
+            task.cancel()
         self._l2_timers.clear()
+
         if self._gc_task is not None:
             self._gc_task.cancel()
             try:
                 await self._gc_task
             except asyncio.CancelledError:
                 pass
-            self._gc_task = None
-        logger.info(t("tdai_memory.scheduler.stopped"))
+
+        await self._l1_queue.stop()
+        await self._l2_queue.stop()
+        await self._l3_queue.stop()
+        logger.info("PipelineScheduler stopped")
 
     async def notify_conversation(self, agent_id: str, session_key: str) -> None:
-        state = await self._postgres.read_pipeline_state(agent_id, session_key)
+        key = (agent_id, session_key)
+
+        try:
+            state = await self._postgres.read_pipeline_state(agent_id, session_key)
+        except Exception:
+            logger.exception("read_pipeline_state failed for %s/%s", agent_id, session_key)
+            return
+
         if state is None:
             state = PipelineSessionState(
                 agent_id=agent_id,
                 session_key=session_key,
+                warmup_threshold=1,
             )
+        else:
+            state.agent_id = agent_id
+            state.session_key = session_key
 
         state.conversation_count += 1
-        now_ms = int(time.time() * 1000)
-        state.last_active_time = now_ms
+        state.last_active_time = int(datetime.now(timezone.utc).timestamp() * 1000)
 
-        effective_threshold = self._config.pipeline.every_n_conversations
-        if self._config.pipeline.enable_warmup and state.warmup_threshold > 0:
-            effective_threshold = state.warmup_threshold
+        effective_threshold = (
+            state.warmup_threshold
+            if self._config.pipeline.enable_warmup and state.warmup_threshold > 0
+            else self._config.pipeline.every_n_conversations
+        )
 
         if state.conversation_count >= effective_threshold:
-            await self._trigger_l1(agent_id, session_key)
+            self._cancel_idle_timer(key)
+            await self._l1_queue.enqueue(self._trigger_l1, agent_id, session_key, state)
         else:
             self._schedule_idle_timeout(agent_id, session_key)
 
-        await self._postgres.write_pipeline_state(state)
-
-    async def _trigger_l1(self, agent_id: str, session_key: str) -> None:
-        key = (agent_id, session_key)
-        if key in self._timers:
-            self._timers[key].cancel()
-            del self._timers[key]
-
-        logger.info(
-            t("tdai_memory.scheduler.trigger_l1"),
-            agent_id,
-            session_key,
-        )
-
-        state = await self._postgres.read_pipeline_state(agent_id, session_key)
-        checkpoint_cursor = state.last_extraction_updated_time if state else None
-
+        self._sessions[key] = state
         try:
-            await run_l1_extraction(
-                agent_id=agent_id,
-                session_key=session_key,
-                postgres=self._postgres,
-                qdrant=self._qdrant,
-                embedding=self._embedding,
-                llm_client=self._llm_client,
-                config=self._config,
-                data_dir=self._data_dir,
-                checkpoint_cursor=checkpoint_cursor,
-            )
+            await self._postgres.write_pipeline_state(state)
         except Exception:
-            logger.exception(
-                t("tdai_memory.scheduler.l1_failed"),
-                agent_id,
-                session_key,
-            )
+            logger.exception("write_pipeline_state failed for %s/%s", agent_id, session_key)
+
+    async def flush_session(self, agent_id: str, session_key: str) -> None:
+        key = (agent_id, session_key)
+        state = self._sessions.get(key)
+        if state is None:
+            try:
+                state = await self._postgres.read_pipeline_state(agent_id, session_key)
+            except Exception:
+                return
+
+        if state and state.conversation_count > 0:
+            self._cancel_idle_timer(key)
+            await self._l1_queue.enqueue(self._trigger_l1, agent_id, session_key, state)
+
+    def _schedule_idle_timeout(self, agent_id: str, session_key: str) -> None:
+        key = (agent_id, session_key)
+        if key in self._idle_timers:
+            return
+        task = asyncio.create_task(
+            self._idle_timeout_task(agent_id, session_key)
+        )
+        self._idle_timers[key] = task
+
+    def _cancel_idle_timer(self, key: tuple[str, str]) -> None:
+        task = self._idle_timers.pop(key, None)
+        if task is not None:
+            task.cancel()
+
+    async def _idle_timeout_task(self, agent_id: str, session_key: str) -> None:
+        timeout_s = self._config.pipeline.l1_idle_timeout_seconds
+        try:
+            await asyncio.sleep(timeout_s)
+        except asyncio.CancelledError:
             return
 
-        state = await self._postgres.read_pipeline_state(agent_id, session_key)
+        key = (agent_id, session_key)
+        state = self._sessions.get(key)
         if state is None:
-            state = PipelineSessionState(
-                agent_id=agent_id,
-                session_key=session_key,
-            )
+            return
+
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        if now_ms - state.last_active_time >= timeout_s * 1000 and state.conversation_count > 0:
+            self._idle_timers.pop(key, None)
+            await self._l1_queue.enqueue(self._trigger_l1, agent_id, session_key, state)
+
+    async def _trigger_l1(self, agent_id: str, session_key: str, state: PipelineSessionState) -> None:
+        key = (agent_id, session_key)
+        if self._l1_queued.pop(key, False):
+            return
+        self._l1_queued[key] = True
+        self._cancel_idle_timer(key)
+
+        for attempt in range(1, L1_MAX_RETRIES + 1):
+            try:
+                logger.info(
+                    "L1 extraction for agent=%s session=%s (attempt %d/%d, conv=%d)",
+                    agent_id, session_key, attempt, L1_MAX_RETRIES, state.conversation_count,
+                )
+                await run_l1_extraction(
+                    agent_id=agent_id,
+                    session_key=session_key,
+                    postgres=self._postgres,
+                    qdrant=self._qdrant,
+                    embedding=self._embedding,
+                    llm_client=self._llm_client,
+                    config=self._config,
+                    data_dir=self._data_dir,
+                )
+                break
+            except Exception:
+                logger.exception(
+                    "L1 extraction failed for %s/%s (attempt %d)", agent_id, session_key, attempt
+                )
+                if attempt < L1_MAX_RETRIES:
+                    await asyncio.sleep(L1_RETRY_DELAY)
+                else:
+                    self._l1_queued.pop(key, None)
+                    return
+
+        self._l1_queued.pop(key, None)
 
         now_iso = datetime.now(timezone.utc).isoformat()
         state.conversation_count = 0
         state.last_extraction_time = now_iso
         state.last_extraction_updated_time = now_iso
+        state.l2_pending_l1_count = (state.l2_pending_l1_count or 0) + 1
 
-        if self._config.pipeline.enable_warmup and state.warmup_threshold > 0:
-            if state.warmup_threshold < self._config.pipeline.every_n_conversations:
-                state.warmup_threshold *= 2
-            else:
-                state.warmup_threshold = 0
+        if self._config.pipeline.enable_warmup:
+            if state.warmup_threshold > 0:
+                next_threshold = state.warmup_threshold * 2
+                if next_threshold >= self._config.pipeline.every_n_conversations:
+                    state.warmup_threshold = 0
+                else:
+                    state.warmup_threshold = next_threshold
 
-        state.l2_pending_l1_count += 1
-        await self._postgres.write_pipeline_state(state)
+        self._sessions[key] = state
+        try:
+            await self._postgres.write_pipeline_state(state)
+        except Exception:
+            logger.exception("write_pipeline_state failed after L1 for %s/%s", agent_id, session_key)
 
-        await self._evaluate_l2(agent_id)
+        if state.l2_pending_l1_count >= L2_MIN_L1_COUNT:
+            await self._l2_queue.enqueue(self._maybe_trigger_l2, agent_id)
 
-    async def _evaluate_l2(self, agent_id: str) -> None:
-        states = await self._get_all_pipeline_states_for_agent(agent_id)
-        total_pending = sum(s.l2_pending_l1_count for s in states)
-
-        if total_pending < 3:
-            return
-
-        if agent_id in self._l2_timers:
-            return
-
-        l2_last = None
-        for s in states:
-            if s.l2_last_extraction_time:
-                if l2_last is None or s.l2_last_extraction_time > l2_last:
-                    l2_last = s.l2_last_extraction_time
-
-        if l2_last:
-            try:
-                last_dt = datetime.fromisoformat(l2_last)
-                elapsed = (datetime.now(timezone.utc) - last_dt).total_seconds()
-            except (ValueError, TypeError):
-                elapsed = float("inf")
-            if elapsed < self._config.pipeline.l2_min_interval_seconds:
-                return
-            if elapsed >= self._config.pipeline.l2_max_interval_seconds:
-                pass
-        else:
-            pass
-
+    async def _maybe_trigger_l2(self, agent_id: str) -> None:
+        now = int(datetime.now(timezone.utc).timestamp())
         delay = self._config.pipeline.l2_delay_after_l1_seconds
-        self._l2_timers[agent_id] = asyncio.create_task(
-            self._l2_delay_task(agent_id, delay)
-        )
+        desired = now + delay
+        min_fire = now - self._config.pipeline.l2_min_interval_seconds
 
-    async def _l2_delay_task(self, agent_id: str, delay: int) -> None:
-        await asyncio.sleep(delay)
-        self._l2_timers.pop(agent_id, None)
+        existing = self._l2_timers.get(agent_id)
+        if existing is not None:
+            existing.cancel()
+            self._l2_timers.pop(agent_id, None)
+
+        fire_at = max(desired, min_fire)
+        wait_seconds = max(0, fire_at - now)
+        await asyncio.sleep(wait_seconds)
+
         await self._trigger_l2(agent_id)
+        self._schedule_l2_max_interval(agent_id)
+
+    def _schedule_l2_max_interval(self, agent_id: str) -> None:
+        existing = self._l2_timers.pop(agent_id, None)
+        if existing is not None:
+            existing.cancel()
+
+        max_interval = self._config.pipeline.l2_max_interval_seconds
+        task = asyncio.create_task(self._l2_max_interval_task(agent_id))
+        self._l2_timers[agent_id] = task
+
+    async def _l2_max_interval_task(self, agent_id: str) -> None:
+        try:
+            await asyncio.sleep(self._config.pipeline.l2_max_interval_seconds)
+        except asyncio.CancelledError:
+            return
+        await self._l2_queue.enqueue(self._trigger_l2_from_timer, agent_id)
+
+    async def _trigger_l2_from_timer(self, agent_id: str) -> None:
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        active_window_ms = self._config.pipeline.session_active_window_hours * 3600 * 1000
+
+        has_active = False
+        for (aid, _), state in self._sessions.items():
+            if aid == agent_id and (now_ms - state.last_active_time) < active_window_ms:
+                has_active = True
+                break
+
+        if not has_active:
+            logger.info("Skipping L2 for agent=%s (no active sessions)", agent_id)
+            self._schedule_l2_max_interval(agent_id)
+            return
+
+        await self._trigger_l2(agent_id)
+        self._schedule_l2_max_interval(agent_id)
 
     async def _trigger_l2(self, agent_id: str) -> None:
-        logger.info(t("tdai_memory.scheduler.trigger_l2"), agent_id)
-
         try:
+            logger.info("L2 scene grouping for agent=%s", agent_id)
             await run_l2_scene_grouping(
                 agent_id=agent_id,
                 postgres=self._postgres,
@@ -194,138 +350,93 @@ class PipelineScheduler:
                 data_dir=self._data_dir,
             )
         except Exception:
-            logger.exception(t("tdai_memory.scheduler.l2_failed"), agent_id)
+            logger.exception("L2 scene grouping failed for agent=%s", agent_id)
             return
 
-        states = await self._get_all_pipeline_states_for_agent(agent_id)
-        now_iso = datetime.now(timezone.utc).isoformat()
-        for s in states:
-            s.l2_pending_l1_count = 0
-            s.l2_last_extraction_time = now_iso
-            await self._postgres.write_pipeline_state(s)
+        for (aid, sk), state in list(self._sessions.items()):
+            if aid == agent_id and state.l2_pending_l1_count:
+                state.l2_pending_l1_count = 0
+                state.l2_last_extraction_time = datetime.now(timezone.utc).isoformat()
+                try:
+                    await self._postgres.write_pipeline_state(state)
+                except Exception:
+                    pass
 
-        l1_count = await self._postgres.count_l1(agent_id)
-        if l1_count >= self._config.persona.trigger_every_n:
-            l3_meta_key = f"l3_last_gen_count_{agent_id}"
-            last_gen_val = await self._postgres.get_embedding_meta(
-                agent_id, l3_meta_key
-            )
-            last_gen_count = int(last_gen_val) if last_gen_val else 0
-            if l1_count - last_gen_count >= self._config.persona.trigger_every_n:
-                await self._trigger_l3(agent_id)
+        await self._maybe_trigger_l3(agent_id)
+
+    async def _maybe_trigger_l3(self, agent_id: str) -> None:
+        if self._l3_running:
+            self._l3_pending = True
+            return
+        await self._l3_queue.enqueue(self._trigger_l3, agent_id)
 
     async def _trigger_l3(self, agent_id: str) -> None:
-        logger.info(t("tdai_memory.scheduler.trigger_l3"), agent_id)
+        if self._l3_running:
+            self._l3_pending = True
+            return
+
+        self._l3_running = True
+        self._l3_pending = False
 
         try:
+            l1_count = await self._postgres.count_l1(agent_id)
+        except Exception:
+            logger.exception("count_l1 failed for agent=%s", agent_id)
+            l1_count = 0
+
+        try:
+            logger.info("L3 profile generation for agent=%s", agent_id)
             await run_l3_profile_generation(
                 agent_id=agent_id,
                 postgres=self._postgres,
                 llm_client=self._llm_client,
                 config=self._config,
                 data_dir=self._data_dir,
-                trigger_reason="达到阈值",
+                trigger_reason=f"Post-L2 trigger (L1 count: {l1_count})",
             )
         except Exception:
-            logger.exception(t("tdai_memory.scheduler.l3_failed"), agent_id)
-            return
+            logger.exception("L3 profile generation failed for agent=%s", agent_id)
+        finally:
+            self._l3_running = False
 
-        l1_count = await self._postgres.count_l1(agent_id)
-        l3_meta_key = f"l3_last_gen_count_{agent_id}"
-        await self._postgres.set_embedding_meta(
-            agent_id, l3_meta_key, str(l1_count)
-        )
-
-    async def flush_session(self, agent_id: str, session_key: str) -> None:
-        state = await self._postgres.read_pipeline_state(agent_id, session_key)
-        if state is not None and state.conversation_count > 0:
-            await self._trigger_l1(agent_id, session_key)
-
-    def _schedule_idle_timeout(self, agent_id: str, session_key: str) -> None:
-        key = (agent_id, session_key)
-        if key in self._timers:
-            self._timers[key].cancel()
-        self._timers[key] = asyncio.create_task(
-            self._idle_timeout_task(agent_id, session_key)
-        )
-
-    async def _idle_timeout_task(
-        self, agent_id: str, session_key: str
-    ) -> None:
-        await asyncio.sleep(self._config.pipeline.l1_idle_timeout_seconds)
-
-        key = (agent_id, session_key)
-        state = await self._postgres.read_pipeline_state(agent_id, session_key)
-        if state is None or state.conversation_count <= 0:
-            self._timers.pop(key, None)
-            return
-
-        now_ms = int(time.time() * 1000)
-        idle_ms = self._config.pipeline.l1_idle_timeout_seconds * 1000
-        if state.last_active_time + idle_ms < now_ms:
-            await self._trigger_l1(agent_id, session_key)
-
-        self._timers.pop(key, None)
+        if self._l3_pending:
+            self._l3_pending = False
+            try:
+                await self._l3_queue.enqueue(self._trigger_l3, agent_id)
+            except Exception:
+                logger.exception("Failed to enqueue pending L3 for agent=%s", agent_id)
 
     async def _gc_loop(self) -> None:
-        while True:
+        while self._running:
             try:
                 await asyncio.sleep(3600)
-                await self._collect_garbage()
             except asyncio.CancelledError:
-                raise
-            except Exception:
-                logger.exception(t("tdai_memory.scheduler.gc_loop_error"))
+                return
 
-    async def _collect_garbage(self) -> None:
-        now_ms = int(time.time() * 1000)
-        window_ms = self._config.pipeline.session_active_window_hours * 3600 * 1000
-        cutoff_ms = now_ms - window_ms
+            now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+            active_window_ms = self._config.pipeline.session_active_window_hours * 3600 * 1000 * _GC_MULTIPLIER
 
-        pool = self._postgres._pool
-        if pool is None:
-            return
+            stale_keys = []
+            for key, state in self._sessions.items():
+                if (now_ms - state.last_active_time) >= active_window_ms:
+                    stale_keys.append(key)
 
-        async with pool.acquire() as conn:
-            rows = await conn.fetch(
-                "SELECT agent_id, session_key, last_active_time FROM pipeline_state"
-            )
+            for key in stale_keys:
+                self._cancel_idle_timer(key)
+                self._sessions.pop(key, None)
 
-        stale_keys: list[tuple[str, str]] = []
-        for row in rows:
-            if row["last_active_time"] < cutoff_ms:
-                stale_keys.append((row["agent_id"], row["session_key"]))
+            if stale_keys:
+                logger.info("GC: evicted %d stale sessions from memory", len(stale_keys))
 
-        if stale_keys:
-            async with pool.acquire() as conn:
-                for agent_id, session_key in stale_keys:
-                    await conn.execute(
-                        "DELETE FROM pipeline_state WHERE agent_id = $1 AND session_key = $2",
-                        agent_id,
-                        session_key,
-                    )
-            logger.info(
-                t("tdai_memory.scheduler.gc_cleaned"),
-                len(stale_keys),
-            )
+    def get_session_state(self, agent_id: str, session_key: str) -> PipelineSessionState | None:
+        return self._sessions.get((agent_id, session_key))
 
-    async def _get_all_pipeline_states_for_agent(
-        self, agent_id: str
-    ) -> list[PipelineSessionState]:
-        pool = self._postgres._pool
-        if pool is None:
-            return []
+    def get_session_keys(self) -> list[tuple[str, str]]:
+        return list(self._sessions.keys())
 
-        async with pool.acquire() as conn:
-            rows = await conn.fetch(
-                """
-                SELECT agent_id, session_key, conversation_count,
-                       last_extraction_time, last_extraction_updated_time,
-                       last_active_time, l2_pending_l1_count, warmup_threshold,
-                       l2_last_extraction_time
-                FROM pipeline_state
-                WHERE agent_id = $1
-                """,
-                agent_id,
-            )
-        return [PipelineSessionState(**dict(row)) for row in rows]
+    def get_queue_sizes(self) -> dict[str, int]:
+        sizes = {"l1": 0, "l2": 0, "l3": 0}
+        for name, q in [("l1", self._l1_queue), ("l2", self._l2_queue), ("l3", self._l3_queue)]:
+            if q._queue is not None:
+                sizes[name] = q._queue.qsize()
+        return sizes

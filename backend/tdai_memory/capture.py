@@ -5,44 +5,27 @@ import json
 import logging
 import os
 import re
+import time
 import uuid
 from datetime import datetime, timezone
 from typing import Awaitable, Callable
 
-from backend.i18n import t
-from backend.tdai_memory.models import CaptureResult, CompletedTurn, ConversationMessage, L0Record
-from backend.tdai_memory.store.embedding import EmbeddingService
-from backend.tdai_memory.store.postgres import PostgresStore
-from backend.tdai_memory.store.qdrant import QdrantStore
+from .models import CaptureResult, CompletedTurn, ConversationMessage, L0Record
+from .store.embedding import EmbeddingService
+from .store.postgres import PostgresStore
+from .store.qdrant import QdrantStore
+from .utils.sanitize import should_capture_l0, strip_code_blocks
 
 logger = logging.getLogger(__name__)
 
-_MEMORIES_BLOCK_RE = re.compile(r"<relevant-memories>.*?</relevant-memories>\s*", re.DOTALL)
-
-
-def _strip_memories_block(text: str) -> str:
-    return _MEMORIES_BLOCK_RE.sub("", text)
+_RE_MEMORIES_BLOCK = re.compile(
+    r"<relevant-memories>.*?</relevant-memories>\s*", re.DOTALL
+)
 
 
 def _make_l0_id(session_key: str, timestamp: int, idx: int) -> str:
-    return f"l0_{session_key}_{timestamp}_{idx}_{uuid.uuid4().hex[:4]}"
-
-
-def _apply_filtering(
-    turn: CompletedTurn,
-) -> list[ConversationMessage]:
-    filtered: list[ConversationMessage] = []
-
-    if turn.original_user_message_count is not None:
-        for msg in turn.messages:
-            content = _strip_memories_block(msg.content)
-            filtered.append(
-                ConversationMessage(role=msg.role, content=content, timestamp=msg.timestamp)
-            )
-    else:
-        filtered = list(turn.messages)
-
-    return filtered
+    hex_part = uuid.uuid4().hex[:4]
+    return f"l0_{session_key}_{timestamp}_{idx}_{hex_part}"
 
 
 async def _embed_l0_background(
@@ -52,22 +35,71 @@ async def _embed_l0_background(
 ) -> None:
     for record in records:
         try:
-            vector = await embedding.embed(record.message_text)
-            await qdrant.upsert_l0(record, vector)
+            vec = await embedding.embed(record.message_text)
+            await qdrant.upsert_l0(record, vec)
         except Exception:
-            logger.exception(t("tdai_memory.capture.l0_embed_upsert_failed"), record.id)
+            logger.exception("Background L0 embed failed for %s", record.id)
+
+
+def _strip_memories_block(text: str) -> str:
+    return _RE_MEMORIES_BLOCK.sub("", text)
+
+
+def _apply_filtering(turn: CompletedTurn) -> list[ConversationMessage]:
+    messages = list(turn.messages)
+
+    if turn.original_user_message_count is not None and turn.user_text:
+        target_index = turn.original_user_message_count - 1
+        if 0 <= target_index < len(messages):
+            stripped = _strip_memories_block(turn.user_text)
+            messages[target_index] = ConversationMessage(
+                role=messages[target_index].role,
+                content=stripped,
+                timestamp=messages[target_index].timestamp,
+            )
+
+    for i, msg in enumerate(messages):
+        content = _strip_memories_block(msg.content)
+        content = re.sub(r'data:image\/[^;]+;base64,[A-Za-z0-9+/=]+', '[image]', content)
+        if msg.role == "assistant":
+            content = strip_code_blocks(content)
+        messages[i] = ConversationMessage(
+            role=msg.role,
+            content=content,
+            timestamp=msg.timestamp,
+        )
+
+    return messages
 
 
 async def perform_auto_capture(
     turn: CompletedTurn,
     agent_id: str,
     postgres: PostgresStore,
-    qdrant: QdrantStore,
-    embedding: EmbeddingService,
+    qdrant: QdrantStore | None,
+    embedding: EmbeddingService | None,
     data_dir: str,
     on_scheduler_notify: Callable[[str, str], Awaitable[None]] | None = None,
+    bg_tasks: set[asyncio.Task] | None = None,
 ) -> CaptureResult:
+    t_start = time.monotonic()
+
+    if postgres.is_degraded():
+        logger.warning("PostgresStore degraded, skipping capture")
+        return CaptureResult()
+
     filtered_msgs = _apply_filtering(turn)
+    filtered_msgs = [m for m in filtered_msgs if should_capture_l0(m.content)]
+
+    runner_state = await postgres.read_runner_state(agent_id, turn.session_key)
+    cursor = 0
+    if runner_state is not None:
+        cursor = runner_state["last_captured_timestamp"]
+
+    if cursor > 0:
+        filtered_msgs = [m for m in filtered_msgs if m.timestamp > cursor]
+
+    now_epoch_ms = int(time.time() * 1000)
 
     date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     conversations_dir = os.path.join(data_dir, agent_id, "conversations")
@@ -75,38 +107,71 @@ async def perform_auto_capture(
 
     def _write_jsonl() -> None:
         os.makedirs(conversations_dir, exist_ok=True)
-        with open(jsonl_path, "a") as f:
+        with open(jsonl_path, "a", encoding="utf-8") as f:
             for msg in filtered_msgs:
-                f.write(msg.model_dump_json() + "\n")
+                f.write(json.dumps(_msg_to_dict(msg), ensure_ascii=False) + "\n")
 
     await asyncio.to_thread(_write_jsonl)
 
     records: list[L0Record] = []
     now_iso = datetime.now(timezone.utc).isoformat()
     for idx, msg in enumerate(filtered_msgs):
+        content = msg.content
+        if msg.role == "assistant":
+            content = strip_code_blocks(content)
         record = L0Record(
             id=_make_l0_id(turn.session_key, msg.timestamp, idx),
             agent_id=agent_id,
             session_key=turn.session_key,
             session_id=turn.session_id,
             role=msg.role,
-            message_text=msg.content,
+            message_text=content,
             recorded_at=now_iso,
             timestamp=msg.timestamp,
         )
         records.append(record)
 
     for record in records:
-        await postgres.upsert_l0(record)
+        try:
+            await postgres.upsert_l0(record)
+        except Exception:
+            logger.exception("upsert_l0 failed for %s", record.id)
 
-    asyncio.create_task(_embed_l0_background(records, embedding, qdrant))
+    if len(records) > 0:
+        try:
+            await postgres.write_runner_state(
+                agent_id, turn.session_key, now_epoch_ms
+            )
+        except Exception:
+            logger.exception("write_runner_state failed for %s/%s", agent_id, turn.session_key)
+
+    vectors_written = 0
+    if qdrant is not None and embedding is not None and embedding.is_ready():
+        embed_task = asyncio.create_task(
+            _embed_l0_background(records, embedding, qdrant)
+        )
+        if bg_tasks is not None:
+            bg_tasks.add(embed_task)
+            embed_task.add_done_callback(bg_tasks.discard)
 
     if on_scheduler_notify is not None:
-        await on_scheduler_notify(agent_id, turn.session_key)
+        try:
+            await on_scheduler_notify(agent_id, turn.session_key)
+        except Exception:
+            logger.exception("scheduler notify failed for %s/%s", agent_id, turn.session_key)
 
+    elapsed = (time.monotonic() - t_start) * 1000
+    logger.debug(
+        "Capture done: agent=%s session=%s records=%d (%.0fms)",
+        agent_id, turn.session_key, len(records), elapsed,
+    )
     return CaptureResult(
-        l0_recorded_count=len(filtered_msgs),
-        l0_vectors_written=0,
         scheduler_notified=on_scheduler_notify is not None,
+        l0_recorded_count=len(records),
+        l0_vectors_written=vectors_written,
         filtered_messages=filtered_msgs,
     )
+
+
+def _msg_to_dict(msg: ConversationMessage) -> dict:
+    return {"role": msg.role, "content": msg.content, "timestamp": msg.timestamp}

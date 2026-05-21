@@ -26,7 +26,7 @@ Usage:
     await memory.capture(agent_id="my-agent", turn=turn)
 """
 
-from .config import MemoryConfig
+from .config import MemoryConfig, normalize_config, validate_config
 from .manager import MemoryManager
 from .models import (
     CaptureResult,
@@ -43,6 +43,8 @@ from .models import (
 __all__ = [
     "MemoryManager",
     "MemoryConfig",
+    "validate_config",
+    "normalize_config",
     "MemoryRecord",
     "L0Record",
     "CompletedTurn",
