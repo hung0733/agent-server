@@ -106,3 +106,35 @@ main.py
 - `backend/entities/`, `backend/dao/`, and `backend/dto/` are the SQLAlchemy entity, data access, and transfer layers.
 - `backend/llm/` contains LLM model selection and runtime types.
 - `backend/sandbox/` contains sandbox execution support.
+
+## 8. TDAI Memory Module Notes
+
+Use this section as the current map for `backend/tdai_memory/` before changing memory behavior or integrating memory from other modules.
+
+### Functional Layers
+
+- L0 captures raw conversation messages through `capture.py`, writes them to PostgreSQL and daily JSONL files, and writes Qdrant vectors in the background when embedding is ready.
+- L1 extracts structured memories from L0 conversations through the pipeline. Memory types are `persona`, `episodic`, and `instruction`.
+- L2 groups L1 memories into scene blocks under `scene_blocks/` and maintains `scene_index.json`.
+- L3 generates or updates profile files: `persona.md`, `SOUL.md`, and `IDENTITY.md`.
+- Recall/Search loads stable profile context and searches L1/L0 records with keyword, embedding, or hybrid strategies.
+- Offload summarizes tool results, stores offload references, builds MMD files, and supports context compression.
+
+### Public Entry Points
+
+- `backend/tdai_memory/__init__.py` is the package public API. It exports `MemoryManager`, `MemoryConfig`, `CompletedTurn`, `RecallResult`, `CaptureResult`, `MemorySearchParams`, `SearchResult`, and related models/config helpers.
+- `backend/tdai_memory/manager.py::MemoryManager` is the facade other modules should call first.
+- `MemoryManager` external methods are `initialize()`, `destroy()`, `recall()`, `capture()`, `search_memories()`, `search_conversations()`, `end_session()`, `set_identity_seed()`, `bootstrap_agent()`, and `seed()`.
+- `get_postgres()`, `get_qdrant()`, `get_embedding()`, `get_scheduler()`, and `get_offload()` are low-level escape hatches. Use them only for necessary integration or diagnostics.
+
+### Internal API Boundaries
+
+- `capture.py`, `recall.py`, and `search.py` expose module-level functions, but they are currently intended to be wrapped by `MemoryManager`.
+- `store/`, `pipeline/`, and `offload/` are internal collaboration layers. Other modules should not depend on their classes or functions unless there is a clear integration need.
+- Current repo inspection found no direct Python imports of `tdai_memory` outside `backend/tdai_memory/`.
+
+### Maintenance Notes
+
+- New user-facing text or `logger` messages must follow this file's i18n/logger rules.
+- Do not bypass `MemoryManager` to mutate PostgreSQL, Qdrant, or memory file layout unless the task explicitly requires lower-level repair.
+- Known observation: `recall._rrf_fusion()` currently appears to return `fuseds`; treat that as a separate bugfix task if it needs to be fixed.
