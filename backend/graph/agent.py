@@ -9,6 +9,7 @@ from langgraph.graph import END, START, StateGraph
 from backend.graph.graph_node import GraphNode, MessageState
 from backend.i18n import t
 from backend.llm.llm import LLMSet
+from backend.llm.types import StreamChunk
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,12 @@ async def chat_node(state: MessageState, config: RunnableConfig):
     )
 
     response = await model_to_use.ainvoke(messages)
-    GraphNode.log_base_message_response(response)
+    if isinstance(response, list) and all(isinstance(chunk, StreamChunk) for chunk in response):
+        for chunk in response:
+            GraphNode.log_stream_chunk_response(chunk)
+        response = GraphNode.stream_chunks_to_message(response)
+    else:
+        GraphNode.log_base_message_response(response)
 
     if isinstance(response, AIMessage):
         response.additional_kwargs = {

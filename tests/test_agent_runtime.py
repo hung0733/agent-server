@@ -139,7 +139,7 @@ async def test_chat_node_logs_content_lengths_and_tool_chunks(monkeypatch):
                 StreamChunk(chunk_type="content", content="llo"),
             ]
 
-    monkeypatch.setattr("backend.graph.agent.logger.info", lambda *args: calls.append(args))
+    monkeypatch.setattr("backend.graph.graph_node.logger.info", lambda *args: calls.append(args))
     config = GraphNode.prepare_chat_node_config(
         thread_id="session-1",
         models=FakeModels(LoggingLLM()),
