@@ -135,6 +135,8 @@ class MemoryConfig:
     postgres_url: str = "postgresql://localhost:5432/tdai_memory"
     postgres_schema: str = "public"
     qdrant_url: str = "http://localhost:6333"
+    qdrant_l0_collection: str = "l0_conversations"
+    qdrant_l1_collection: str = "l1_memories"
 
     # ── Data directory (file-based assets: persona.md, scenes, etc.) ──
     data_dir: str = "./tdai_data"
