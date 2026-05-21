@@ -9,15 +9,11 @@ from datetime import datetime, timezone
 
 import openai
 
+from backend.i18n import t
 from backend.tdai_memory.config import MemoryConfig
 from backend.tdai_memory.offload.summarizer import summarize_tool_result
 
 logger = logging.getLogger(__name__)
-
-_OFFLOAD_JSONL = "offload.jsonl"
-_REFS_DIR = "refs"
-_MMDS_DIR = "mmds"
-
 
 @dataclass
 class OffloadEntry:
@@ -40,8 +36,8 @@ class OffloadManager:
 
     async def initialize(self, agent_id: str) -> None:
         offload_dir = os.path.join(self.data_dir, agent_id, "offload")
-        refs_dir = os.path.join(offload_dir, _REFS_DIR)
-        mmds_dir = os.path.join(offload_dir, _MMDS_DIR)
+        refs_dir = os.path.join(offload_dir, self.config.offload.refs_dir)
+        mmds_dir = os.path.join(offload_dir, self.config.offload.mmds_dir)
 
         def _ensure():
             os.makedirs(refs_dir, exist_ok=True)
@@ -71,7 +67,7 @@ class OffloadManager:
         )
         if call_data is None:
             logger.warning(
-                "No pending tool call found for tool_call_id=%s session=%s",
+                t("tdai_memory.offload.pending_tool_call_missing"),
                 tool_call_id, session_key,
             )
             return
@@ -84,18 +80,22 @@ class OffloadManager:
         )
 
         offload_dir = os.path.join(self.data_dir, agent_id, "offload")
-        refs_dir = os.path.join(offload_dir, _REFS_DIR)
+        refs_dir = os.path.join(offload_dir, self.config.offload.refs_dir)
         ref_filename = f"{tool_call_id}.md"
         ref_path = os.path.join(refs_dir, ref_filename)
-        jsonl_path = os.path.join(offload_dir, _OFFLOAD_JSONL)
+        jsonl_path = os.path.join(offload_dir, self.config.offload.jsonl_filename)
 
         timestamp = datetime.now(timezone.utc).isoformat()
         entry = OffloadEntry(
             timestamp=timestamp,
             node_id=None,
-            tool_call=summary[:80] if summary else tool_name,
+            tool_call=(
+                summary[: self.config.offload.tool_call_label_chars]
+                if summary
+                else tool_name
+            ),
             summary=summary,
-            result_ref=os.path.join(_REFS_DIR, ref_filename),
+            result_ref=os.path.join(self.config.offload.refs_dir, ref_filename),
             tool_call_id=tool_call_id,
             session_key=session_key,
             score=score,
@@ -110,10 +110,11 @@ class OffloadManager:
         await asyncio.to_thread(_write)
 
     async def get_offload_context(
-        self, agent_id: str, session_key: str = "", compression_level: str = "mild"
+        self, agent_id: str, session_key: str = "", compression_level: str | None = None
     ) -> str:
+        compression_level = compression_level or self.config.offload.default_compression_level
         offload_dir = os.path.join(self.data_dir, agent_id, "offload")
-        jsonl_path = os.path.join(offload_dir, _OFFLOAD_JSONL)
+        jsonl_path = os.path.join(offload_dir, self.config.offload.jsonl_filename)
 
         def _read():
             if not os.path.exists(jsonl_path):
@@ -131,10 +132,10 @@ class OffloadManager:
             return ""
 
         if compression_level == "mild":
-            recent = all_entries[-10:]
+            recent = all_entries[-self.config.offload.mild_recent_entries :]
             lines = []
             for e in recent:
-                if e.get("score", 10) <= 3:
+                if e.get("score", 10) <= self.config.offload.mild_inline_score_threshold:
                     lines.append(f"- {e['tool_call']}: {e['summary']}")
                 else:
                     lines.append(f"- {e['tool_call']} (see {e['result_ref']})")
@@ -142,14 +143,14 @@ class OffloadManager:
 
         if compression_level == "aggressive":
             lines = []
-            for e in all_entries[-15:]:
+            for e in all_entries[-self.config.offload.aggressive_recent_entries :]:
                 lines.append(f"- {e['tool_call']}: {e['summary']}")
             return "[Compressed tool execution summary]\n" + "\n".join(lines)
 
         if compression_level == "emergency":
             lines = ["[Critical: full context compressed]"]
             lines.append("Key tool calls:")
-            for e in all_entries[-20:]:
+            for e in all_entries[-self.config.offload.emergency_recent_entries :]:
                 lines.append(f"- {e['tool_call']} [{e['timestamp'][:19]}]")
             return "\n".join(lines)
 
@@ -157,7 +158,7 @@ class OffloadManager:
 
     async def build_mermaid(self, agent_id: str, task_name: str) -> str | None:
         offload_dir = os.path.join(self.data_dir, agent_id, "offload")
-        jsonl_path = os.path.join(offload_dir, _OFFLOAD_JSONL)
+        jsonl_path = os.path.join(offload_dir, self.config.offload.jsonl_filename)
 
         def _read():
             if not os.path.exists(jsonl_path):
@@ -188,7 +189,7 @@ class OffloadManager:
 
         mmd = await build_mermaid_flowchart(entries, task_name, self.llm_client, self.config)
         if mmd:
-            mmds_dir = os.path.join(offload_dir, _MMDS_DIR)
+            mmds_dir = os.path.join(offload_dir, self.config.offload.mmds_dir)
             mmd_path = os.path.join(mmds_dir, f"{task_name}.mmd")
 
             def _write():

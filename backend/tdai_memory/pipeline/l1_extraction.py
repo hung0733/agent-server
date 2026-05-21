@@ -8,6 +8,7 @@ from uuid import uuid4
 
 import openai
 
+from backend.i18n import t
 from backend.tdai_memory.config import MemoryConfig
 from backend.tdai_memory.models import MemoryRecord
 from backend.tdai_memory.store.embedding import EmbeddingService
@@ -65,7 +66,7 @@ def _parse_llm_extraction_response(response_text: str) -> list[dict]:
     try:
         data = json.loads(text)
     except json.JSONDecodeError:
-        logger.warning("Failed to parse LLM JSON response")
+        logger.warning(t("tdai_memory.pipeline.l1_parse_json_failed"))
         return []
 
     if not isinstance(data, dict) or "memories" not in data:
@@ -122,7 +123,7 @@ async def run_l1_extraction(
     )
 
     if not l0_messages:
-        logger.debug("No L0 messages for agent=%s session=%s", agent_id, session_key)
+        logger.debug(t("tdai_memory.pipeline.l1_no_l0_messages"), agent_id, session_key)
         return []
 
     conversation_lines = [f"[{m['role']}]: {m['message_text']}" for m in l0_messages]
@@ -156,7 +157,7 @@ async def run_l1_extraction(
     extracted = _parse_llm_extraction_response(response_text)
 
     if not extracted:
-        logger.debug("No memories extracted for agent=%s", agent_id)
+        logger.debug(t("tdai_memory.pipeline.l1_no_memories_extracted"), agent_id)
         return []
 
     max_memories = config.extraction.max_memories_per_session
@@ -188,7 +189,7 @@ async def run_l1_extraction(
         try:
             query_vector = await embedding.embed(record.content)
         except Exception:
-            logger.exception("Embed failed for memory '%s'", record.id)
+            logger.exception(t("tdai_memory.pipeline.l1_embed_failed"), record.id)
             await postgres.upsert_l1(record)
             await qdrant.upsert_l1(record, None)
             results.append(record)
@@ -228,7 +229,12 @@ async def run_l1_extraction(
             )
             await postgres.upsert_l1(updated)
             results.append(updated)
-            logger.debug("Dedup: '%s' matches existing '%s' (score=%.3f)", record.id, existing_id, top["score"])
+            logger.debug(
+                t("tdai_memory.pipeline.l1_dedup_match"),
+                record.id,
+                existing_id,
+                top["score"],
+            )
         else:
             merged_content = f"{existing_content}\n{record.content}"
             merged = MemoryRecord(
@@ -249,12 +255,17 @@ async def run_l1_extraction(
                 merged_vector = await embedding.embed(merged_content)
                 await qdrant.upsert_l1(merged, merged_vector)
             except Exception:
-                logger.exception("Re-embed failed for merged memory '%s'", existing_id)
+                logger.exception(t("tdai_memory.pipeline.l1_reembed_failed"), existing_id)
             results.append(merged)
-            logger.debug("Merge: '%s' into existing '%s' (score=%.3f)", record.id, existing_id, top["score"])
+            logger.debug(
+                t("tdai_memory.pipeline.l1_merge"),
+                record.id,
+                existing_id,
+                top["score"],
+            )
 
     logger.info(
-        "L1 extraction done: agent=%s session=%s raw=%d results=%d",
+        t("tdai_memory.pipeline.l1_done"),
         agent_id, session_key, len(extracted), len(results),
     )
     return results

@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 import openai
 
+from backend.i18n import t
 from backend.tdai_memory.config import MemoryConfig
 from backend.tdai_memory.models import PipelineSessionState
 from backend.tdai_memory.store.embedding import EmbeddingService
@@ -43,7 +44,7 @@ class PipelineScheduler:
 
     async def start(self) -> None:
         self._gc_task = asyncio.create_task(self._gc_loop())
-        logger.info("PipelineScheduler started")
+        logger.info(t("tdai_memory.scheduler.started"))
 
     async def stop(self) -> None:
         for key in list(self._timers.keys()):
@@ -59,7 +60,7 @@ class PipelineScheduler:
             except asyncio.CancelledError:
                 pass
             self._gc_task = None
-        logger.info("PipelineScheduler stopped")
+        logger.info(t("tdai_memory.scheduler.stopped"))
 
     async def notify_conversation(self, agent_id: str, session_key: str) -> None:
         state = await self._postgres.read_pipeline_state(agent_id, session_key)
@@ -91,7 +92,7 @@ class PipelineScheduler:
             del self._timers[key]
 
         logger.info(
-            "Triggering L1 extraction for agent=%s session=%s",
+            t("tdai_memory.scheduler.trigger_l1"),
             agent_id,
             session_key,
         )
@@ -113,7 +114,7 @@ class PipelineScheduler:
             )
         except Exception:
             logger.exception(
-                "L1 extraction failed for agent=%s session=%s",
+                t("tdai_memory.scheduler.l1_failed"),
                 agent_id,
                 session_key,
             )
@@ -182,7 +183,7 @@ class PipelineScheduler:
         await self._trigger_l2(agent_id)
 
     async def _trigger_l2(self, agent_id: str) -> None:
-        logger.info("Triggering L2 scene grouping for agent=%s", agent_id)
+        logger.info(t("tdai_memory.scheduler.trigger_l2"), agent_id)
 
         try:
             await run_l2_scene_grouping(
@@ -193,7 +194,7 @@ class PipelineScheduler:
                 data_dir=self._data_dir,
             )
         except Exception:
-            logger.exception("L2 scene grouping failed for agent=%s", agent_id)
+            logger.exception(t("tdai_memory.scheduler.l2_failed"), agent_id)
             return
 
         states = await self._get_all_pipeline_states_for_agent(agent_id)
@@ -214,7 +215,7 @@ class PipelineScheduler:
                 await self._trigger_l3(agent_id)
 
     async def _trigger_l3(self, agent_id: str) -> None:
-        logger.info("Triggering L3 profile generation for agent=%s", agent_id)
+        logger.info(t("tdai_memory.scheduler.trigger_l3"), agent_id)
 
         try:
             await run_l3_profile_generation(
@@ -226,7 +227,7 @@ class PipelineScheduler:
                 trigger_reason="达到阈值",
             )
         except Exception:
-            logger.exception("L3 profile generation failed for agent=%s", agent_id)
+            logger.exception(t("tdai_memory.scheduler.l3_failed"), agent_id)
             return
 
         l1_count = await self._postgres.count_l1(agent_id)
@@ -274,7 +275,7 @@ class PipelineScheduler:
             except asyncio.CancelledError:
                 raise
             except Exception:
-                logger.exception("GC loop error")
+                logger.exception(t("tdai_memory.scheduler.gc_loop_error"))
 
     async def _collect_garbage(self) -> None:
         now_ms = int(time.time() * 1000)
@@ -304,7 +305,7 @@ class PipelineScheduler:
                         session_key,
                     )
             logger.info(
-                "Pipeline GC cleaned %d stale sessions",
+                t("tdai_memory.scheduler.gc_cleaned"),
                 len(stale_keys),
             )
 

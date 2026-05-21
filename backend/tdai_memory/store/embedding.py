@@ -12,6 +12,7 @@ from tenacity import (
     wait_exponential,
 )
 
+from backend.i18n import t
 from backend.tdai_memory.config import EmbeddingConfig
 
 logger = logging.getLogger(__name__)
@@ -85,7 +86,7 @@ class EmbeddingService:
             error_msg = str(e).lower()
             if "maximum context length" in error_msg or "too long" in error_msg:
                 logger.warning(
-                    "Embedding text too long (%d chars), truncating by half and retrying",
+                    t("tdai_memory.embedding.text_too_long"),
                     len(text),
                 )
                 kwargs["input"] = text[: len(text) // 2]
@@ -111,7 +112,7 @@ class EmbeddingService:
             error_msg = str(e).lower()
             if "maximum context length" in error_msg or "too long" in error_msg:
                 logger.warning(
-                    "Batch embedding too long, truncating each text by half and retrying"
+                    t("tdai_memory.embedding.batch_too_long")
                 )
                 kwargs["input"] = [t[: len(t) // 2] for t in texts]
                 response = await self._client.embeddings.create(**kwargs)

@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 
 import openai
 
+from backend.i18n import t
 from backend.tdai_memory.config import MemoryConfig
 from backend.tdai_memory.models import MemoryRecord
 from backend.tdai_memory.store.postgres import PostgresStore
@@ -143,7 +144,7 @@ async def run_l2_scene_grouping(
     await asyncio.to_thread(_write_file, index_path, index_json)
 
     logger.info(
-        "L2 scene grouping complete: agent=%s scenes=%d memories=%d",
+        t("tdai_memory.pipeline.l2_done"),
         agent_id,
         len(new_index),
         len(memories),

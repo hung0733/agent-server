@@ -9,6 +9,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Awaitable, Callable
 
+from backend.i18n import t
 from backend.tdai_memory.models import CaptureResult, CompletedTurn, ConversationMessage, L0Record
 from backend.tdai_memory.store.embedding import EmbeddingService
 from backend.tdai_memory.store.postgres import PostgresStore
@@ -54,7 +55,7 @@ async def _embed_l0_background(
             vector = await embedding.embed(record.message_text)
             await qdrant.upsert_l0(record, vector)
         except Exception:
-            logger.exception("Failed to embed/upsert L0 record %s", record.id)
+            logger.exception(t("tdai_memory.capture.l0_embed_upsert_failed"), record.id)
 
 
 async def perform_auto_capture(
@@ -106,6 +107,6 @@ async def perform_auto_capture(
     return CaptureResult(
         l0_recorded_count=len(filtered_msgs),
         l0_vectors_written=0,
-        scheduled_notified=on_scheduler_notify is not None,
+        scheduler_notified=on_scheduler_notify is not None,
         filtered_messages=filtered_msgs,
     )

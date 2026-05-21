@@ -6,6 +6,7 @@ import logging
 import os
 import re
 
+from backend.i18n import t
 from backend.tdai_memory.config import MemoryConfig
 from backend.tdai_memory.models import RecalledMemory, RecallResult
 from backend.tdai_memory.store.embedding import EmbeddingService
@@ -75,7 +76,7 @@ def _rrf_fusion(
             )
 
     fused = sorted(merged.values(), key=lambda x: x["_rrf_score"], reverse=True)
-    return fuseds
+    return fused
 
 
 def _build_memory_line(item: dict) -> str:
@@ -128,9 +129,7 @@ async def _do_hybrid_recall(
             keyword_task, embedding_task
         )
     except Exception:
-        logger.warning(
-            "Embedding failed during hybrid recall, falling back to keyword-only"
-        )
+        logger.warning(t("tdai_memory.recall.hybrid_embedding_failed"))
         keyword_results = await postgres.search_l1_fts(
             agent_id, user_text, limit=limit
         )
@@ -225,7 +224,7 @@ async def perform_auto_recall(
         )
     except asyncio.TimeoutError:
         logger.warning(
-            "Auto-recall timed out after %dms for agent=%s",
+            t("tdai_memory.recall.timed_out"),
             config.recall.timeout_ms,
             agent_id,
         )
@@ -279,10 +278,7 @@ async def _perform_recall(
             )
             return results, "embedding"
         except Exception:
-            logger.warning(
-                "Embedding recall failed, falling back to keyword for agent=%s",
-                agent_id,
-            )
+            logger.warning(t("tdai_memory.recall.embedding_failed"), agent_id)
             results = await _do_keyword_recall(agent_id, sanitized_text, postgres, config)
             return results, "keyword"
 
@@ -292,10 +288,7 @@ async def _perform_recall(
         )
         return results, "hybrid"
     except Exception:
-        logger.warning(
-            "Hybrid recall failed, falling back to keyword for agent=%s",
-            agent_id,
-        )
+        logger.warning(t("tdai_memory.recall.hybrid_failed"), agent_id)
         results = await _do_keyword_recall(agent_id, sanitized_text, postgres, config)
         return results, "keyword"
 

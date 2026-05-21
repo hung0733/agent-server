@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 import asyncpg
 
+from backend.i18n import t
 from ..models import L0Record, MemoryRecord, PipelineSessionState
 
 logger = logging.getLogger(__name__)
@@ -56,7 +57,7 @@ class PostgresStore:
             max_size=10,
             server_settings={"search_path": self._schema},
         )
-        logger.info("PostgresStore initialized")
+        logger.info(t("tdai_memory.store.postgres_initialized"))
 
     async def close(self) -> None:
         if self._pool:

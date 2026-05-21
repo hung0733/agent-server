@@ -20,6 +20,7 @@ from backend.graph.graph_store import GraphStore
 from backend.i18n import t
 from backend.queues.message_queue import MessageQueue
 from backend.queues.msg_queue_handle import handle_agent_message
+from backend.tdai_memory import MemoryConfig, MemoryManager
 from logger_setup import setup_logging
 
 logger = logging.getLogger(__name__)
@@ -69,6 +70,16 @@ async def main(
     await upgrade_database_schema_func()
     await GraphStore.init_langgraph_checkpointer()
 
+    memory_manager: MemoryManager | None = None
+    logger.info(t("main.memory_initialize_started"))
+    try:
+        memory_manager = MemoryManager(MemoryConfig.from_env())
+        await memory_manager.initialize()
+    except Exception:
+        logger.exception(t("main.memory_initialize_failed"))
+        raise
+    logger.info(t("main.memory_initialize_completed"))
+
     channel = channel_factory()
     message_queue = MessageQueue(handle_agent_message, max_concurrency=2)
     message_queue.start()
@@ -98,6 +109,9 @@ async def main(
             await shutdown_task
         await message_queue.stop()
         await channel.close()
+        if memory_manager is not None:
+            await memory_manager.destroy()
+            logger.info(t("main.memory_destroy_completed"))
         await db_engine.dispose()
         await GraphStore.pool.close()
         logger.info(t("main.shutdown_complete"))

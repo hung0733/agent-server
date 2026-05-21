@@ -5,6 +5,7 @@ import logging
 
 import openai
 
+from backend.i18n import t
 from backend.tdai_memory.config import MemoryConfig
 
 logger = logging.getLogger(__name__)
@@ -17,9 +18,6 @@ _SYSTEM_PROMPT = """Summarize the tool call result concisely. Include:
 
 Return JSON: {"summary": "...", "score": N}"""
 
-_MAX_RESULT_CHARS = 4000
-
-
 async def summarize_tool_result(
     tool_name: str,
     tool_input: dict,
@@ -27,7 +25,7 @@ async def summarize_tool_result(
     llm_client: openai.AsyncOpenAI,
     config: MemoryConfig,
 ) -> tuple[str, int]:
-    truncated = result_text[:_MAX_RESULT_CHARS]
+    truncated = result_text[: config.offload.summarizer_max_result_chars]
     user_prompt = json.dumps(
         {"tool_name": tool_name, "tool_input": tool_input, "result_text": truncated},
         ensure_ascii=False,
@@ -47,7 +45,7 @@ async def summarize_tool_result(
         )
         content = response.choices[0].message.content or ""
     except Exception:
-        logger.exception("LLM summarization failed for tool %s", tool_name)
+        logger.exception(t("tdai_memory.offload.summarization_failed"), tool_name)
         return f"Tool '{tool_name}' executed.", 10
 
     try:
@@ -56,7 +54,7 @@ async def summarize_tool_result(
         score = int(data.get("score", 5))
         score = max(0, min(10, score))
     except (json.JSONDecodeError, ValueError, TypeError):
-        logger.warning("Failed to parse LLM summary response")
+        logger.warning(t("tdai_memory.offload.summary_parse_failed"))
         return f"Tool '{tool_name}' executed.", 5
 
     return summary, score

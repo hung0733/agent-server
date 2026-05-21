@@ -4,23 +4,32 @@ import logging
 
 from qdrant_client import AsyncQdrantClient, models
 
+from backend.i18n import t
 from backend.tdai_memory.models import L0Record, MemoryRecord
 
 logger = logging.getLogger(__name__)
 
 
 class QdrantStore:
-    def __init__(self, qdrant_url: str, vector_dimensions: int) -> None:
+    def __init__(
+        self,
+        qdrant_url: str,
+        vector_dimensions: int,
+        l0_collection: str = "l0_conversations",
+        l1_collection: str = "l1_memories",
+    ) -> None:
         self.client = AsyncQdrantClient(url=qdrant_url)
         self.dimensions = vector_dimensions
+        self.l0_collection = l0_collection
+        self.l1_collection = l1_collection
 
     async def initialize(self) -> None:
         collections = await self.client.get_collections()
         existing = {c.name for c in collections.collections}
 
-        if "l0_conversations" not in existing:
+        if self.l0_collection not in existing:
             await self.client.create_collection(
-                collection_name="l0_conversations",
+                collection_name=self.l0_collection,
                 vectors_config=models.VectorParams(
                     size=self.dimensions,
                     distance=models.Distance.COSINE,
@@ -28,14 +37,14 @@ class QdrantStore:
                 ),
             )
             await self.client.create_payload_index(
-                collection_name="l0_conversations",
+                collection_name=self.l0_collection,
                 field_name="agent_id",
                 field_schema=models.PayloadSchemaType.KEYWORD,
             )
 
-        if "l1_memories" not in existing:
+        if self.l1_collection not in existing:
             await self.client.create_collection(
-                collection_name="l1_memories",
+                collection_name=self.l1_collection,
                 vectors_config=models.VectorParams(
                     size=self.dimensions,
                     distance=models.Distance.COSINE,
@@ -43,12 +52,12 @@ class QdrantStore:
                 ),
             )
             await self.client.create_payload_index(
-                collection_name="l1_memories",
+                collection_name=self.l1_collection,
                 field_name="agent_id",
                 field_schema=models.PayloadSchemaType.KEYWORD,
             )
 
-        logger.info("QdrantStore initialized")
+        logger.info(t("tdai_memory.store.qdrant_initialized"))
 
     async def close(self) -> None:
         await self.client.close()
@@ -59,7 +68,7 @@ class QdrantStore:
         if not embedding:
             return
         await self.client.upsert(
-            collection_name="l0_conversations",
+            collection_name=self.l0_collection,
             points=[
                 models.PointStruct(
                     id=record.id,
@@ -71,7 +80,7 @@ class QdrantStore:
 
     async def delete_l0(self, record_id: str) -> None:
         await self.client.delete(
-            collection_name="l0_conversations",
+            collection_name=self.l0_collection,
             points_selector=models.PointIdsList(
                 points=[record_id],
             ),
@@ -81,7 +90,7 @@ class QdrantStore:
         self, agent_id: str, query_embedding: list[float], limit: int = 10
     ) -> list[dict]:
         results = await self.client.search(
-            collection_name="l0_conversations",
+            collection_name=self.l0_collection,
             query_vector=query_embedding,
             limit=limit,
             query_filter=models.Filter(
@@ -105,7 +114,7 @@ class QdrantStore:
         if not embedding:
             return
         await self.client.upsert(
-            collection_name="l1_memories",
+            collection_name=self.l1_collection,
             points=[
                 models.PointStruct(
                     id=record.id,
@@ -117,7 +126,7 @@ class QdrantStore:
 
     async def delete_l1(self, record_id: str) -> None:
         await self.client.delete(
-            collection_name="l1_memories",
+            collection_name=self.l1_collection,
             points_selector=models.PointIdsList(
                 points=[record_id],
             ),
@@ -127,7 +136,7 @@ class QdrantStore:
         self, agent_id: str, query_embedding: list[float], limit: int = 10
     ) -> list[dict]:
         results = await self.client.search(
-            collection_name="l1_memories",
+            collection_name=self.l1_collection,
             query_vector=query_embedding,
             limit=limit,
             query_filter=models.Filter(
@@ -147,7 +156,7 @@ class QdrantStore:
 
     async def count_l0(self, agent_id: str) -> int:
         result = await self.client.count(
-            collection_name="l0_conversations",
+            collection_name=self.l0_collection,
             count_filter=models.Filter(
                 must=[
                     models.FieldCondition(
@@ -161,7 +170,7 @@ class QdrantStore:
 
     async def count_l1(self, agent_id: str) -> int:
         result = await self.client.count(
-            collection_name="l1_memories",
+            collection_name=self.l1_collection,
             count_filter=models.Filter(
                 must=[
                     models.FieldCondition(

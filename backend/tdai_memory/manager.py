@@ -23,6 +23,7 @@ from backend.tdai_memory.search import search_conversations, search_memories
 from backend.tdai_memory.store.embedding import EmbeddingService
 from backend.tdai_memory.store.postgres import PostgresStore
 from backend.tdai_memory.store.qdrant import QdrantStore
+from backend.i18n import t
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +66,10 @@ class MemoryManager:
         await self._postgres.initialize()
 
         self._qdrant = QdrantStore(
-            self.config.qdrant_url, self._embedding.get_dimensions()
+            self.config.qdrant_url,
+            self._embedding.get_dimensions(),
+            self.config.qdrant_l0_collection,
+            self.config.qdrant_l1_collection,
         )
         await self._qdrant.initialize()
 
@@ -87,7 +91,7 @@ class MemoryManager:
             )
 
         self._initialized = True
-        logger.info("MemoryManager initialized")
+        logger.info(t("tdai_memory.manager.initialized"))
 
     async def destroy(self) -> None:
         for task in list(self._bg_tasks):
@@ -111,7 +115,7 @@ class MemoryManager:
             self._client = None
 
         self._initialized = False
-        logger.info("MemoryManager destroyed")
+        logger.info(t("tdai_memory.manager.destroyed"))
 
     async def recall(
         self, *, agent_id: str, user_text: str, session_key: str

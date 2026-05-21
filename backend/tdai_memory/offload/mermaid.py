@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 
 import openai
 
+from backend.i18n import t
 from backend.tdai_memory.config import MemoryConfig
 
 if TYPE_CHECKING:
@@ -46,7 +47,8 @@ async def build_mermaid_flowchart(
     entry_lines = []
     for i, e in enumerate(entries):
         entry_lines.append(
-            f"{i + 1}. [{e.timestamp[:19]}] {e.tool_call} (score={e.score}): {e.summary[:200]}"
+            f"{i + 1}. [{e.timestamp[:19]}] {e.tool_call} "
+            f"(score={e.score}): {e.summary[: config.offload.mermaid_entry_summary_chars]}"
         )
     entry_text = "\n".join(entry_lines)
 
@@ -65,7 +67,7 @@ async def build_mermaid_flowchart(
         )
         content = response.choices[0].message.content or ""
     except Exception:
-        logger.exception("Mermaid generation failed for task %s", task_name)
+        logger.exception(t("tdai_memory.offload.mermaid_failed"), task_name)
         return None
 
     content = content.strip()

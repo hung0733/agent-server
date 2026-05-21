@@ -63,6 +63,7 @@ async def test_main_starts_message_queue_listener_and_cleans_up(monkeypatch):
     listener_calls = []
     queue_calls = []
     graph_calls = []
+    memory_calls = []
     monkeypatch.setattr(main_module, "_install_signal_handlers", lambda shutdown_event: None)
 
     class FakeQueue:
@@ -90,10 +91,28 @@ async def test_main_starts_message_queue_listener_and_cleans_up(monkeypatch):
         async def close(self):
             graph_calls.append("close")
 
+    class FakeMemoryConfig:
+        @classmethod
+        def from_env(cls):
+            memory_calls.append("config")
+            return "memory-config"
+
+    class FakeMemoryManager:
+        def __init__(self, config):
+            memory_calls.append(("init", config))
+
+        async def initialize(self):
+            memory_calls.append("initialize")
+
+        async def destroy(self):
+            memory_calls.append("destroy")
+
     monkeypatch.setattr(main_module, "MessageQueue", FakeQueue)
     monkeypatch.setattr(main_module, "run_whatsapp_listener", run_listener)
     monkeypatch.setattr(main_module.GraphStore, "init_langgraph_checkpointer", init_checkpointer)
     monkeypatch.setattr(main_module.GraphStore, "pool", FakePool())
+    monkeypatch.setattr(main_module, "MemoryConfig", FakeMemoryConfig)
+    monkeypatch.setattr(main_module, "MemoryManager", FakeMemoryManager)
 
     await main_module.main(
         db_engine=engine,
@@ -113,9 +132,58 @@ async def test_main_starts_message_queue_listener_and_cleans_up(monkeypatch):
     ]
     assert listener_calls == [(channel, queue)]
     assert graph_calls == ["init", "close"]
+    assert memory_calls == [
+        "config",
+        ("init", "memory-config"),
+        "initialize",
+        "destroy",
+    ]
     assert engine.executed == ["select 1"]
     assert channel.closed is True
     assert engine.disposed is True
+
+
+@pytest.mark.asyncio
+async def test_main_raises_when_memory_initialization_fails(monkeypatch):
+    engine = FakeEngine()
+    setup_calls = []
+    migration_calls = []
+    graph_calls = []
+    monkeypatch.setattr(main_module, "_install_signal_handlers", lambda shutdown_event: None)
+
+    async def upgrade_database_schema():
+        migration_calls.append(True)
+
+    async def init_checkpointer():
+        graph_calls.append("init")
+
+    class FakeMemoryConfig:
+        @classmethod
+        def from_env(cls):
+            return "memory-config"
+
+    class FakeMemoryManager:
+        def __init__(self, config):
+            self.config = config
+
+        async def initialize(self):
+            raise RuntimeError("memory init failed")
+
+    monkeypatch.setattr(main_module.GraphStore, "init_langgraph_checkpointer", init_checkpointer)
+    monkeypatch.setattr(main_module, "MemoryConfig", FakeMemoryConfig)
+    monkeypatch.setattr(main_module, "MemoryManager", FakeMemoryManager)
+
+    with pytest.raises(RuntimeError, match="memory init failed"):
+        await main_module.main(
+            db_engine=engine,
+            setup_logging_func=lambda: setup_calls.append(True),
+            upgrade_database_schema_func=upgrade_database_schema,
+            shutdown_event=asyncio.Event(),
+        )
+
+    assert setup_calls == [True]
+    assert migration_calls == [True]
+    assert graph_calls == ["init"]
 
 
 @pytest.mark.asyncio
