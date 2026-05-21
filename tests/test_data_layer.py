@@ -42,10 +42,7 @@ EXPECTED_TABLES = {
     "llm_endpoint",
     "llm_group",
     "llm_level",
-    "long_term_mem",
-    "memory_block",
     "session",
-    "short_term_mem",
     "user_acc",
 }
 

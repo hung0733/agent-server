@@ -10,8 +10,6 @@ class AgentMsgHistCreate(BaseModel):
     msg_type: str
     content: str | None = None
     token: int | None = None
-    is_summary: bool = False
-    is_analyst: int | None = None
     meta_data: str | None = None
     model_name: str | None = None
 
@@ -23,8 +21,6 @@ class AgentMsgHistUpdate(BaseModel):
     msg_type: str | None = None
     content: str | None = None
     token: int | None = None
-    is_summary: bool | None = None
-    is_analyst: int | None = None
     meta_data: str | None = None
     model_name: str | None = None
 

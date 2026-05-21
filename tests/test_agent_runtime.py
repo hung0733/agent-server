@@ -87,33 +87,7 @@ class FakeAgent:
 
 
 @pytest.mark.asyncio
-async def test_prepare_sys_prompt_loads_selected_memory_blocks(monkeypatch):
-    calls = []
-
-    class FakeSessionFactory:
-        async def __aenter__(self):
-            return object()
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return None
-
-    class FakeMemoryBlockDAO:
-        def __init__(self, session):
-            calls.append(("session", session))
-
-        async def list_by_agent_id_and_memory_types(self, agent_id, memory_types):
-            calls.append(("query", agent_id, memory_types))
-            return [
-                type("MemoryBlock", (), {"memory_type": "SYS_PROMPT", "content": "\n\nsystem\n\n"})(),
-                type("MemoryBlock", (), {"memory_type": "USER_PROFILE", "content": None})(),
-                type("MemoryBlock", (), {"memory_type": "SOUL", "content": "\n\nsoul\n\n"})(),
-            ]
-
-    monkeypatch.setattr(
-        "backend.agent.agent.async_session_factory", lambda: FakeSessionFactory()
-    )
-    monkeypatch.setattr("backend.agent.agent.MemoryBlockDAO", FakeMemoryBlockDAO)
-
+async def test_prepare_sys_prompt_defaults_to_empty_string():
     agent = Agent(
         1,
         2,
@@ -128,13 +102,7 @@ async def test_prepare_sys_prompt_loads_selected_memory_blocks(monkeypatch):
 
     await agent.prepare_sys_prompt()
 
-    assert calls[1] == (
-        "query",
-        2,
-        ("SOUL", "USER_PROFILE", "IDENTITY", "SYS_PROMPT"),
-    )
-    assert agent.sys_prompt == "<SOUL>\nsoul\n</SOUL>\n\nsystem"
-    assert "\n\n\n" not in agent.sys_prompt
+    assert agent.sys_prompt == ""
 
 
 @pytest.mark.asyncio

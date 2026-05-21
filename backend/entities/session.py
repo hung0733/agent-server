@@ -18,4 +18,3 @@ class AgentSession(Base):
     recv_agent = relationship("Agent", back_populates="recv_sessions", foreign_keys=[recv_agent_id])
     sender_agent = relationship("Agent", back_populates="sent_sessions", foreign_keys=[sender_agent_id])
     messages = relationship("AgentMsgHist", back_populates="session")
-    short_term_mems = relationship("ShortTermMem", back_populates="session")

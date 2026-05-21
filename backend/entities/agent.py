@@ -31,5 +31,3 @@ class Agent(Base):
         back_populates="sender_agent",
         foreign_keys="AgentSession.sender_agent_id",
     )
-    long_term_mems = relationship("LongTermMem", back_populates="agent")
-    memory_blocks = relationship("MemoryBlock", back_populates="agent")

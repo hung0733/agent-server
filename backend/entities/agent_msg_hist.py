@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.db.base import Base
@@ -17,8 +17,6 @@ class AgentMsgHist(Base):
     create_dt: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     content: Mapped[str | None] = mapped_column(Text)
     token: Mapped[int | None] = mapped_column(Integer)
-    is_summary: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
-    is_analyst: Mapped[int | None] = mapped_column(Integer)
     meta_data: Mapped[str | None] = mapped_column(Text)
     model_name: Mapped[str | None] = mapped_column(String(255))
 
