@@ -42,7 +42,7 @@ class FakeSandbox:
         return await self._record("read_file", {"content": smoke_script.SMOKE_FILE_CONTENT})
 
     async def list_files(self, path, pattern):
-        assert path == "/workspaces"
+        assert path == "/workspace"
         assert pattern == "smoke-test.txt"
         return await self._record("list_files", {"files": [{"path": smoke_script.SMOKE_FILE_PATH}]})
 

@@ -54,13 +54,27 @@ class FakeSearchEntry:
     pattern: str
 
 
+@dataclass
+class FakeMoveEntry:
+    src: str
+    dest: str
+
+
+@dataclass
+class FakeRunCommandOpts:
+    working_directory: str | None = None
+
+
 class FakeCommands:
     def __init__(self):
         self.commands = []
 
-    async def run(self, command):
-        self.commands.append(command)
-        return SimpleNamespace(exit_code=0, logs={"stdout": ["ok"]})
+    async def run(self, command, *, opts=None):
+        self.commands.append((command, opts))
+        stdout = ["ok"]
+        if command.startswith("cd -- ") and command.endswith(" && pwd"):
+            stdout = [command.removeprefix("cd -- ").removesuffix(" && pwd").strip("'")]
+        return SimpleNamespace(exit_code=0, logs={"stdout": stdout})
 
 
 class FakeFiles:
@@ -68,6 +82,7 @@ class FakeFiles:
         self.writes = []
         self.deleted = []
         self.searches = []
+        self.moves = []
 
     async def write_files(self, entries):
         self.writes.extend(entries)
@@ -81,6 +96,9 @@ class FakeFiles:
 
     async def delete_files(self, paths):
         self.deleted.extend(paths)
+
+    async def move_files(self, entries):
+        self.moves.extend(entries)
 
 
 class FakeSandbox:
@@ -145,6 +163,8 @@ class FakeSdk:
     SandboxFilter = FakeSandboxFilter
     WriteEntry = FakeWriteEntry
     SearchEntry = FakeSearchEntry
+    MoveEntry = FakeMoveEntry
+    RunCommandOpts = FakeRunCommandOpts
 
 
 @pytest.fixture(autouse=True)
@@ -158,7 +178,7 @@ def fake_sdk(monkeypatch, tmp_path):
     monkeypatch.setattr(agent_sandbox, "_load_opensandbox_sdk", lambda: FakeSdk)
 
 
-def test_create_uses_default_image_host_path_and_workspaces_mount(tmp_path):
+def test_create_uses_default_image_host_path_and_workspace_mount(tmp_path):
     async def run():
         sandbox = AgentSandbox()
         result = await sandbox.create("user_123")
@@ -183,7 +203,7 @@ def test_create_uses_default_image_host_path_and_workspaces_mount(tmp_path):
         assert call["timeout"] == timedelta(minutes=30)
         volume = call["volumes"][0]
         assert volume.host.path == str(tmp_path / "user_123")
-        assert volume.mountPath == "/workspaces"
+        assert volume.mountPath == "/workspace"
         assert volume.readOnly is False
 
     import asyncio
@@ -226,22 +246,25 @@ async def test_command_file_and_lifecycle_methods_delegate_to_sdk():
     command = await sandbox.run_command("echo ok")
     assert command["sandbox_id"] == "sandbox-1"
     assert command["result"]["exit_code"] == 0
-    assert sandbox._sandbox.commands.commands == ["echo ok"]
+    assert sandbox._sandbox.commands.commands == [
+        ("echo ok", FakeRunCommandOpts(working_directory="/workspace"))
+    ]
 
-    write = await sandbox.write_file("/workspaces/a.txt", "hello")
-    assert write == {"sandbox_id": "sandbox-1", "path": "/workspaces/a.txt"}
-    assert sandbox._sandbox.files.writes == [FakeWriteEntry("/workspaces/a.txt", "hello", 0o644)]
+    write = await sandbox.write_file("/workspace/a.txt", "hello")
+    assert write == {"sandbox_id": "sandbox-1", "path": "/workspace/a.txt"}
+    assert sandbox._sandbox.files.writes == [FakeWriteEntry("/workspace/a.txt", "hello", 0o644)]
 
-    read = await sandbox.read_file("/workspaces/a.txt")
-    assert read["content"] == "content:/workspaces/a.txt"
+    read = await sandbox.read_file("/workspace/a.txt")
+    assert read["content"] == "content:/workspace/a.txt"
 
     listed = await sandbox.list_files()
-    assert listed["files"] == [{"path": "/workspaces/a.txt"}]
-    assert sandbox._sandbox.files.searches == [FakeSearchEntry("/workspaces", "*")]
+    assert listed["path"] == "/workspace"
+    assert listed["files"] == [{"path": "/workspace/a.txt"}]
+    assert sandbox._sandbox.files.searches == [FakeSearchEntry("/workspace", "*")]
 
-    deleted = await sandbox.delete_file("/workspaces/a.txt")
-    assert deleted == {"sandbox_id": "sandbox-1", "path": "/workspaces/a.txt"}
-    assert sandbox._sandbox.files.deleted == ["/workspaces/a.txt"]
+    deleted = await sandbox.delete_file("/workspace/a.txt")
+    assert deleted == {"sandbox_id": "sandbox-1", "path": "/workspace/a.txt"}
+    assert sandbox._sandbox.files.deleted == ["/workspace/a.txt"]
 
     renewed = await sandbox.renew(15)
     assert renewed["result"] == {"renewed": 900.0}
@@ -263,6 +286,59 @@ async def test_command_file_and_lifecycle_methods_delegate_to_sdk():
     killed = await sandbox.kill()
     assert killed == {"sandbox_id": "sandbox-1", "killed": True}
     assert sandbox._sandbox is None
+
+
+@pytest.mark.asyncio
+async def test_working_directory_and_relative_paths():
+    sandbox = AgentSandbox(sandbox=FakeSandbox())
+
+    assert await sandbox.pwd() == {"sandbox_id": "sandbox-1", "path": "/workspace"}
+
+    cd_result = await sandbox.cd("project")
+    assert cd_result == {"sandbox_id": "sandbox-1", "path": "/workspace/project"}
+
+    await sandbox.run_command("pwd")
+    assert sandbox._sandbox.commands.commands[-1] == (
+        "pwd",
+        FakeRunCommandOpts(working_directory="/workspace/project"),
+    )
+
+    write = await sandbox.write_file("a.txt", "hello")
+    assert write == {"sandbox_id": "sandbox-1", "path": "/workspace/project/a.txt"}
+
+    read = await sandbox.read_file("a.txt")
+    assert read["path"] == "/workspace/project/a.txt"
+
+    listed = await sandbox.list_files(".", "*.py")
+    assert listed["path"] == "/workspace/project"
+    assert sandbox._sandbox.files.searches[-1] == FakeSearchEntry("/workspace/project", "*.py")
+
+    deleted = await sandbox.delete_file("a.txt")
+    assert deleted == {"sandbox_id": "sandbox-1", "path": "/workspace/project/a.txt"}
+
+
+@pytest.mark.asyncio
+async def test_copy_and_rename_use_resolved_paths():
+    sandbox = AgentSandbox(sandbox=FakeSandbox())
+    await sandbox.cd("/workspace/project")
+
+    copied = await sandbox.copy("src dir", "dest dir")
+    assert copied["src"] == "/workspace/project/src dir"
+    assert copied["dest"] == "/workspace/project/dest dir"
+    assert sandbox._sandbox.commands.commands[-1] == (
+        "cp -R -- '/workspace/project/src dir' '/workspace/project/dest dir'",
+        FakeRunCommandOpts(working_directory="/workspace/project"),
+    )
+
+    renamed = await sandbox.rename("old.txt", "new.txt")
+    assert renamed == {
+        "sandbox_id": "sandbox-1",
+        "src": "/workspace/project/old.txt",
+        "dest": "/workspace/project/new.txt",
+    }
+    assert sandbox._sandbox.files.moves == [
+        FakeMoveEntry("/workspace/project/old.txt", "/workspace/project/new.txt")
+    ]
 
 
 @pytest.mark.asyncio

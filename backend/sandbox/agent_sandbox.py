@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 import os
+import posixpath
+import shlex
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -14,7 +16,7 @@ from backend.i18n import t
 
 logger = logging.getLogger(__name__)
 
-WORKSPACE_MOUNT_PATH = "/workspaces"
+WORKSPACE_MOUNT_PATH = "/workspace"
 DEFAULT_SANDBOX_IMAGE = "ubuntu:22.04"
 _UNCHANGED = object()
 
@@ -30,6 +32,7 @@ class AgentSandbox:
         self.user_id = user_id
         self.timeout_minutes = timeout_minutes
         self._sandbox = sandbox
+        self.working_directory = WORKSPACE_MOUNT_PATH
 
     async def __aenter__(self) -> AgentSandbox:
         await self.create()
@@ -86,42 +89,100 @@ class AgentSandbox:
 
     async def run_command(self, command: str) -> dict[str, Any]:
         sandbox = self._require_sandbox()
-        result = await sandbox.commands.run(command)
+        sdk = _load_opensandbox_sdk()
+        result = await sandbox.commands.run(
+            command,
+            opts=sdk.RunCommandOpts(working_directory=self.working_directory),
+        )
         return {"sandbox_id": self.sandbox_id, "result": _json_safe(result)}
 
     async def write_file(self, path: str, content: str) -> dict[str, Any]:
         sandbox = self._require_sandbox()
         sdk = _load_opensandbox_sdk()
+        resolved_path = self._resolve_path(path)
         await sandbox.files.write_files(
             [
                 sdk.WriteEntry(
-                    path=path,
+                    path=resolved_path,
                     data=content,
                     mode=0o644,
                 )
             ]
         )
-        return {"sandbox_id": self.sandbox_id, "path": path}
+        return {"sandbox_id": self.sandbox_id, "path": resolved_path}
 
     async def read_file(self, path: str) -> dict[str, Any]:
         sandbox = self._require_sandbox()
-        content = await sandbox.files.read_file(path)
-        return {"sandbox_id": self.sandbox_id, "path": path, "content": content}
+        resolved_path = self._resolve_path(path)
+        content = await sandbox.files.read_file(resolved_path)
+        return {
+            "sandbox_id": self.sandbox_id,
+            "path": resolved_path,
+            "content": content,
+        }
 
     async def list_files(
         self,
-        path: str = WORKSPACE_MOUNT_PATH,
+        path: str = ".",
         pattern: str = "*",
     ) -> dict[str, Any]:
         sandbox = self._require_sandbox()
         sdk = _load_opensandbox_sdk()
-        files = await sandbox.files.search(sdk.SearchEntry(path=path, pattern=pattern))
-        return {"sandbox_id": self.sandbox_id, "files": _json_safe(files)}
+        resolved_path = self._resolve_path(path)
+        files = await sandbox.files.search(
+            sdk.SearchEntry(path=resolved_path, pattern=pattern)
+        )
+        return {
+            "sandbox_id": self.sandbox_id,
+            "path": resolved_path,
+            "files": _json_safe(files),
+        }
 
     async def delete_file(self, path: str) -> dict[str, Any]:
         sandbox = self._require_sandbox()
-        await sandbox.files.delete_files([path])
-        return {"sandbox_id": self.sandbox_id, "path": path}
+        resolved_path = self._resolve_path(path)
+        await sandbox.files.delete_files([resolved_path])
+        return {"sandbox_id": self.sandbox_id, "path": resolved_path}
+
+    async def copy(self, src: str, dest: str) -> dict[str, Any]:
+        resolved_src = self._resolve_path(src)
+        resolved_dest = self._resolve_path(dest)
+        result = await self.run_command(
+            f"cp -R -- {shlex.quote(resolved_src)} {shlex.quote(resolved_dest)}"
+        )
+        return {
+            "sandbox_id": self.sandbox_id,
+            "src": resolved_src,
+            "dest": resolved_dest,
+            "result": result["result"],
+        }
+
+    async def rename(self, src: str, dest: str) -> dict[str, Any]:
+        sandbox = self._require_sandbox()
+        sdk = _load_opensandbox_sdk()
+        resolved_src = self._resolve_path(src)
+        resolved_dest = self._resolve_path(dest)
+        await sandbox.files.move_files(
+            [sdk.MoveEntry(src=resolved_src, dest=resolved_dest)]
+        )
+        return {
+            "sandbox_id": self.sandbox_id,
+            "src": resolved_src,
+            "dest": resolved_dest,
+        }
+
+    async def pwd(self) -> dict[str, Any]:
+        self._require_sandbox()
+        return {"sandbox_id": self.sandbox_id, "path": self.working_directory}
+
+    async def cd(self, path: str) -> dict[str, Any]:
+        resolved_path = self._resolve_path(path)
+        result = await self.run_command(f"cd -- {shlex.quote(resolved_path)} && pwd")
+        stdout = _result_stdout_text(result["result"])
+        if not stdout:
+            raise RuntimeError(t("sandbox.agent.cd_failed") % resolved_path)
+        self.working_directory = stdout.strip().splitlines()[-1]
+        return {"sandbox_id": self.sandbox_id, "path": self.working_directory}
 
     async def renew(self, timeout_minutes: int) -> dict[str, Any]:
         sandbox = self._require_sandbox()
@@ -172,6 +233,11 @@ class AgentSandbox:
             raise RuntimeError(t("sandbox.agent.not_created"))
         return self._sandbox
 
+    def _resolve_path(self, path: str) -> str:
+        if path.startswith("/"):
+            return posixpath.normpath(path)
+        return posixpath.normpath(posixpath.join(self.working_directory, path))
+
 
 class _OpenSandboxSdk:
     def __init__(
@@ -185,6 +251,8 @@ class _OpenSandboxSdk:
         SandboxFilter: Any,
         WriteEntry: Any,
         SearchEntry: Any,
+        MoveEntry: Any,
+        RunCommandOpts: Any,
     ) -> None:
         self.Sandbox = Sandbox
         self.SandboxManager = SandboxManager
@@ -194,6 +262,8 @@ class _OpenSandboxSdk:
         self.SandboxFilter = SandboxFilter
         self.WriteEntry = WriteEntry
         self.SearchEntry = SearchEntry
+        self.MoveEntry = MoveEntry
+        self.RunCommandOpts = RunCommandOpts
 
 
 def _load_opensandbox_sdk() -> _OpenSandboxSdk:
@@ -201,7 +271,8 @@ def _load_opensandbox_sdk() -> _OpenSandboxSdk:
         from opensandbox import Sandbox
         from opensandbox.config import ConnectionConfig
         from opensandbox.manager import SandboxManager
-        from opensandbox.models.filesystem import SearchEntry, WriteEntry
+        from opensandbox.models.execd import RunCommandOpts
+        from opensandbox.models.filesystem import MoveEntry, SearchEntry, WriteEntry
         from opensandbox.models.sandboxes import Host, SandboxFilter, Volume
     except ImportError as exc:
         raise RuntimeError(t("sandbox.agent.sdk_missing")) from exc
@@ -215,6 +286,8 @@ def _load_opensandbox_sdk() -> _OpenSandboxSdk:
         SandboxFilter=SandboxFilter,
         WriteEntry=WriteEntry,
         SearchEntry=SearchEntry,
+        MoveEntry=MoveEntry,
+        RunCommandOpts=RunCommandOpts,
     )
 
 
@@ -285,3 +358,24 @@ def _json_safe(value: Any) -> Any:
             if not key.startswith("_")
         }
     return str(value)
+
+
+def _result_stdout_text(result: Any) -> str:
+    logs = (
+        result.get("logs")
+        if isinstance(result, dict)
+        else getattr(result, "logs", None)
+    )
+    if not logs:
+        return ""
+
+    stdout = (
+        logs.get("stdout")
+        if isinstance(logs, dict)
+        else getattr(logs, "stdout", None)
+    )
+    if isinstance(stdout, str):
+        return stdout
+    if isinstance(stdout, list):
+        return "\n".join(str(line) for line in stdout)
+    return ""

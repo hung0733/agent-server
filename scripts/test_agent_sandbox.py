@@ -26,9 +26,9 @@ from backend.sandbox import AgentSandbox
 
 
 DEFAULT_USER_ID = "sandbox_smoke_test"
-SMOKE_FILE_PATH = "/workspaces/smoke-test.txt"
+SMOKE_FILE_PATH = "/workspace/smoke-test.txt"
 SMOKE_FILE_CONTENT = "agent sandbox smoke test"
-SMOKE_COMMAND = "pwd && ls -la /workspaces && echo sandbox-ok"
+SMOKE_COMMAND = "pwd && ls -la /workspace && echo sandbox-ok"
 VERIFY_COMMAND = f"cat {SMOKE_FILE_PATH}"
 
 logger = logging.getLogger(__name__)
@@ -66,7 +66,7 @@ async def run_smoke_test(user_id: str = DEFAULT_USER_ID) -> int:
         if read_result.get("content") != SMOKE_FILE_CONTENT:
             raise RuntimeError(t("scripts.test_agent_sandbox.read_mismatch"))
 
-        await _run_step("list_files", lambda: sandbox.list_files("/workspaces", "smoke-test.txt"))
+        await _run_step("list_files", lambda: sandbox.list_files("/workspace", "smoke-test.txt"))
         await _run_step("renew", lambda: sandbox.renew(10))
         await _run_step("pause", sandbox.pause)
         await _run_step("resume", sandbox.resume)
