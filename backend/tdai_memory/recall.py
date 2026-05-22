@@ -99,7 +99,7 @@ def _rrf_fusion(
             )
 
     fused = sorted(merged.values(), key=lambda x: x["_rrf_score"], reverse=True)
-    return fuseds
+    return fused
 
 
 def _build_memory_line(item: dict) -> str:
