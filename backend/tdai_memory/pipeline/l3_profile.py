@@ -181,10 +181,22 @@ async def write_profile_file(
 
 _BOOTSTRAP_SYSTEM = """# Agent Profile Bootstrapper
 
-你是一個 Agent 配置文件分析器。根據提供的 Agent 定義/system prompt，分析並將內容分配到兩個檔案：
+你是一個 Agent 配置文件還原器。根據提供的 Agent 定義/system prompt，將原始內容重組到兩個檔案。你的目標是「事實還原」，不是摘要、評論或重新創作。
 
 1. **SOUL.md** — Agent 的核心人格：價值觀、溝通風格、決策模式、行為邊界。Agent 內在「係咩」。
 2. **IDENTITY.md** — Agent 的角色定義：職責、能力範疇、限制邊界、自我介紹方式。Agent「做咩」。
+
+## 事實還原原則
+
+- 預設保留原始 prompt 的全部可執行事實：角色定位、工作流程、觸發條件、例外、工具/函數名稱、專家/角色名、輸出格式、JSON schema、欄位名稱、硬性限制、拒絕話術、驗收標準。
+- 不要把具體規則壓縮成抽象形容詞。例如「不得自己寫程式」必須保留為具體禁令，不可以只寫「遵守分工」。
+- 不要省略例子、清單、條件分支、格式樣板或 code block；它們通常是 Agent 運作所需的事實。
+- 優先用「低壓縮轉寫」：原文中的標題、bullet、硬性限制、工具名稱、欄位名稱、示例話術，盡量原樣搬移到合適檔案。
+- 避免詮釋性重寫：不要用「更有文采」或「更像人格分析」的句子取代原始規則；不要加入原文沒有的評價性描述。
+- 可以按 SOUL/IDENTITY 分類重排內容，但每條規則的操作含義必須仍然可由輸出檔案還原。
+- 如果內容較長，優先完整保留事實，唔好為咗整齊或簡短而刪減。
+- 輸出檔案唔一定要短；除非原文重複，否則不要合併到失去細節。
+- 輸出語言必須跟原始 prompt 一致：原文用繁體中文就用繁體中文，原文用英文就用英文，原文中英混合就保留原本的混合方式；技術名詞、角色名、欄位名和工具名保持原樣。
 
 ## 分類指南
 
@@ -240,14 +252,27 @@ _BOOTSTRAP_SYSTEM = """# Agent Profile Bootstrapper
 [Agent 如何向用戶介紹自己]
 ```
 
+如原始 prompt 包含大量格式規範、路由 schema 或硬性限制，可在模板下新增合適小節，例如：
+- `## Operating Rules (運作規則)`
+- `## Routing Conditions (路由條件)`
+- `## Output Formats (輸出格式)`
+- `## Hard Limits (硬性限制)`
+
+新增小節只可用於保留原始事實，不可加入原文冇嘅規則。
+
 ## ⚠️ 嚴格規則（必須遵守）
 
 1. **必須如實保留原始 prompt 中每一句話嘅意思** — 意思不可以改變
-2. **可以調整字眼、格式、語氣**，但意思要完全一致
-3. **不可以添加原始 prompt 中冇嘅資訊** — 不要憑空捏造
-4. **如果某條資訊可同時放入兩個 file，放入最合適嗰個**，不要重複
-5. **如果原始 prompt 很短或籠統，仍盡量提取**，唔好因為資訊不足而留空
-6. **不要包含場景導航**（工程會自動追加）
+2. **必須如實保留原始 prompt 中的所有輸出格式規範** — 意思不可以改變
+3. **必須保留原始 prompt 中的所有 JSON / markdown / code block 樣板** — 欄位名、字面值、佔位符意思都不可遺漏
+4. **可以調整字眼、格式、語氣**，但意思要完全一致；對硬性限制、格式樣板和工具名稱，盡量保留原字眼
+5. **不可以添加原始 prompt 中冇嘅資訊** — 不要憑空捏造
+6. **如果某條資訊可同時放入兩個 file，放入最合適嗰個**，不要重複；但不可因為避免重複而刪除必要事實
+7. **如果原始 prompt 很短或籠統，仍盡量提取**，唔好因為資訊不足而留空
+8. **不要包含場景導航**（工程會自動追加）
+9. **輸出前自我檢查**：原 prompt 每個標題、每個 bullet、每個輸出格式、每個硬性限制，都應該可以喺 soul 或 identity 其中一個檔案搵返對應內容
+10. **若摘要與完整保留衝突，選完整保留**；只有純粹重複或明顯裝飾性文字可以省略
+11. **輸入是什麼語言，輸出必須同樣語言**；不要把英文 prompt 翻譯成中文，也不要把中文 prompt 翻譯成英文
 
 輸出格式（純 JSON，不要 markdown code block）：
 {"soul": "完整 SOUL.md 內容", "identity": "完整 IDENTITY.md 內容"}"""
@@ -569,7 +594,9 @@ async def run_l3_profile_generation(
         name = entry.get("name", "")
         for sc in scene_contents:
             if sc.get("name") == name:
-                changed_contents.append(f"## {entry.get('label', name)}\n{sc.get('content', '')}")
+                changed_contents.append(
+                    f"## {entry.get('label', name)}\n{sc.get('content', '')}"
+                )
                 break
         else:
             summary = entry.get("summary", "")
@@ -612,7 +639,9 @@ async def run_l3_profile_generation(
         if not persona_text.strip():
             logger.error(t("tdai_memory.pipeline.persona_body_empty"), agent_id)
         else:
-            await write_profile_file(agent_id, data_dir, "persona.md", persona_text, index)
+            await write_profile_file(
+                agent_id, data_dir, "persona.md", persona_text, index
+            )
             results["persona"] = True
     except Exception:
         logger.exception(t("tdai_memory.pipeline.generate_persona_failed"), agent_id)
@@ -623,7 +652,9 @@ async def run_l3_profile_generation(
             existing=existing_soul,
             scene_contents=scene_contents,
             index=index,
-            persona_text=persona_text if results["persona"] else (existing_persona or ""),
+            persona_text=(
+                persona_text if results["persona"] else (existing_persona or "")
+            ),
             llm_client=llm_client,
             config=config,
             data_dir=data_dir,
@@ -646,7 +677,9 @@ async def run_l3_profile_generation(
             data_dir=data_dir,
             agent_id=agent_id,
         )
-        await write_profile_file(agent_id, data_dir, "IDENTITY.md", identity_text, index)
+        await write_profile_file(
+            agent_id, data_dir, "IDENTITY.md", identity_text, index
+        )
         results["identity"] = True
     except Exception:
         logger.exception(t("tdai_memory.pipeline.generate_identity_failed"), agent_id)
@@ -657,7 +690,9 @@ async def run_l3_profile_generation(
     return results
 
 
-async def _raw_write_file(agent_id: str, data_dir: str, filename: str, content: str) -> None:
+async def _raw_write_file(
+    agent_id: str, data_dir: str, filename: str, content: str
+) -> None:
     agent_dir = os.path.join(data_dir, agent_id)
     path = os.path.join(agent_dir, filename)
 
@@ -669,6 +704,62 @@ async def _raw_write_file(agent_id: str, data_dir: str, filename: str, content: 
     await asyncio.to_thread(_write)
 
 
+def _escape_control_chars_in_json_strings(raw: str) -> str:
+    chars: list[str] = []
+    in_string = False
+    escaped = False
+
+    for char in raw:
+        if escaped:
+            chars.append(char)
+            escaped = False
+            continue
+
+        if char == "\\":
+            chars.append(char)
+            escaped = in_string
+            continue
+
+        if char == '"':
+            in_string = not in_string
+            chars.append(char)
+            continue
+
+        if in_string:
+            if char == "\n":
+                chars.append("\\n")
+                continue
+            if char == "\r":
+                chars.append("\\r")
+                continue
+            if char == "\t":
+                chars.append("\\t")
+                continue
+
+        chars.append(char)
+
+    return "".join(chars)
+
+
+def _parse_bootstrap_response(raw: str) -> dict:
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as first_error:
+        repaired = _escape_control_chars_in_json_strings(raw)
+        try:
+            return json.loads(repaired)
+        except json.JSONDecodeError:
+            match = re.search(r"\{[\s\S]*\}", raw)
+            if match is None:
+                raise first_error
+
+            matched = match.group(0)
+            try:
+                return json.loads(matched)
+            except json.JSONDecodeError:
+                return json.loads(_escape_control_chars_in_json_strings(matched))
+
+
 async def bootstrap_agent_profile(
     *,
     agent_id: str,
@@ -678,7 +769,9 @@ async def bootstrap_agent_profile(
     prompt: str,
 ) -> dict[str, str]:
     model = config.persona.model or config.llm.model
-    logger.info(t("tdai_memory.pipeline.bootstrap_agent_profile"), agent_id, len(prompt))
+    logger.info(
+        t("tdai_memory.pipeline.bootstrap_agent_profile"), agent_id, len(prompt)
+    )
 
     response = await llm_client.chat.completions.create(
         model=model,
@@ -693,18 +786,14 @@ async def bootstrap_agent_profile(
     raw = response.choices[0].message.content or ""
 
     try:
-        data = json.loads(raw)
+        data = _parse_bootstrap_response(raw)
     except json.JSONDecodeError:
-        match = re.search(r'\{[\s\S]*\}', raw)
-        if match:
-            try:
-                data = json.loads(match.group(0))
-            except json.JSONDecodeError:
-                logger.error(t("tdai_memory.pipeline.parse_bootstrap_response_failed"), agent_id, raw[:200])
-                return {"soul": "", "identity": ""}
-        else:
-            logger.error(t("tdai_memory.pipeline.no_json_bootstrap_response"), agent_id, raw[:200])
-            return {"soul": "", "identity": ""}
+        logger.error(
+            t("tdai_memory.pipeline.parse_bootstrap_response_failed"),
+            agent_id,
+            raw[:200],
+        )
+        return {"soul": "", "identity": ""}
 
     soul_text = data.get("soul", "").strip()
     identity_text = data.get("identity", "").strip()
@@ -715,6 +804,8 @@ async def bootstrap_agent_profile(
 
     if identity_text:
         await _raw_write_file(agent_id, data_dir, "IDENTITY.md", identity_text)
-        logger.info(t("tdai_memory.pipeline.identity_written"), agent_id, len(identity_text))
+        logger.info(
+            t("tdai_memory.pipeline.identity_written"), agent_id, len(identity_text)
+        )
 
     return {"soul": soul_text, "identity": identity_text}

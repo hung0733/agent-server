@@ -7,6 +7,7 @@ import time
 from typing import Any, Callable
 
 import openai
+from dotenv import load_dotenv
 
 from backend.i18n import t
 from .capture import perform_auto_capture
@@ -492,14 +493,27 @@ class MemoryManager:
     async def set_identity_seed(self, *, agent_id: str, content: str) -> None:
         await set_identity_seed(agent_id, self.config.data_dir, content)
 
-    async def bootstrap_agent(self, *, agent_id: str, prompt: str) -> dict[str, str]:
-        return await bootstrap_agent_profile(
-            agent_id=agent_id,
-            data_dir=self.config.data_dir,
-            llm_client=self._client,
-            config=self.config,
-            prompt=prompt,
+    @staticmethod
+    async def bootstrap_agent(*, agent_id: str, prompt: str) -> dict[str, str]:
+        load_dotenv()
+        config = MemoryManager.from_env()
+        llm_cfg = config.llm
+        client = openai.AsyncOpenAI(
+            api_key=resolve_openai_api_key(llm_cfg.api_key, llm_cfg.base_url),
+            base_url=llm_cfg.base_url,
+            timeout=llm_cfg.timeout_ms / 1000.0 if llm_cfg.timeout_ms > 0 else 30.0,
         )
+
+        try:
+            return await bootstrap_agent_profile(
+                agent_id=agent_id,
+                data_dir=config.data_dir,
+                llm_client=client,
+                config=config,
+                prompt=prompt,
+            )
+        finally:
+            await client.close()
 
     async def seed(self, *, agent_id: str, sessions: list[dict], **kwargs) -> dict:
         from .pipeline.seed import seed_conversations

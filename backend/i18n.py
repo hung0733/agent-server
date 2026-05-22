@@ -228,6 +228,38 @@ _MESSAGES = {
 
 
 _MESSAGES["zh_HK"].update(
+    {
+        "scripts.bootstrap_agent_memory.agent_id_help": "要 bootstrap memory profile 的 agent_id",
+        "scripts.bootstrap_agent_memory.completed": "Agent memory profile bootstrap 完成：agent=%s",
+        "scripts.bootstrap_agent_memory.description": "由 prompt 檔案 bootstrap TDAI memory profile",
+        "scripts.bootstrap_agent_memory.error": "錯誤",
+        "scripts.bootstrap_agent_memory.error_bootstrap_agent": "Bootstrap agent memory profile 時發生錯誤：%s",
+        "scripts.bootstrap_agent_memory.operation_cancelled": "\n\n操作已取消",
+        "scripts.bootstrap_agent_memory.output_files": "已產生 profile 內容字數：",
+        "scripts.bootstrap_agent_memory.prompt_file_empty": "Prompt 檔案內容不能為空：%s",
+        "scripts.bootstrap_agent_memory.prompt_file_help": "包含 agent prompt 的檔案路徑",
+        "scripts.bootstrap_agent_memory.prompt_file_missing": "找不到 prompt 檔案：%s",
+        "scripts.bootstrap_agent_memory.started": "開始 bootstrap agent memory profile：agent=%s prompt_file=%s",
+    }
+)
+_MESSAGES["en"].update(
+    {
+        "scripts.bootstrap_agent_memory.agent_id_help": "agent_id to bootstrap memory profile for",
+        "scripts.bootstrap_agent_memory.completed": "Agent memory profile bootstrap completed: agent=%s",
+        "scripts.bootstrap_agent_memory.description": "Bootstrap TDAI memory profile from a prompt file",
+        "scripts.bootstrap_agent_memory.error": "Error",
+        "scripts.bootstrap_agent_memory.error_bootstrap_agent": "Error bootstrapping agent memory profile: %s",
+        "scripts.bootstrap_agent_memory.operation_cancelled": "\n\nOperation cancelled",
+        "scripts.bootstrap_agent_memory.output_files": "Generated profile content lengths:",
+        "scripts.bootstrap_agent_memory.prompt_file_empty": "Prompt file content cannot be empty: %s",
+        "scripts.bootstrap_agent_memory.prompt_file_help": "Path to the file containing the agent prompt",
+        "scripts.bootstrap_agent_memory.prompt_file_missing": "Prompt file not found: %s",
+        "scripts.bootstrap_agent_memory.started": "Starting agent memory profile bootstrap: agent=%s prompt_file=%s",
+    }
+)
+
+
+_MESSAGES["zh_HK"].update(
 {'tdai_memory.capture.background_l0_embed_failed': '背景 L0 embedding 失敗：record_id=%s',
  'tdai_memory.capture.done': 'Capture 完成：agent=%s session=%s records=%d (%.0fms)',
  'tdai_memory.capture.postgres_degraded_skipping': 'PostgresStore 已降級，略過 capture',
