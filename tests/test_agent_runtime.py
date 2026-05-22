@@ -10,7 +10,7 @@ from langchain_core.messages import (
 )
 
 from backend.agent.agent import Agent
-from backend.graph.agent import chat_node
+from backend.graph.agent import assign_task_node, chat_node, graph, route_after_chat
 from backend.graph.graph_node import GraphNode
 from backend.llm.types import StreamChunk
 
@@ -25,7 +25,7 @@ class FakeLLM:
         self.messages = messages
         self.started.set()
         await self.release.wait()
-        return [StreamChunk(chunk_type="content", content="你好")]
+        return AIMessage(content="你好")
 
 
 class FakeModels:
@@ -37,6 +37,13 @@ class FakeModels:
 
     def getSysActModel(self):
         return self.llm
+
+
+class FakeSandbox:
+    sandbox_id = "sandbox-1"
+
+    async def run_command(self, command: str):
+        return {"sandbox_id": self.sandbox_id, "result": {"exit_code": 0}}
 
 
 @pytest.mark.asyncio
@@ -65,6 +72,166 @@ async def test_chat_node_waits_for_llm_and_returns_ai_message():
 
     assert isinstance(result["messages"][0], AIMessage)
     assert result["messages"][0].content == "你好"
+
+
+@pytest.mark.asyncio
+async def test_graph_routes_assign_task_tool_calls_through_assign_task_node():
+    class ToolCallingLLM:
+        def __init__(self):
+            self.calls = 0
+            self.bound_tools = None
+            self.messages = []
+
+        def bind_tools(self, tools):
+            self.bound_tools = tools
+            return self
+
+        async def ainvoke(self, messages):
+            self.calls += 1
+            self.messages.append(messages)
+            if self.calls == 1:
+                return AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": "assign_task",
+                            "args": {"task_json": '{"task":"demo"}'},
+                            "id": "call-1",
+                        }
+                    ],
+                )
+
+            return AIMessage(content="done")
+
+    llm = ToolCallingLLM()
+    config = GraphNode.prepare_chat_node_config(
+        thread_id="session-1",
+        models=FakeModels(llm),
+        sys_prompt="",
+        involves_secrets=False,
+        think_mode=False,
+        args={},
+    )
+
+    result = await graph.ainvoke(
+        {"messages": [HumanMessage(content="hello")]},
+        config=config,
+    )
+
+    assert [tool.name for tool in llm.bound_tools] == ["assign_task"]
+    assert llm.calls == 1
+    assert isinstance(result["messages"][-1], ToolMessage)
+    assert result["messages"][-1].tool_call_id == "call-1"
+
+
+@pytest.mark.asyncio
+async def test_assign_task_node_returns_tool_message():
+    message = AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": "assign_task",
+                "args": {"task_json": '{"task":"demo"}'},
+                "id": "call-1",
+            }
+        ],
+    )
+
+    result = await assign_task_node({"messages": [message]}, {"configurable": {}})
+
+    assert len(result["messages"]) == 1
+    assert result["messages"][0].tool_call_id == "call-1"
+    assert '"tool_call_id": "call-1"' in result["messages"][0].content
+
+
+@pytest.mark.asyncio
+async def test_graph_routes_other_tool_calls_through_tools_node():
+    class ToolCallingLLM:
+        def __init__(self):
+            self.calls = 0
+            self.bound_tools = None
+            self.messages = []
+
+        def bind_tools(self, tools):
+            self.bound_tools = tools
+            return self
+
+        async def ainvoke(self, messages):
+            self.calls += 1
+            self.messages.append(messages)
+            if self.calls == 1:
+                return AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": "run_command",
+                            "args": {"command": "pwd"},
+                            "id": "call-2",
+                        }
+                    ],
+                )
+
+            return AIMessage(content="done")
+
+    llm = ToolCallingLLM()
+    config = GraphNode.prepare_chat_node_config(
+        thread_id="session-1",
+        models=FakeModels(llm),
+        sys_prompt="",
+        involves_secrets=False,
+        think_mode=False,
+        args={},
+    )
+    config["configurable"]["sandbox"] = FakeSandbox()
+
+    result = await graph.ainvoke(
+        {"messages": [HumanMessage(content="hello")]},
+        config=config,
+    )
+
+    assert [tool.name for tool in llm.bound_tools] == [
+        "assign_task",
+        "run_command",
+        "write_file",
+        "read_file",
+        "list_files",
+        "delete_file",
+        "copy",
+        "rename",
+        "pwd",
+        "cd",
+    ]
+    assert llm.calls == 2
+    assert any(isinstance(message, ToolMessage) for message in llm.messages[1])
+    assert result["messages"][-1].content == "done"
+    assert result["messages"][-1].additional_kwargs["text_done"] is True
+
+
+def test_route_after_chat_routes_assign_task_and_other_tool_calls():
+    assign_task_message = AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": "assign_task",
+                "args": {"task_json": "{}"},
+                "id": "call-1",
+            }
+        ],
+    )
+    other_tool_message = AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": "run_command",
+                "args": {"command": "pwd"},
+                "id": "call-2",
+            }
+        ],
+    )
+
+    assert route_after_chat({"messages": [assign_task_message]}) == "assign_task"
+    assert route_after_chat({"messages": [other_tool_message]}) == "tools"
+    assert route_after_chat({"messages": [HumanMessage(content="hello")]}) == "__end__"
 
 
 class FakeGraph:
@@ -128,16 +295,16 @@ async def test_chat_node_logs_content_lengths_and_tool_chunks(monkeypatch):
 
     class LoggingLLM:
         async def ainvoke(self, messages):
-            return [
-                StreamChunk(chunk_type="content", content="he"),
-                StreamChunk(chunk_type="tool", content="search"),
-                StreamChunk(
-                    chunk_type="tool_result",
-                    content="result",
-                    data={"tool_call_id": "call-1"},
-                ),
-                StreamChunk(chunk_type="content", content="llo"),
-            ]
+            return AIMessage(
+                content="hello",
+                tool_calls=[
+                    {
+                        "name": "search",
+                        "args": {"query": "hello"},
+                        "id": "call-1",
+                    }
+                ],
+            )
 
     monkeypatch.setattr("backend.graph.graph_node.logger.info", lambda *args: calls.append(args))
     config = GraphNode.prepare_chat_node_config(
@@ -151,14 +318,11 @@ async def test_chat_node_logs_content_lengths_and_tool_chunks(monkeypatch):
 
     result = await chat_node({"messages": [HumanMessage(content="hello")]}, config)
 
-    assert isinstance(result["messages"][0], ToolMessage)
-    assert result["messages"][0].content == "result"
-    assert result["messages"][0].tool_call_id == "call-1"
+    assert isinstance(result["messages"][0], AIMessage)
+    assert result["messages"][0].content == "hello"
     assert calls == [
-        ("Agent graph chat node 收到 content chunk：content_length=%s", 2),
+        ("Agent graph chat node 收到 content chunk：content_length=%s", 5),
         ("Agent graph chat node 收到工具調用：tool_name=%s", "search"),
-        ("Agent graph chat node 收到工具結果：content_length=%s", 6),
-        ("Agent graph chat node 收到 content chunk：content_length=%s", 3),
     ]
 
 
@@ -265,17 +429,17 @@ def test_stream_chunks_to_message_rejects_non_object_tool_arguments():
 async def test_chat_node_preserves_reasoning_and_tool_calls():
     class ToolLLM:
         async def ainvoke(self, messages):
-            return [
-                StreamChunk(chunk_type="think", content="reason"),
-                StreamChunk(chunk_type="content", content="hello"),
-                StreamChunk(
-                    chunk_type="tool",
-                    data={
+            return AIMessage(
+                content="hello",
+                additional_kwargs={"reasoning_content": "reason"},
+                tool_calls=[
+                    {
+                        "name": "search",
+                        "args": {"query": "hello"},
                         "id": "call-1",
-                        "function": {"name": "search", "arguments": "{\"query\": \"hello\"}"},
-                    },
-                ),
-            ]
+                    }
+                ],
+            )
 
     config = GraphNode.prepare_chat_node_config(
         thread_id="session-1",
