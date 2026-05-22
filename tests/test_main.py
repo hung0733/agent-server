@@ -229,6 +229,16 @@ async def test_upgrade_database_schema_runs_alembic_upgrade(monkeypatch):
     ]
 
 
+def test_run_suppresses_keyboard_interrupt(monkeypatch):
+    def run(coro):
+        coro.close()
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(main_module.asyncio, "run", run)
+
+    main_module.run()
+
+
 @pytest.mark.asyncio
 async def test_handle_agent_message_calls_agent_send(monkeypatch):
     calls = []

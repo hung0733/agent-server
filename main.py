@@ -51,6 +51,16 @@ def create_memory_manager() -> MemoryManager:
     return MemoryManager(MemoryManager.from_env())
 
 
+async def _close_graph_store_pool() -> None:
+    if GraphStore.pool is None:
+        return
+
+    pool = GraphStore.pool
+    GraphStore.pool = None
+    GraphStore.checkpointer = None
+    await pool.close()
+
+
 def _install_signal_handlers(shutdown_event: asyncio.Event) -> None:
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
@@ -78,8 +88,7 @@ async def main(
     try:
         await memory_manager.initialize()
     except Exception:
-        if GraphStore.pool is not None:
-            await GraphStore.pool.close()
+        await _close_graph_store_pool()
         raise
 
     channel = channel_factory()
@@ -113,9 +122,16 @@ async def main(
         await channel.close()
         await memory_manager.destroy()
         await db_engine.dispose()
-        await GraphStore.pool.close()
+        await _close_graph_store_pool()
         logger.info(t("main.shutdown_complete"))
 
 
+def run() -> None:
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        pass
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    run()
