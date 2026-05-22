@@ -20,6 +20,7 @@ from backend.graph.graph_store import GraphStore
 from backend.i18n import t
 from backend.queues.message_queue import MessageQueue
 from backend.queues.msg_queue_handle import handle_agent_message
+from backend.tdai_memory import MemoryManager
 from logger_setup import setup_logging
 
 logger = logging.getLogger(__name__)
@@ -46,6 +47,10 @@ async def upgrade_database_schema() -> None:
     logger.info(t("main.db_schema_upgrade_completed"))
 
 
+def create_memory_manager() -> MemoryManager:
+    return MemoryManager(MemoryManager.from_env())
+
+
 def _install_signal_handlers(shutdown_event: asyncio.Event) -> None:
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
@@ -57,6 +62,7 @@ async def main(
     *,
     db_engine: Any = engine,
     channel_factory: Callable[[], EvolutionWhatsAppChannel] = EvolutionWhatsAppChannel,
+    memory_manager_factory: Callable[[], Any] = create_memory_manager,
     setup_logging_func: Callable[[], None] = setup_logging,
     upgrade_database_schema_func: Callable[[], Awaitable[Any]] = upgrade_database_schema,
     shutdown_event: asyncio.Event | None = None,
@@ -68,6 +74,8 @@ async def main(
     await check_database(db_engine)
     await upgrade_database_schema_func()
     await GraphStore.init_langgraph_checkpointer()
+    memory_manager = memory_manager_factory()
+    await memory_manager.initialize()
 
     channel = channel_factory()
     message_queue = MessageQueue(handle_agent_message, max_concurrency=2)
@@ -98,6 +106,7 @@ async def main(
             await shutdown_task
         await message_queue.stop()
         await channel.close()
+        await memory_manager.destroy()
         await db_engine.dispose()
         await GraphStore.pool.close()
         logger.info(t("main.shutdown_complete"))

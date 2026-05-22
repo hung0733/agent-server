@@ -63,7 +63,15 @@ async def test_main_starts_message_queue_listener_and_cleans_up(monkeypatch):
     listener_calls = []
     queue_calls = []
     graph_calls = []
+    memory_calls = []
     monkeypatch.setattr(main_module, "_install_signal_handlers", lambda shutdown_event: None)
+
+    class FakeMemoryManager:
+        async def initialize(self):
+            memory_calls.append("initialize")
+
+        async def destroy(self):
+            memory_calls.append("destroy")
 
     class FakeQueue:
         def __init__(self, handler, max_concurrency):
@@ -98,6 +106,7 @@ async def test_main_starts_message_queue_listener_and_cleans_up(monkeypatch):
     await main_module.main(
         db_engine=engine,
         channel_factory=lambda: channel,
+        memory_manager_factory=FakeMemoryManager,
         setup_logging_func=lambda: setup_calls.append(True),
         upgrade_database_schema_func=upgrade_database_schema,
         shutdown_event=asyncio.Event(),
@@ -113,9 +122,70 @@ async def test_main_starts_message_queue_listener_and_cleans_up(monkeypatch):
     ]
     assert listener_calls == [(channel, queue)]
     assert graph_calls == ["init", "close"]
+    assert memory_calls == ["initialize", "destroy"]
     assert engine.executed == ["select 1"]
     assert channel.closed is True
     assert engine.disposed is True
+
+
+@pytest.mark.asyncio
+async def test_main_fails_fast_when_memory_initialize_fails(monkeypatch):
+    engine = FakeEngine()
+    setup_calls = []
+    migration_calls = []
+    listener_calls = []
+    queue_calls = []
+    graph_calls = []
+    error = RuntimeError("memory init failed")
+    monkeypatch.setattr(main_module, "_install_signal_handlers", lambda shutdown_event: None)
+
+    class FakeMemoryManager:
+        async def initialize(self):
+            raise error
+
+        async def destroy(self):
+            raise AssertionError("memory should not be destroyed after failed initialize")
+
+    class FakeQueue:
+        def __init__(self, handler, max_concurrency):
+            queue_calls.append(("init", handler, max_concurrency))
+
+        def start(self):
+            queue_calls.append("start")
+
+    async def run_listener(received_channel, message_queue=None):
+        listener_calls.append((received_channel, message_queue))
+
+    async def upgrade_database_schema():
+        migration_calls.append(True)
+
+    async def init_checkpointer():
+        graph_calls.append("init")
+
+    def create_channel():
+        raise AssertionError("channel should not be created")
+
+    monkeypatch.setattr(main_module, "MessageQueue", FakeQueue)
+    monkeypatch.setattr(main_module, "run_whatsapp_listener", run_listener)
+    monkeypatch.setattr(main_module.GraphStore, "init_langgraph_checkpointer", init_checkpointer)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        await main_module.main(
+            db_engine=engine,
+            channel_factory=create_channel,
+            memory_manager_factory=FakeMemoryManager,
+            setup_logging_func=lambda: setup_calls.append(True),
+            upgrade_database_schema_func=upgrade_database_schema,
+            shutdown_event=asyncio.Event(),
+        )
+
+    assert exc_info.value is error
+    assert setup_calls == [True]
+    assert migration_calls == [True]
+    assert graph_calls == ["init"]
+    assert queue_calls == []
+    assert listener_calls == []
+    assert engine.disposed is False
 
 
 @pytest.mark.asyncio
