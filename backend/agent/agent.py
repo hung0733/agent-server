@@ -67,6 +67,9 @@ class Agent:
         self.stm_trigger_token = SUMMARY_TRIGGER_TOKEN
         self.stm_summary_token = SUMMARY_USAGE_TOKEN
 
+        if Agent._graph is None:
+            Agent._graph = workflow.compile(checkpointer=GraphStore.checkpointer)
+
     @classmethod
     async def get_db_agent(
         cls, agent_id: str, session_id: str
@@ -86,9 +89,6 @@ class Agent:
         agent = cls(*(await cls.get_db_agent(agent_id, session_id)))
         await agent.prepare_sys_prompt()
         await agent.init_llm_models()
-
-        if cls._graph is None:
-            cls._graph = workflow.compile(checkpointer=GraphStore.checkpointer)
 
         return agent
 
