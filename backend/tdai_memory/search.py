@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import logging
 
-from tdai_memory.models import ConversationSearchParams, MemorySearchParams, SearchResult
-from tdai_memory.store.embedding import EmbeddingService
-from tdai_memory.store.postgres import PostgresStore
-from tdai_memory.store.qdrant import QdrantStore
+from .models import ConversationSearchParams, MemorySearchParams, SearchResult
+from .store.embedding import EmbeddingService
+from .store.postgres import PostgresStore
+from .store.qdrant import QdrantStore
 
 from .recall import _rrf_fusion
 

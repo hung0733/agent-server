@@ -5,6 +5,7 @@ import logging
 import os
 from datetime import datetime, timedelta, timezone
 
+from backend.i18n import t
 from ..config import MemoryConfig
 from ..store.postgres import PostgresStore
 
@@ -20,7 +21,7 @@ class MemoryCleaner:
 
     async def start(self) -> None:
         self._task = asyncio.create_task(self._clean_loop())
-        logger.info("MemoryCleaner started")
+        logger.info(t("tdai_memory.pipeline.memory_cleaner_started"))
 
     async def stop(self) -> None:
         if self._task is not None:
@@ -30,7 +31,7 @@ class MemoryCleaner:
             except asyncio.CancelledError:
                 pass
             self._task = None
-        logger.info("MemoryCleaner stopped")
+        logger.info(t("tdai_memory.pipeline.memory_cleaner_stopped"))
 
     async def _clean_loop(self) -> None:
         while True:
@@ -46,13 +47,13 @@ class MemoryCleaner:
             except asyncio.CancelledError:
                 raise
             except Exception:
-                logger.exception("MemoryCleaner loop error")
+                logger.exception(t("tdai_memory.pipeline.memory_cleaner_loop_error"))
                 await asyncio.sleep(3600)
 
     async def run_once(self) -> None:
         retention_days = self._config.capture.l0_l1_retention_days
         if retention_days <= 0:
-            logger.debug("MemoryCleaner: retention disabled, skipping")
+            logger.debug(t("tdai_memory.pipeline.memory_cleaner_retention_disabled"))
             return
 
         cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
@@ -62,6 +63,6 @@ class MemoryCleaner:
         l1_deleted = await self._postgres.delete_l1_expired(cutoff_iso)
 
         logger.info(
-            "MemoryCleaner run_once: deleted %d L0 records, %d L1 records (cutoff=%s)",
+            t("tdai_memory.pipeline.memory_cleaner_run_once_deleted"),
             l0_deleted, l1_deleted, cutoff_iso,
         )

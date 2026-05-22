@@ -13,7 +13,8 @@ from tenacity import (
     wait_exponential,
 )
 
-from tdai_memory.config import EmbeddingConfig
+from backend.i18n import t
+from ..config import EmbeddingConfig
 
 logger = logging.getLogger(__name__)
 
@@ -95,13 +96,13 @@ class EmbeddingService:
             error_msg = str(e).lower()
             if "maximum context length" in error_msg or "too long" in error_msg:
                 logger.warning(
-                    "Embedding text too long (%d chars), truncating by half and retrying",
+                    t("tdai_memory.store.embedding_text_too_long"),
                     len(text),
                 )
                 kwargs["input"] = text[: len(text) // 2]
                 response = await self._client.embeddings.create(**kwargs)
                 return response.data[0].embedding
-            raise EmbeddingNotReadyError(f"Embedding API bad request: {e}") from e
+            raise EmbeddingNotReadyError(t("tdai_memory.store.embedding_bad_request") % e) from e
 
     @retry(
         retry=retry_if_exception_type(
@@ -121,11 +122,11 @@ class EmbeddingService:
             error_msg = str(e).lower()
             if "maximum context length" in error_msg or "too long" in error_msg:
                 logger.warning(
-                    "Batch embedding too long, truncating each text by half and retrying"
+                    t("tdai_memory.store.batch_embedding_too_long")
                 )
                 kwargs["input"] = [t[: len(t) // 2] for t in texts]
                 response = await self._client.embeddings.create(**kwargs)
                 return [d.embedding for d in response.data]
             raise EmbeddingNotReadyError(
-                f"Embedding API bad request during batch: {e}"
+                t("tdai_memory.store.embedding_batch_bad_request") % e
             ) from e

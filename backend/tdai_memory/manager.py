@@ -8,9 +8,10 @@ from typing import Any, Callable
 
 import openai
 
-from tdai_memory.capture import perform_auto_capture
-from tdai_memory.config import MemoryConfig, normalize_config
-from tdai_memory.models import (
+from backend.i18n import t
+from .capture import perform_auto_capture
+from .config import MemoryConfig, normalize_config
+from .models import (
     CaptureResult,
     CompletedTurn,
     ConversationSearchParams,
@@ -18,15 +19,15 @@ from tdai_memory.models import (
     RecallResult,
     SearchResult,
 )
-from tdai_memory.offload.manager import OffloadManager
-from tdai_memory.pipeline.l3_profile import bootstrap_agent_profile, set_identity_seed
-from tdai_memory.pipeline.memory_cleaner import MemoryCleaner
-from tdai_memory.pipeline.scheduler import PipelineScheduler
-from tdai_memory.recall import perform_auto_recall
-from tdai_memory.search import search_conversations, search_memories
-from tdai_memory.store.embedding import EmbeddingService
-from tdai_memory.store.postgres import PostgresStore
-from tdai_memory.store.qdrant import QdrantStore
+from .offload.manager import OffloadManager
+from .pipeline.l3_profile import bootstrap_agent_profile, set_identity_seed
+from .pipeline.memory_cleaner import MemoryCleaner
+from .pipeline.scheduler import PipelineScheduler
+from .recall import perform_auto_recall
+from .search import search_conversations, search_memories
+from .store.embedding import EmbeddingService
+from .store.postgres import PostgresStore
+from .store.qdrant import QdrantStore
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ def _env_bool(name: str, value: str) -> bool:
         return True
     if normalized in ("0", "false", "no", "off"):
         return False
-    raise ValueError(f"{name} must be a boolean value")
+    raise ValueError(t("tdai_memory.manager.invalid_boolean_env") % name)
 
 
 def _env_optional_str(_: str, value: str) -> str | None:
@@ -374,7 +375,7 @@ class MemoryManager:
                 )
 
             self._initialized = True
-            logger.info("MemoryManager initialized")
+            logger.info(t("tdai_memory.manager.initialized"))
         finally:
             event.set()
 
@@ -406,7 +407,7 @@ class MemoryManager:
 
         self._initialized = False
         _init_cache.pop(self.config.data_dir, None)
-        logger.info("MemoryManager destroyed")
+        logger.info(t("tdai_memory.manager.destroyed"))
 
     async def recall(
         self, *, agent_id: str, user_text: str, session_key: str

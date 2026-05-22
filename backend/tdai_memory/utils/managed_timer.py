@@ -5,6 +5,7 @@ import logging
 from collections.abc import Callable
 from datetime import datetime, timezone
 
+from backend.i18n import t
 logger = logging.getLogger(__name__)
 
 
@@ -87,4 +88,4 @@ class ManagedTimer:
         except asyncio.CancelledError:
             pass
         except Exception:
-            logger.exception("ManagedTimer[%s] callback failed", self._name)
+            logger.exception(t("tdai_memory.utils.managed_timer_callback_failed"), self._name)

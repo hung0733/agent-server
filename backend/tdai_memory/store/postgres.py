@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 import asyncpg
 
+from backend.i18n import t
 from ..models import L0Record, MemoryRecord, PipelineSessionState
 
 logger = logging.getLogger(__name__)
@@ -78,7 +79,7 @@ class PostgresStore:
                 server_settings={"search_path": self._schema},
             )
         except Exception:
-            logger.exception("PostgresStore init failed, entering degraded mode")
+            logger.exception(t("tdai_memory.store.postgres_init_failed_degraded"))
             self._degraded = True
             return
 
@@ -167,11 +168,11 @@ class PostgresStore:
                     )
                 """)
         except Exception:
-            logger.exception("PostgresStore schema init failed, entering degraded mode")
+            logger.exception(t("tdai_memory.store.postgres_schema_init_failed_degraded"))
             self._degraded = True
             return
 
-        logger.info("PostgresStore initialized")
+        logger.info(t("tdai_memory.store.postgres_initialized"))
 
     async def close(self) -> None:
         if self._pool:
@@ -217,7 +218,7 @@ class PostgresStore:
                 )
             return True
         except Exception:
-            logger.exception("upsert_l0 failed for %s", record.id)
+            logger.exception(t("tdai_memory.store.upsert_l0_failed"), record.id)
             return False
 
     async def delete_l0(self, record_id: str) -> bool:
@@ -228,7 +229,7 @@ class PostgresStore:
                 await conn.execute("DELETE FROM l0_conversations WHERE id = $1", record_id)
             return True
         except Exception:
-            logger.exception("delete_l0 failed for %s", record_id)
+            logger.exception(t("tdai_memory.store.delete_l0_failed"), record_id)
             return False
 
     async def delete_l0_expired(self, cutoff_iso: str) -> int:
@@ -243,7 +244,7 @@ class PostgresStore:
                 parts = result.split()
                 return int(parts[-1]) if parts else 0
         except Exception:
-            logger.exception("delete_l0_expired failed")
+            logger.exception(t("tdai_memory.store.delete_l0_expired_failed"))
             return 0
 
     async def count_l0(self, agent_id: str) -> int:
@@ -256,7 +257,7 @@ class PostgresStore:
                 )
                 return row[0]
         except Exception:
-            logger.exception("count_l0 failed")
+            logger.exception(t("tdai_memory.store.count_l0_failed"))
             return 0
 
     async def query_l0_for_l1(
@@ -286,7 +287,7 @@ class PostgresStore:
                 )
                 return [dict(row) for row in rows]
         except Exception:
-            logger.exception("query_l0_for_l1 failed")
+            logger.exception(t("tdai_memory.store.query_l0_for_l1_failed"))
             return []
 
     async def get_all_l0_texts(self, agent_id: str) -> list[dict]:
@@ -299,7 +300,7 @@ class PostgresStore:
                 )
                 return [dict(row) for row in rows]
         except Exception:
-            logger.exception("get_all_l0_texts failed")
+            logger.exception(t("tdai_memory.store.get_all_l0_texts_failed"))
             return []
 
     async def upsert_l1(self, record: MemoryRecord) -> bool:
@@ -342,7 +343,7 @@ class PostgresStore:
                 )
             return True
         except Exception:
-            logger.exception("upsert_l1 failed for %s", record.id)
+            logger.exception(t("tdai_memory.store.upsert_l1_failed"), record.id)
             return False
 
     async def delete_l1(self, record_id: str) -> bool:
@@ -353,7 +354,7 @@ class PostgresStore:
                 await conn.execute("DELETE FROM l1_records WHERE id = $1", record_id)
             return True
         except Exception:
-            logger.exception("delete_l1 failed for %s", record_id)
+            logger.exception(t("tdai_memory.store.delete_l1_failed"), record_id)
             return False
 
     async def delete_l1_batch(self, record_ids: list[str]) -> bool:
@@ -364,7 +365,7 @@ class PostgresStore:
                 await conn.execute("DELETE FROM l1_records WHERE id = ANY($1)", record_ids)
             return True
         except Exception:
-            logger.exception("delete_l1_batch failed")
+            logger.exception(t("tdai_memory.store.delete_l1_batch_failed"))
             return False
 
     async def delete_l1_expired(self, cutoff_iso: str) -> int:
@@ -379,7 +380,7 @@ class PostgresStore:
                 parts = result.split()
                 return int(parts[-1]) if parts else 0
         except Exception:
-            logger.exception("delete_l1_expired failed")
+            logger.exception(t("tdai_memory.store.delete_l1_expired_failed"))
             return 0
 
     async def count_l1(self, agent_id: str) -> int:
@@ -392,7 +393,7 @@ class PostgresStore:
                 )
                 return row[0]
         except Exception:
-            logger.exception("count_l1 failed")
+            logger.exception(t("tdai_memory.store.count_l1_failed"))
             return 0
 
     async def query_l1_records(
@@ -457,7 +458,7 @@ class PostgresStore:
                     )
             return [dict(row) for row in rows]
         except Exception:
-            logger.exception("query_l1_records failed")
+            logger.exception(t("tdai_memory.store.query_l1_records_failed"))
             return []
 
     async def get_all_l1_texts(self, agent_id: str) -> list[dict]:
@@ -470,7 +471,7 @@ class PostgresStore:
                 )
                 return [dict(row) for row in rows]
         except Exception:
-            logger.exception("get_all_l1_texts failed")
+            logger.exception(t("tdai_memory.store.get_all_l1_texts_failed"))
             return []
 
     async def search_l0_fts(self, agent_id: str, query: str, limit: int = 10) -> list[dict]:
@@ -495,7 +496,7 @@ class PostgresStore:
                 )
                 return [dict(row) for row in rows]
         except Exception:
-            logger.exception("search_l0_fts failed")
+            logger.exception(t("tdai_memory.store.search_l0_fts_failed"))
             return []
 
     async def search_l1_fts(self, agent_id: str, query: str, limit: int = 10) -> list[dict]:
@@ -520,7 +521,7 @@ class PostgresStore:
                 )
                 return [dict(row) for row in rows]
         except Exception:
-            logger.exception("search_l1_fts failed")
+            logger.exception(t("tdai_memory.store.search_l1_fts_failed"))
             return []
 
     async def read_pipeline_state(
@@ -546,7 +547,7 @@ class PostgresStore:
                     return None
                 return PipelineSessionState(**dict(row))
         except Exception:
-            logger.exception("read_pipeline_state failed")
+            logger.exception(t("tdai_memory.store.read_pipeline_state_failed"))
             return None
 
     async def write_pipeline_state(self, state: PipelineSessionState) -> bool:
@@ -583,7 +584,7 @@ class PostgresStore:
                 )
             return True
         except Exception:
-            logger.exception("write_pipeline_state failed")
+            logger.exception(t("tdai_memory.store.write_pipeline_state_failed"))
             return False
 
     async def read_runner_state(
@@ -607,7 +608,7 @@ class PostgresStore:
                     return None
                 return dict(row)
         except Exception:
-            logger.exception("read_runner_state failed")
+            logger.exception(t("tdai_memory.store.read_runner_state_failed"))
             return None
 
     async def write_runner_state(
@@ -639,7 +640,7 @@ class PostgresStore:
                 )
             return True
         except Exception:
-            logger.exception("write_runner_state failed")
+            logger.exception(t("tdai_memory.store.write_runner_state_failed"))
             return False
 
     async def get_embedding_meta(self, agent_id: str, key: str) -> str | None:
@@ -654,7 +655,7 @@ class PostgresStore:
                 )
                 return row["value"] if row else None
         except Exception:
-            logger.exception("get_embedding_meta failed")
+            logger.exception(t("tdai_memory.store.get_embedding_meta_failed"))
             return None
 
     async def set_embedding_meta(self, agent_id: str, key: str, value: str) -> bool:
@@ -674,7 +675,7 @@ class PostgresStore:
                 )
             return True
         except Exception:
-            logger.exception("set_embedding_meta failed")
+            logger.exception(t("tdai_memory.store.set_embedding_meta_failed"))
             return False
 
     def get_capabilities(self) -> dict:
@@ -719,7 +720,7 @@ class PostgresStore:
                 )
                 return [dict(row) for row in rows]
         except Exception:
-            logger.exception("query_l0_grouped_by_session_id failed")
+            logger.exception(t("tdai_memory.store.query_l0_grouped_by_session_id_failed"))
             return []
 
     async def reindex_all(self, embed_fn, qdrant_store=None, on_progress=None) -> dict:

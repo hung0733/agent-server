@@ -6,6 +6,7 @@ import os
 
 from qdrant_client import models
 
+from backend.i18n import t
 from ..store.embedding import EmbeddingService
 from ..store.qdrant import QdrantStore
 
@@ -40,7 +41,7 @@ async def pull_profiles_to_local(agent_id: str, data_dir: str, qdrant: QdrantSto
             with_vectors=False,
         )
     except Exception:
-        logger.exception("Failed to pull profiles for agent %s", agent_id)
+        logger.exception(t("tdai_memory.pipeline.pull_profiles_failed"), agent_id)
         return []
 
     profiles: list[dict] = []
@@ -85,7 +86,7 @@ async def sync_local_profiles_to_store(
         try:
             vec = await embedding.embed(content)
         except Exception:
-            logger.exception("Failed to embed profile %s for agent %s", profile_type, agent_id)
+            logger.exception(t("tdai_memory.pipeline.embed_profile_failed"), profile_type, agent_id)
             continue
 
         profile_id = f"profile_{agent_id}_{profile_type}"
@@ -104,4 +105,4 @@ async def sync_local_profiles_to_store(
                 )
             ],
         )
-        logger.info("Synced profile %s for agent %s", profile_type, agent_id)
+        logger.info(t("tdai_memory.pipeline.profile_synced"), profile_type, agent_id)

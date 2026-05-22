@@ -6,6 +6,7 @@ import logging
 import httpx
 import openai
 
+from backend.i18n import t
 logger = logging.getLogger(__name__)
 
 _SUMMARIZE_PROMPT = (
@@ -57,7 +58,7 @@ class BackendClient:
                 resp = await client.get(f"{self._url}/health")
                 return resp.status_code == 200
         except Exception:
-            logger.debug("Backend health check failed", exc_info=True)
+            logger.debug(t("tdai_memory.offload.backend_health_check_failed"), exc_info=True)
             return False
 
     def _get_llm_client(self) -> openai.AsyncOpenAI:
@@ -91,7 +92,7 @@ class BackendClient:
             content = response.choices[0].message.content.strip()
             return json.loads(content)
         except Exception:
-            logger.warning("Backend summarize failed", exc_info=True)
+            logger.warning(t("tdai_memory.offload.backend_summarize_failed"), exc_info=True)
             return []
 
     async def judge_l15(self, entries: list[dict], model: str) -> dict:
@@ -110,7 +111,7 @@ class BackendClient:
             content = response.choices[0].message.content.strip()
             return json.loads(content)
         except Exception:
-            logger.warning("Backend judge_l15 failed", exc_info=True)
+            logger.warning(t("tdai_memory.offload.backend_judge_l15_failed"), exc_info=True)
             return {"boundaries": [], "labels": {}}
 
     async def generate_l2(self, entries: list[dict], model: str) -> dict:
@@ -141,7 +142,7 @@ class BackendClient:
                 mmd = content
             return {"mermaid": mmd.strip()}
         except Exception:
-            logger.warning("Backend generate_l2 failed", exc_info=True)
+            logger.warning(t("tdai_memory.offload.backend_generate_l2_failed"), exc_info=True)
             return {"mermaid": ""}
 
     async def generate_l4(self, entries: list[dict], model: str, focus: str = "") -> dict:
@@ -162,5 +163,5 @@ class BackendClient:
             content = response.choices[0].message.content.strip()
             return json.loads(content)
         except Exception:
-            logger.warning("Backend generate_l4 failed", exc_info=True)
+            logger.warning(t("tdai_memory.offload.backend_generate_l4_failed"), exc_info=True)
             return {"skills": [], "summary": ""}

@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 
 import openai
 
+from backend.i18n import t
 from ..config import MemoryConfig
 from ..store.postgres import PostgresStore
 from ..utils.sanitize import escape_xml_tags
@@ -266,9 +267,9 @@ async def set_identity_seed(agent_id: str, data_dir: str, content: str) -> None:
 
     written = await asyncio.to_thread(_write)
     if written:
-        logger.info("Identity seed written for agent %s", agent_id)
+        logger.info(t("tdai_memory.pipeline.identity_seed_written"), agent_id)
     else:
-        logger.debug("Identity seed skipped for agent %s (already exists)", agent_id)
+        logger.debug(t("tdai_memory.pipeline.identity_seed_skipped_exists"), agent_id)
 
 
 async def _load_scenes(data_dir: str, agent_id: str) -> tuple[list[dict], list[dict]]:
@@ -462,14 +463,14 @@ async def _generate_persona(
         changed_scenes_content=changed_scenes_content,
         trigger_reason=trigger_reason,
     )
-    logger.info("Generating persona for agent %s (mode=%s)", agent_id, mode)
+    logger.info(t("tdai_memory.pipeline.generating_persona"), agent_id, mode)
     result = await _call_llm(
         llm_client=llm_client,
         config=config,
         system_prompt=_PERSONA_SYSTEM,
         user_prompt=user_prompt,
     )
-    logger.info("Persona generation complete for agent %s", agent_id)
+    logger.info(t("tdai_memory.pipeline.persona_generation_complete"), agent_id)
     return result
 
 
@@ -491,14 +492,14 @@ async def _generate_soul(
         scene_contents=scene_contents,
         persona_text=persona_text,
     )
-    logger.info("Generating SOUL for agent %s (mode=%s)", agent_id, mode)
+    logger.info(t("tdai_memory.pipeline.generating_soul"), agent_id, mode)
     result = await _call_llm(
         llm_client=llm_client,
         config=config,
         system_prompt=_SOUL_SYSTEM,
         user_prompt=user_prompt,
     )
-    logger.info("SOUL generation complete for agent %s", agent_id)
+    logger.info(t("tdai_memory.pipeline.soul_generation_complete"), agent_id)
     return result
 
 
@@ -520,14 +521,14 @@ async def _generate_identity(
         scene_contents=scene_contents,
         soul_text=soul_text,
     )
-    logger.info("Generating IDENTITY for agent %s (mode=%s)", agent_id, mode)
+    logger.info(t("tdai_memory.pipeline.generating_identity"), agent_id, mode)
     result = await _call_llm(
         llm_client=llm_client,
         config=config,
         system_prompt=_IDENTITY_SYSTEM,
         user_prompt=user_prompt,
     )
-    logger.info("IDENTITY generation complete for agent %s", agent_id)
+    logger.info(t("tdai_memory.pipeline.identity_generation_complete"), agent_id)
     return result
 
 
@@ -542,7 +543,7 @@ async def run_l3_profile_generation(
 ) -> dict[str, bool]:
     index, scene_contents = await _load_scenes(data_dir, agent_id)
     if not index:
-        logger.info("No scene index found for agent %s, skipping L3", agent_id)
+        logger.info(t("tdai_memory.pipeline.no_scene_index_skip_l3"), agent_id)
         return {"persona": False, "soul": False, "identity": False}
 
     from .backup import BackupManager
@@ -609,12 +610,12 @@ async def run_l3_profile_generation(
         persona_text = _strip_scene_navigation(persona_text)
         persona_text = escape_xml_tags(persona_text)
         if not persona_text.strip():
-            logger.error("Persona body empty after stripping for agent %s", agent_id)
+            logger.error(t("tdai_memory.pipeline.persona_body_empty"), agent_id)
         else:
             await write_profile_file(agent_id, data_dir, "persona.md", persona_text, index)
             results["persona"] = True
     except Exception:
-        logger.exception("Failed to generate persona for agent %s", agent_id)
+        logger.exception(t("tdai_memory.pipeline.generate_persona_failed"), agent_id)
 
     try:
         soul_text = await _generate_soul(
@@ -631,7 +632,7 @@ async def run_l3_profile_generation(
         await write_profile_file(agent_id, data_dir, "SOUL.md", soul_text, index)
         results["soul"] = True
     except Exception:
-        logger.exception("Failed to generate SOUL for agent %s", agent_id)
+        logger.exception(t("tdai_memory.pipeline.generate_soul_failed"), agent_id)
 
     try:
         identity_text = await _generate_identity(
@@ -648,7 +649,7 @@ async def run_l3_profile_generation(
         await write_profile_file(agent_id, data_dir, "IDENTITY.md", identity_text, index)
         results["identity"] = True
     except Exception:
-        logger.exception("Failed to generate IDENTITY for agent %s", agent_id)
+        logger.exception(t("tdai_memory.pipeline.generate_identity_failed"), agent_id)
 
     if results["persona"] or results["soul"] or results["identity"]:
         _save_last_run_time(data_dir, agent_id)
@@ -677,7 +678,7 @@ async def bootstrap_agent_profile(
     prompt: str,
 ) -> dict[str, str]:
     model = config.persona.model or config.llm.model
-    logger.info("Bootstrapping agent profile for %s from prompt (%d chars)", agent_id, len(prompt))
+    logger.info(t("tdai_memory.pipeline.bootstrap_agent_profile"), agent_id, len(prompt))
 
     response = await llm_client.chat.completions.create(
         model=model,
@@ -699,10 +700,10 @@ async def bootstrap_agent_profile(
             try:
                 data = json.loads(match.group(0))
             except json.JSONDecodeError:
-                logger.error("Failed to parse bootstrap response for agent %s: %s", agent_id, raw[:200])
+                logger.error(t("tdai_memory.pipeline.parse_bootstrap_response_failed"), agent_id, raw[:200])
                 return {"soul": "", "identity": ""}
         else:
-            logger.error("No JSON found in bootstrap response for agent %s: %s", agent_id, raw[:200])
+            logger.error(t("tdai_memory.pipeline.no_json_bootstrap_response"), agent_id, raw[:200])
             return {"soul": "", "identity": ""}
 
     soul_text = data.get("soul", "").strip()
@@ -710,10 +711,10 @@ async def bootstrap_agent_profile(
 
     if soul_text:
         await _raw_write_file(agent_id, data_dir, "SOUL.md", soul_text)
-        logger.info("SOUL.md written for agent %s (%d chars)", agent_id, len(soul_text))
+        logger.info(t("tdai_memory.pipeline.soul_written"), agent_id, len(soul_text))
 
     if identity_text:
         await _raw_write_file(agent_id, data_dir, "IDENTITY.md", identity_text)
-        logger.info("IDENTITY.md written for agent %s (%d chars)", agent_id, len(identity_text))
+        logger.info(t("tdai_memory.pipeline.identity_written"), agent_id, len(identity_text))
 
     return {"soul": soul_text, "identity": identity_text}

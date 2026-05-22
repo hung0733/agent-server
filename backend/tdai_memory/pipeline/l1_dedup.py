@@ -7,6 +7,7 @@ from uuid import uuid4
 import openai
 from openai import AsyncOpenAI
 
+from backend.i18n import t
 from ..config import MemoryConfig
 from ..models import MemoryRecord
 from ..store.embedding import EmbeddingService
@@ -66,7 +67,7 @@ async def batch_dedup(
         try:
             candidates = await qdrant.search_l1(agent_id, emb, limit=top_k)
         except Exception:
-            logger.warning("Dedup search failed for mem %s, storing as new", new_mem.id)
+            logger.warning(t("tdai_memory.pipeline.dedup_search_failed_storing_new"), new_mem.id)
             continue
 
         if len(candidates) < 3:
@@ -81,7 +82,7 @@ async def batch_dedup(
                         merged[fid] = f
                 candidates = list(merged.values())
             except Exception:
-                logger.exception("FTS recall failed for %s", new_mem.id)
+                logger.exception(t("tdai_memory.pipeline.fts_recall_failed"), new_mem.id)
 
         high_conflicts = [c for c in candidates if c.get("score", 0) >= 0.7]
         if not high_conflicts:
@@ -132,7 +133,7 @@ async def batch_dedup(
         raw = response.choices[0].message.content or ""
         data = json.loads(raw)
     except Exception:
-        logger.exception("LLM batch dedup failed, falling back to simple dedup")
+        logger.exception(t("tdai_memory.pipeline.llm_batch_dedup_failed_simple"))
         return _simple_dedup(new_memories, conflict_batch, postgres, embedding, qdrant, agent_id)
 
     decisions = data.get("decisions", [])
@@ -171,7 +172,7 @@ async def batch_dedup(
                         postgres, embedding, qdrant, agent_id, new_mem
                     )
                 except Exception:
-                    logger.exception("Failed to update existing mem %s", tid)
+                    logger.exception(t("tdai_memory.pipeline.update_existing_mem_failed"), tid)
 
             if action == "merge":
                 new_mem.content = merged_content
@@ -229,7 +230,7 @@ async def _update_existing(
         emb = await embedding.embed(content)
         await qdrant.upsert_l1(record, emb)
     except Exception:
-        logger.exception("Failed to update embedding for dedup result %s", record_id)
+        logger.exception(t("tdai_memory.pipeline.update_dedup_embedding_failed"), record_id)
 
 
 def _simple_dedup(

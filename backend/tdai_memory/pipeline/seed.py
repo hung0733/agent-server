@@ -2,7 +2,8 @@ import logging
 import time
 from typing import Any
 
-from tdai_memory.models import CompletedTurn, ConversationMessage
+from backend.i18n import t
+from ..models import CompletedTurn, ConversationMessage
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,7 @@ async def seed_conversations(
                 if not isinstance(round_data, dict):
                     errors += 1
                     logger.warning(
-                        "Seed round %d in session '%s': not a dict, skipping",
+                        t("tdai_memory.pipeline.seed_round_not_dict"),
                         idx, session_key,
                     )
                     continue
@@ -40,8 +41,7 @@ async def seed_conversations(
                 if not (has_user and has_assistant):
                     errors += 1
                     logger.warning(
-                        "Seed round %d in session '%s': strict_round_role requires "
-                        "exactly one user + one assistant, skipping",
+                        t("tdai_memory.pipeline.seed_round_invalid_roles"),
                         idx, session_key,
                     )
                     continue
@@ -81,7 +81,7 @@ async def seed_conversations(
             except Exception:
                 errors += 1
                 logger.exception(
-                    "Seed capture failed for session '%s' round %d",
+                    t("tdai_memory.pipeline.seed_capture_failed"),
                     session_key, idx,
                 )
 

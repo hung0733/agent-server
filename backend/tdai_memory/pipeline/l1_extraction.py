@@ -8,11 +8,12 @@ from uuid import uuid4
 
 import openai
 
-from tdai_memory.config import MemoryConfig
-from tdai_memory.models import MemoryRecord
-from tdai_memory.store.embedding import EmbeddingService
-from tdai_memory.store.postgres import PostgresStore
-from tdai_memory.store.qdrant import QdrantStore
+from backend.i18n import t
+from ..config import MemoryConfig
+from ..models import MemoryRecord
+from ..store.embedding import EmbeddingService
+from ..store.postgres import PostgresStore
+from ..store.qdrant import QdrantStore
 
 from ..utils.sanitize import sanitize_json_for_parse, should_extract_l1
 
@@ -69,7 +70,7 @@ def _parse_llm_extraction_response(response_text: str) -> list[dict]:
     try:
         data = json.loads(text)
     except json.JSONDecodeError:
-        logger.warning("Failed to parse LLM JSON response")
+        logger.warning(t("tdai_memory.pipeline.failed_parse_llm_json"))
         return []
 
     if not isinstance(data, dict) or "memories" not in data:
@@ -126,14 +127,14 @@ async def run_l1_extraction(
     )
 
     if not l0_messages:
-        logger.debug("No L0 messages for agent=%s session=%s", agent_id, session_key)
+        logger.debug(t("tdai_memory.pipeline.no_l0_messages"), agent_id, session_key)
         return []
 
     l0_msgs_for_check = [
         {"role": m["role"], "content": m["message_text"]} for m in l0_messages
     ]
     if not should_extract_l1(l0_msgs_for_check):
-        logger.debug("L0 messages failed quality gate for agent=%s", agent_id)
+        logger.debug(t("tdai_memory.pipeline.l0_quality_gate_failed"), agent_id)
         return []
 
     split_idx = int(len(l0_messages) * 0.7)
@@ -179,7 +180,7 @@ async def run_l1_extraction(
     extracted = _parse_llm_extraction_response(response_text)
 
     if not extracted:
-        logger.debug("No memories extracted for agent=%s", agent_id)
+        logger.debug(t("tdai_memory.pipeline.no_memories_extracted"), agent_id)
         return []
 
     max_memories = config.extraction.max_memories_per_session
@@ -227,10 +228,10 @@ async def run_l1_extraction(
                 await qdrant.upsert_l1(mem, None)
             results.append(mem)
         except Exception:
-            logger.exception("Failed to upsert memory %s", mem.id)
+            logger.exception(t("tdai_memory.pipeline.upsert_memory_failed"), mem.id)
 
     logger.info(
-        "L1 extraction done: agent=%s session=%s raw=%d results=%d",
+        t("tdai_memory.pipeline.l1_extraction_done"),
         agent_id, session_key, len(extracted), len(results),
     )
     return results

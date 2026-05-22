@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 import openai
 from openai import AsyncOpenAI
 
+from backend.i18n import t
 from ..config import MemoryConfig
 from ..models import MemoryRecord
 from ..store.postgres import PostgresStore
@@ -250,7 +251,7 @@ async def run_l2_scene_grouping(
     try:
         data = json.loads(raw)
     except json.JSONDecodeError:
-        logger.error("Failed to parse L2 LLM response: %s", raw[:200])
+        logger.error(t("tdai_memory.pipeline.parse_l2_llm_response_failed"), raw[:200])
         return existing_index
 
     scenes = data.get("scenes", [])
@@ -329,7 +330,7 @@ async def run_l2_scene_grouping(
                         await postgres.upsert_l1(record)
                         break
             except Exception:
-                logger.exception("Failed to update scene_name for memory %s", mid)
+                logger.exception(t("tdai_memory.pipeline.update_scene_name_failed"), mid)
 
     for name in deleted_names:
         block_path = os.path.join(blocks_dir, f"{name}.md")
@@ -370,18 +371,18 @@ async def run_l2_scene_grouping(
             with open(persona_path, "w", encoding="utf-8") as f:
                 f.write(raw + "\n")
         except Exception:
-            logger.exception("Failed to update persona.md navigation")
+            logger.exception(t("tdai_memory.pipeline.update_persona_nav_failed"))
 
     await asyncio.to_thread(_update_persona_nav)
 
     if persona_update_request:
         logger.info(
-            "Persona update requested: %s",
+            t("tdai_memory.pipeline.persona_update_requested"),
             persona_update_request,
         )
 
     logger.info(
-        "L2 scene grouping done: agent=%s created=%d deleted=%d",
+        t("tdai_memory.pipeline.l2_scene_grouping_done"),
         agent_id,
         len(new_index),
         len(deleted_names),

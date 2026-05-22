@@ -5,6 +5,7 @@ import json
 import logging
 import os
 
+from backend.i18n import t
 logger = logging.getLogger(__name__)
 
 _OFFLOAD_JSONL = "offload.jsonl"
@@ -33,7 +34,7 @@ async def read_offload_entries(
                     if session_key is None or entry.get("session_key") == session_key:
                         entries.append(entry)
                 except json.JSONDecodeError:
-                    logger.warning("Skipping malformed JSONL line")
+                    logger.warning(t("tdai_memory.offload.skipping_malformed_jsonl_line"))
                     continue
 
         if limit > 0 and len(entries) > limit:

@@ -7,6 +7,7 @@ import os
 import time
 from datetime import datetime, timezone
 
+from backend.i18n import t
 logger = logging.getLogger(__name__)
 
 _OFFLOAD_JSONL = "offload.jsonl"
@@ -21,7 +22,7 @@ async def reclaim_offload_data(agent_id: str, data_dir: str, retention_days: int
     mmd_count = await _clean_old_mmds(agent_id, data_dir, retention_days)
 
     logger.info(
-        "Reclaimed offload data for agent=%s: expired_entries=%d, orphan_refs=%d, old_mmds=%d",
+        t("tdai_memory.offload.reclaimed_data"),
         agent_id,
         expired_count,
         orphan_count,

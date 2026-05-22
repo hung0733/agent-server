@@ -6,6 +6,7 @@ import os
 
 import openai
 
+from backend.i18n import t
 logger = logging.getLogger(__name__)
 
 
@@ -101,6 +102,6 @@ async def generate_mmd_summary(
         )
         return response.choices[0].message.content.strip()
     except Exception:
-        logger.warning("Failed to generate MMD summary", exc_info=True)
+        logger.warning(t("tdai_memory.offload.generate_mmd_summary_failed"), exc_info=True)
         first_line = mmd_text.strip().split("\n")[0][:120]
         return f"Flowchart: {first_line}..."

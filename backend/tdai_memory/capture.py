@@ -10,6 +10,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Awaitable, Callable
 
+from backend.i18n import t
 from .models import CaptureResult, CompletedTurn, ConversationMessage, L0Record
 from .store.embedding import EmbeddingService
 from .store.postgres import PostgresStore
@@ -38,7 +39,7 @@ async def _embed_l0_background(
             vec = await embedding.embed(record.message_text)
             await qdrant.upsert_l0(record, vec)
         except Exception:
-            logger.exception("Background L0 embed failed for %s", record.id)
+            logger.exception(t("tdai_memory.capture.background_l0_embed_failed"), record.id)
 
 
 def _strip_memories_block(text: str) -> str:
@@ -85,7 +86,7 @@ async def perform_auto_capture(
     t_start = time.monotonic()
 
     if postgres.is_degraded():
-        logger.warning("PostgresStore degraded, skipping capture")
+        logger.warning(t("tdai_memory.capture.postgres_degraded_skipping"))
         return CaptureResult()
 
     filtered_msgs = _apply_filtering(turn)
@@ -135,7 +136,7 @@ async def perform_auto_capture(
         try:
             await postgres.upsert_l0(record)
         except Exception:
-            logger.exception("upsert_l0 failed for %s", record.id)
+            logger.exception(t("tdai_memory.capture.upsert_l0_failed"), record.id)
 
     if len(records) > 0:
         try:
@@ -143,7 +144,7 @@ async def perform_auto_capture(
                 agent_id, turn.session_key, now_epoch_ms
             )
         except Exception:
-            logger.exception("write_runner_state failed for %s/%s", agent_id, turn.session_key)
+            logger.exception(t("tdai_memory.capture.write_runner_state_failed"), agent_id, turn.session_key)
 
     vectors_written = 0
     if qdrant is not None and embedding is not None and embedding.is_ready():
@@ -158,11 +159,11 @@ async def perform_auto_capture(
         try:
             await on_scheduler_notify(agent_id, turn.session_key)
         except Exception:
-            logger.exception("scheduler notify failed for %s/%s", agent_id, turn.session_key)
+            logger.exception(t("tdai_memory.capture.scheduler_notify_failed"), agent_id, turn.session_key)
 
     elapsed = (time.monotonic() - t_start) * 1000
     logger.debug(
-        "Capture done: agent=%s session=%s records=%d (%.0fms)",
+        t("tdai_memory.capture.done"),
         agent_id, turn.session_key, len(records), elapsed,
     )
     return CaptureResult(

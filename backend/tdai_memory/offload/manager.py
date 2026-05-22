@@ -10,7 +10,8 @@ from datetime import datetime, timezone
 
 import openai
 
-from tdai_memory.config import MemoryConfig
+from backend.i18n import t
+from ..config import MemoryConfig
 from .summarizer import summarize_tool_result
 
 logger = logging.getLogger(__name__)
@@ -206,7 +207,7 @@ class OffloadManager:
         call_data = pending.pop(tool_call_id, None)
         if call_data is None:
             logger.warning(
-                "No pending tool call found for tool_call_id=%s session=%s",
+                t("tdai_memory.offload.pending_tool_call_missing"),
                 tool_call_id,
                 session_key,
             )

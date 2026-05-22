@@ -4,7 +4,8 @@ import logging
 
 from qdrant_client import AsyncQdrantClient, models
 
-from tdai_memory.models import L0Record, MemoryRecord
+from backend.i18n import t
+from ..models import L0Record, MemoryRecord
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +57,7 @@ class QdrantStore:
                 field_schema=models.PayloadSchemaType.KEYWORD,
             )
 
-        logger.info("QdrantStore initialized")
+        logger.info(t("tdai_memory.store.qdrant_initialized"))
 
     async def close(self) -> None:
         await self.client.close()

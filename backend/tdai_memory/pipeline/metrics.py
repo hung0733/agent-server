@@ -4,6 +4,7 @@ import json
 import logging
 from datetime import datetime, timezone
 
+from backend.i18n import t
 logger = logging.getLogger(__name__)
 
 
@@ -15,4 +16,4 @@ def report_metric(event: str, data: dict, instance_id: str | None = None) -> Non
     if instance_id:
         payload["instance_id"] = instance_id
     payload.update(data)
-    logger.info("METRIC %s", json.dumps(payload, ensure_ascii=False))
+    logger.info(t("tdai_memory.pipeline.metric"), json.dumps(payload, ensure_ascii=False))

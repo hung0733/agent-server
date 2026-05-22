@@ -8,11 +8,12 @@ import re
 import time
 from datetime import datetime, timezone
 
-from tdai_memory.config import MemoryConfig
-from tdai_memory.models import RecalledMemory, RecallResult
-from tdai_memory.store.embedding import EmbeddingService
-from tdai_memory.store.postgres import PostgresStore
-from tdai_memory.store.qdrant import QdrantStore
+from backend.i18n import t
+from .config import MemoryConfig
+from .models import RecalledMemory, RecallResult
+from .store.embedding import EmbeddingService
+from .store.postgres import PostgresStore
+from .store.qdrant import QdrantStore
 
 logger = logging.getLogger(__name__)
 
@@ -169,7 +170,7 @@ async def _do_hybrid_recall(
         )
     except Exception:
         logger.warning(
-            "Embedding failed during hybrid recall, falling back to keyword-only"
+            t("tdai_memory.recall.hybrid_embedding_failed_keyword_only")
         )
         keyword_results = await postgres.search_l1_fts(
             agent_id, user_text, limit=limit
@@ -246,7 +247,7 @@ async def perform_auto_recall(
 
     sanitized = _sanitize_text(user_text)
     do_search = len(sanitized) >= 2
-    logger.debug("Recall sanitized %d→%d chars", len(user_text), len(sanitized))
+    logger.debug(t("tdai_memory.recall.sanitized"), len(user_text), len(sanitized))
 
     agent_dir = os.path.join(data_dir, agent_id)
 
@@ -280,7 +281,7 @@ async def perform_auto_recall(
             prepend_context = _build_prepend_context(recalled_memories)
         except asyncio.TimeoutError:
             logger.warning(
-                "Auto-recall timed out after %dms for agent=%s",
+                t("tdai_memory.recall.timeout"),
                 config.recall.timeout_ms,
                 agent_id,
             )
@@ -290,11 +291,11 @@ async def perform_auto_recall(
     )
 
     if not prepend_context and not append_system_context:
-        logger.debug("Recall empty result for agent=%s (%.0fms)", agent_id, (time.monotonic() - t_start) * 1000)
+        logger.debug(t("tdai_memory.recall.empty_result"), agent_id, (time.monotonic() - t_start) * 1000)
         return RecallResult()
 
     logger.debug(
-        "Recall done: agent=%s strategy=%s memories=%d persona=%s soul=%s identity=%s scene=%s (%.0fms)",
+        t("tdai_memory.recall.done"),
         agent_id, strategy, len(recalled_memories),
         "yes" if persona_content else "no",
         "yes" if soul_content else "no",
@@ -336,7 +337,7 @@ async def _perform_recall(
             return results, "embedding"
         except Exception:
             logger.warning(
-                "Embedding recall failed, falling back to keyword for agent=%s",
+                t("tdai_memory.recall.embedding_failed_keyword"),
                 agent_id,
             )
             results = await _do_keyword_recall(agent_id, sanitized_text, postgres, config)
@@ -349,7 +350,7 @@ async def _perform_recall(
         return results, "hybrid"
     except Exception:
         logger.warning(
-            "Hybrid recall failed, falling back to keyword for agent=%s",
+            t("tdai_memory.recall.hybrid_failed_keyword"),
             agent_id,
         )
         results = await _do_keyword_recall(agent_id, sanitized_text, postgres, config)

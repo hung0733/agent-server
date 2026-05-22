@@ -2,6 +2,7 @@ import json
 import logging
 import openai
 
+from backend.i18n import t
 logger = logging.getLogger(__name__)
 
 
@@ -57,5 +58,5 @@ async def build_mermaid_flowchart(
 
         return mmd.strip() or None
     except Exception:
-        logger.warning("Failed to build Mermaid flowchart", exc_info=True)
+        logger.warning(t("tdai_memory.offload.build_mermaid_flowchart_failed"), exc_info=True)
         return None

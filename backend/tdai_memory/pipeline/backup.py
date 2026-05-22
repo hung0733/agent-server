@@ -6,6 +6,7 @@ import os
 import shutil
 from datetime import datetime, timezone
 
+from backend.i18n import t
 logger = logging.getLogger(__name__)
 
 
@@ -33,7 +34,7 @@ class BackupManager:
 
         await asyncio.to_thread(_do)
         await asyncio.to_thread(self._prune, dest_dir, max_keep)
-        logger.debug("Backed up %s → %s (keep=%d)", src_path, dest, max_keep)
+        logger.debug(t("tdai_memory.pipeline.backed_up_file"), src_path, dest, max_keep)
 
     async def backup_directory(
         self, src_dir: str, category: str, tag: str, max_keep: int
@@ -54,7 +55,7 @@ class BackupManager:
 
         await asyncio.to_thread(_do)
         await asyncio.to_thread(self._prune, dest_dir, max_keep)
-        logger.debug("Backed up dir %s → %s (keep=%d)", src_dir, dest, max_keep)
+        logger.debug(t("tdai_memory.pipeline.backed_up_dir"), src_dir, dest, max_keep)
 
     def _prune(self, directory: str, max_keep: int) -> None:
         try:
@@ -70,4 +71,4 @@ class BackupManager:
                 else:
                     os.remove(old_path)
             except OSError:
-                logger.warning("Failed to prune backup: %s", old_path)
+                logger.warning(t("tdai_memory.pipeline.prune_backup_failed"), old_path)

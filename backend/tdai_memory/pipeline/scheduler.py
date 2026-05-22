@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 import openai
 
+from backend.i18n import t
 from ..config import MemoryConfig
 from ..models import PipelineSessionState
 from ..store.embedding import EmbeddingService
@@ -64,7 +65,7 @@ class SerialQueue:
             except asyncio.CancelledError:
                 return
             except Exception:
-                logger.exception("SerialQueue[%s] task failed", self._label)
+                logger.exception(t("tdai_memory.pipeline.serial_queue_task_failed"), self._label)
             finally:
                 self._queue.task_done()
 
@@ -119,7 +120,7 @@ class PipelineScheduler:
         for agent_id in {s.agent_id for s in self._sessions.values()}:
             self._maybe_schedule_l2(agent_id)
 
-        logger.info("PipelineScheduler started with %d restored sessions", len(self._sessions))
+        logger.info(t("tdai_memory.pipeline.scheduler_started"), len(self._sessions))
 
     async def stop(self) -> None:
         self._running = False
@@ -142,7 +143,7 @@ class PipelineScheduler:
         await self._l1_queue.stop()
         await self._l2_queue.stop()
         await self._l3_queue.stop()
-        logger.info("PipelineScheduler stopped")
+        logger.info(t("tdai_memory.pipeline.scheduler_stopped"))
 
     async def notify_conversation(self, agent_id: str, session_key: str) -> None:
         key = (agent_id, session_key)
@@ -150,7 +151,7 @@ class PipelineScheduler:
         try:
             state = await self._postgres.read_pipeline_state(agent_id, session_key)
         except Exception:
-            logger.exception("read_pipeline_state failed for %s/%s", agent_id, session_key)
+            logger.exception(t("tdai_memory.pipeline.read_pipeline_state_failed"), agent_id, session_key)
             return
 
         if state is None:
@@ -182,7 +183,7 @@ class PipelineScheduler:
         try:
             await self._postgres.write_pipeline_state(state)
         except Exception:
-            logger.exception("write_pipeline_state failed for %s/%s", agent_id, session_key)
+            logger.exception(t("tdai_memory.pipeline.write_pipeline_state_failed"), agent_id, session_key)
 
     async def flush_session(self, agent_id: str, session_key: str) -> None:
         key = (agent_id, session_key)
@@ -238,7 +239,7 @@ class PipelineScheduler:
         for attempt in range(1, L1_MAX_RETRIES + 1):
             try:
                 logger.info(
-                    "L1 extraction for agent=%s session=%s (attempt %d/%d, conv=%d)",
+                    t("tdai_memory.pipeline.l1_extraction_started"),
                     agent_id, session_key, attempt, L1_MAX_RETRIES, state.conversation_count,
                 )
                 await run_l1_extraction(
@@ -254,7 +255,7 @@ class PipelineScheduler:
                 break
             except Exception:
                 logger.exception(
-                    "L1 extraction failed for %s/%s (attempt %d)", agent_id, session_key, attempt
+                    t("tdai_memory.pipeline.l1_extraction_failed"), agent_id, session_key, attempt
                 )
                 if attempt < L1_MAX_RETRIES:
                     await asyncio.sleep(L1_RETRY_DELAY)
@@ -282,7 +283,7 @@ class PipelineScheduler:
         try:
             await self._postgres.write_pipeline_state(state)
         except Exception:
-            logger.exception("write_pipeline_state failed after L1 for %s/%s", agent_id, session_key)
+            logger.exception(t("tdai_memory.pipeline.write_pipeline_state_after_l1_failed"), agent_id, session_key)
 
         if state.l2_pending_l1_count >= L2_MIN_L1_COUNT:
             await self._l2_queue.enqueue(self._maybe_trigger_l2, agent_id)
@@ -332,7 +333,7 @@ class PipelineScheduler:
                 break
 
         if not has_active:
-            logger.info("Skipping L2 for agent=%s (no active sessions)", agent_id)
+            logger.info(t("tdai_memory.pipeline.skipping_l2_no_active_sessions"), agent_id)
             self._schedule_l2_max_interval(agent_id)
             return
 
@@ -341,7 +342,7 @@ class PipelineScheduler:
 
     async def _trigger_l2(self, agent_id: str) -> None:
         try:
-            logger.info("L2 scene grouping for agent=%s", agent_id)
+            logger.info(t("tdai_memory.pipeline.l2_scene_grouping_started"), agent_id)
             await run_l2_scene_grouping(
                 agent_id=agent_id,
                 postgres=self._postgres,
@@ -350,7 +351,7 @@ class PipelineScheduler:
                 data_dir=self._data_dir,
             )
         except Exception:
-            logger.exception("L2 scene grouping failed for agent=%s", agent_id)
+            logger.exception(t("tdai_memory.pipeline.l2_scene_grouping_failed"), agent_id)
             return
 
         for (aid, sk), state in list(self._sessions.items()):
@@ -381,11 +382,11 @@ class PipelineScheduler:
         try:
             l1_count = await self._postgres.count_l1(agent_id)
         except Exception:
-            logger.exception("count_l1 failed for agent=%s", agent_id)
+            logger.exception(t("tdai_memory.pipeline.count_l1_failed"), agent_id)
             l1_count = 0
 
         try:
-            logger.info("L3 profile generation for agent=%s", agent_id)
+            logger.info(t("tdai_memory.pipeline.l3_profile_generation_started"), agent_id)
             await run_l3_profile_generation(
                 agent_id=agent_id,
                 postgres=self._postgres,
@@ -395,7 +396,7 @@ class PipelineScheduler:
                 trigger_reason=f"Post-L2 trigger (L1 count: {l1_count})",
             )
         except Exception:
-            logger.exception("L3 profile generation failed for agent=%s", agent_id)
+            logger.exception(t("tdai_memory.pipeline.l3_profile_generation_failed"), agent_id)
         finally:
             self._l3_running = False
 
@@ -404,7 +405,7 @@ class PipelineScheduler:
             try:
                 await self._l3_queue.enqueue(self._trigger_l3, agent_id)
             except Exception:
-                logger.exception("Failed to enqueue pending L3 for agent=%s", agent_id)
+                logger.exception(t("tdai_memory.pipeline.enqueue_pending_l3_failed"), agent_id)
 
     async def _gc_loop(self) -> None:
         while self._running:
@@ -426,7 +427,7 @@ class PipelineScheduler:
                 self._sessions.pop(key, None)
 
             if stale_keys:
-                logger.info("GC: evicted %d stale sessions from memory", len(stale_keys))
+                logger.info(t("tdai_memory.pipeline.gc_evicted_stale_sessions"), len(stale_keys))
 
     def get_session_state(self, agent_id: str, session_key: str) -> PipelineSessionState | None:
         return self._sessions.get((agent_id, session_key))

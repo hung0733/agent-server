@@ -2,6 +2,7 @@ import json
 import logging
 import openai
 
+from backend.i18n import t
 logger = logging.getLogger(__name__)
 
 
@@ -44,6 +45,6 @@ async def summarize_tool_result(
         score = int(parsed["score"])
         return summary, min(max(score, 0), 10)
     except Exception:
-        logger.warning("Failed to summarize tool result for %s", tool_name, exc_info=True)
+        logger.warning(t("tdai_memory.offload.summarize_tool_result_failed"), tool_name, exc_info=True)
         fallback = truncated[:200] + ("..." if len(truncated) > 200 else "")
         return fallback, 10

@@ -6,6 +6,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Literal
 
+from backend.i18n import t
 logger = logging.getLogger(__name__)
 
 
@@ -216,7 +217,7 @@ def validate_config(config: MemoryConfig) -> str | None:
         return "Embedding API key required when dimensions configured"
 
     if config.offload.enabled and config.offload.mode == "backend" and not config.offload.backend_url:
-        logger.warning("offload.mode is 'backend' but no offload.backend_url configured")
+        logger.warning(t("tdai_memory.config.offload_backend_url_missing"))
 
     return None
 
