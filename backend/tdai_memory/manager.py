@@ -10,7 +10,7 @@ import openai
 
 from backend.i18n import t
 from .capture import perform_auto_capture
-from .config import MemoryConfig, normalize_config
+from .config import MemoryConfig, normalize_config, resolve_openai_api_key
 from .models import (
     CaptureResult,
     CompletedTurn,
@@ -333,7 +333,7 @@ class MemoryManager:
             else:
                 llm_cfg = self.config.llm
                 self._client = openai.AsyncOpenAI(
-                    api_key=llm_cfg.api_key,
+                    api_key=resolve_openai_api_key(llm_cfg.api_key, llm_cfg.base_url),
                     base_url=llm_cfg.base_url,
                     timeout=(
                         llm_cfg.timeout_ms / 1000.0

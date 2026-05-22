@@ -6,7 +6,7 @@ from pathlib import Path
 BACKEND_DIR = Path(__file__).resolve().parents[1] / "backend"
 sys.path.insert(0, str(BACKEND_DIR))
 
-from tdai_memory.config import MemoryConfig
+from tdai_memory.config import MemoryConfig, resolve_openai_api_key
 from tdai_memory.manager import MemoryManager
 
 
@@ -120,3 +120,9 @@ def test_from_env_ignores_legacy_memory_env_names(monkeypatch):
     assert config.llm.api_key == ""
     assert config.llm.model == "gpt-4o"
     assert config.offload.enabled is False
+
+
+def test_resolve_openai_api_key_allows_empty_key_for_custom_base_url():
+    assert resolve_openai_api_key("", "http://llm.example/v1") == "not-required"
+    assert resolve_openai_api_key("real-key", "http://llm.example/v1") == "real-key"
+    assert resolve_openai_api_key("", "https://api.openai.com/v1") == ""

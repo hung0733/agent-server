@@ -75,7 +75,12 @@ async def main(
     await upgrade_database_schema_func()
     await GraphStore.init_langgraph_checkpointer()
     memory_manager = memory_manager_factory()
-    await memory_manager.initialize()
+    try:
+        await memory_manager.initialize()
+    except Exception:
+        if GraphStore.pool is not None:
+            await GraphStore.pool.close()
+        raise
 
     channel = channel_factory()
     message_queue = MessageQueue(handle_agent_message, max_concurrency=2)

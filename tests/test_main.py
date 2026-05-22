@@ -162,12 +162,17 @@ async def test_main_fails_fast_when_memory_initialize_fails(monkeypatch):
     async def init_checkpointer():
         graph_calls.append("init")
 
+    class FakePool:
+        async def close(self):
+            graph_calls.append("close")
+
     def create_channel():
         raise AssertionError("channel should not be created")
 
     monkeypatch.setattr(main_module, "MessageQueue", FakeQueue)
     monkeypatch.setattr(main_module, "run_whatsapp_listener", run_listener)
     monkeypatch.setattr(main_module.GraphStore, "init_langgraph_checkpointer", init_checkpointer)
+    monkeypatch.setattr(main_module.GraphStore, "pool", FakePool())
 
     with pytest.raises(RuntimeError) as exc_info:
         await main_module.main(
@@ -182,7 +187,7 @@ async def test_main_fails_fast_when_memory_initialize_fails(monkeypatch):
     assert exc_info.value is error
     assert setup_calls == [True]
     assert migration_calls == [True]
-    assert graph_calls == ["init"]
+    assert graph_calls == ["init", "close"]
     assert queue_calls == []
     assert listener_calls == []
     assert engine.disposed is False

@@ -14,7 +14,7 @@ from tenacity import (
 )
 
 from backend.i18n import t
-from ..config import EmbeddingConfig
+from ..config import EmbeddingConfig, resolve_openai_api_key
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +47,7 @@ class EmbeddingService:
         self._max_input_chars = config.max_input_chars
         self._dimensions_override = config.dimensions
         self._client = AsyncOpenAI(
-            api_key=config.api_key,
+            api_key=resolve_openai_api_key(config.api_key, config.base_url),
             base_url=config.base_url,
             timeout=config.timeout_ms / 1000.0 if config.timeout_ms > 0 else 30.0,
         )

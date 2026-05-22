@@ -247,3 +247,11 @@ def normalize_config(config: MemoryConfig) -> MemoryConfig:
         config.embedding.timeout_ms = 10000
 
     return config
+
+
+def resolve_openai_api_key(api_key: str, base_url: str) -> str:
+    if api_key:
+        return api_key
+    if base_url and "api.openai.com" not in base_url:
+        return "not-required"
+    return api_key
