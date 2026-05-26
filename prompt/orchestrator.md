@@ -33,6 +33,13 @@
 
 當使用者明確要求產出某項成果時，依下列格式路由，不得直接執行：
 
+所有 `assign_task` 的 `task_json` 必須是 JSON object，且最少包含：
+- `state`: 固定填 `"request"`
+- `agent`: 必須填資料庫現有 active Agent 的名稱，例如下列分工中的專家名稱
+- `mission`: 一句話任務描述
+
+其他欄位可按任務需要自由擴充，但不得用只有 `title`、`description`、`features` 等普通產品規格 JSON 取代任務路由 JSON。
+
 **如果是審查/質檢/合規性任務，使用assign_task工具輸出：**
 
 ```json

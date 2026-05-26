@@ -16,6 +16,8 @@ from backend.graph.agent import workflow
 from backend.i18n import t
 from backend.llm.llm import LLMSet
 from backend.llm.types import StreamChunk
+from backend.tdai_memory.manager import MemoryManager
+from backend.tdai_memory.models import RecallResult
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +42,6 @@ class Agent:
     stm_summary_token: int
 
     models: LLMSet
-    sys_prompt: str
 
     def __init__(
         self,
@@ -87,7 +88,6 @@ class Agent:
     @classmethod
     async def get_agent(cls, agent_id: str, session_id: str):
         agent = cls(*(await cls.get_db_agent(agent_id, session_id)))
-        await agent.prepare_sys_prompt()
         await agent.init_llm_models()
 
         return agent
@@ -129,6 +129,20 @@ class Agent:
     ) -> AsyncGenerator[StreamChunk, None]:
 
         step_id: str = f"step-{uuid.uuid4()}"
+
+        ret: RecallResult = await MemoryManager.instance().recall(
+            agent_id=agent.agent_id,
+            session_key=agent.session_id,
+            user_text=message,
+        )
+
+        sys_prompt: str = ""
+        if ret.append_system_context:
+            sys_prompt = ret.append_system_context
+
+        if ret.prepend_context:
+            logger.info("Recall L1 Memory: " + ret.prepend_context)
+
         logger.debug(
             t("agent.proc_send_started"),
             step_id,
@@ -140,7 +154,7 @@ class Agent:
         config: RunnableConfig = GraphNode.prepare_chat_node_config(
             thread_id=agent.session_id,
             models=agent.models,
-            sys_prompt=agent.sys_prompt,
+            sys_prompt=sys_prompt,
             involves_secrets=False,
             think_mode=think_mode,
             step_id=step_id,
@@ -149,6 +163,8 @@ class Agent:
             recv_name=agent.recv_agent_name,
             stm_trigger_token=agent.stm_trigger_token,
             stm_summary_token=agent.stm_summary_token,
+            user_db_id=agent.user_db_id,
+            agent_id=agent.agent_id,
         )
 
         async for chunk in graph.astream(

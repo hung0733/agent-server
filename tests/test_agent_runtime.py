@@ -10,7 +10,14 @@ from langchain_core.messages import (
 )
 
 from backend.agent.agent import Agent
-from backend.graph.agent import assign_task_node, chat_node, graph, route_after_chat
+from backend.graph.agent import (
+    _get_allowed_agent_names,
+    assign_task_node,
+    chat_node,
+    graph,
+    route_after_assign_task,
+    route_after_chat,
+)
 from backend.graph.graph_node import GraphNode
 from backend.llm.types import StreamChunk
 
@@ -44,6 +51,14 @@ class FakeSandbox:
 
     async def run_command(self, command: str):
         return {"sandbox_id": self.sandbox_id, "result": {"exit_code": 0}}
+
+
+class FakeAsyncSessionContext:
+    async def __aenter__(self):
+        return object()
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return None
 
 
 @pytest.mark.asyncio
@@ -95,7 +110,9 @@ async def test_graph_routes_assign_task_tool_calls_through_assign_task_node():
                     tool_calls=[
                         {
                             "name": "assign_task",
-                            "args": {"task_json": '{"task":"demo"}'},
+                            "args": {
+                                "task_json": '{"state":"request","agent":"Hephaestus","mission":"整打卡 web"}'
+                            },
                             "id": "call-1",
                         }
                     ],
@@ -112,6 +129,7 @@ async def test_graph_routes_assign_task_tool_calls_through_assign_task_node():
         think_mode=False,
         args={},
     )
+    config["configurable"]["assign_task_allowed_agent_names"] = ["Hephaestus"]
 
     result = await graph.ainvoke(
         {"messages": [HumanMessage(content="hello")]},
@@ -131,17 +149,121 @@ async def test_assign_task_node_returns_tool_message():
         tool_calls=[
             {
                 "name": "assign_task",
-                "args": {"task_json": '{"task":"demo"}'},
+                "args": {
+                    "task_json": '{"state":"request","agent":"Hephaestus","mission":"整打卡 web"}'
+                },
                 "id": "call-1",
             }
         ],
     )
 
-    result = await assign_task_node({"messages": [message]}, {"configurable": {}})
+    result = await assign_task_node(
+        {"messages": [message]},
+        {"configurable": {"assign_task_allowed_agent_names": ["Hephaestus"]}},
+    )
 
     assert len(result["messages"]) == 1
     assert result["messages"][0].tool_call_id == "call-1"
     assert '"tool_call_id": "call-1"' in result["messages"][0].content
+    assert '"accepted": true' in result["messages"][0].content
+
+
+@pytest.mark.asyncio
+async def test_graph_retries_invalid_assign_task_payload():
+    class RetryingLLM:
+        def __init__(self):
+            self.calls = 0
+            self.bound_tools = None
+            self.messages = []
+
+        def bind_tools(self, tools):
+            self.bound_tools = tools
+            return self
+
+        async def ainvoke(self, messages):
+            self.calls += 1
+            self.messages.append(messages)
+            if self.calls == 1:
+                return AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": "assign_task",
+                            "args": {"task_json": '{"title":"wrong shape"}'},
+                            "id": "call-1",
+                        }
+                    ],
+                )
+
+            return AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "assign_task",
+                        "args": {
+                            "task_json": '{"state":"request","agent":"Hephaestus","mission":"整打卡 web"}'
+                        },
+                        "id": "call-2",
+                    }
+                ],
+            )
+
+    llm = RetryingLLM()
+    config = GraphNode.prepare_chat_node_config(
+        thread_id="session-1",
+        models=FakeModels(llm),
+        sys_prompt="",
+        involves_secrets=False,
+        think_mode=False,
+        args={},
+    )
+    config["configurable"]["assign_task_allowed_agent_names"] = ["Hephaestus"]
+
+    result = await graph.ainvoke(
+        {"messages": [HumanMessage(content="hello")]},
+        config=config,
+    )
+
+    assert llm.calls == 2
+    assert any(isinstance(message, ToolMessage) for message in llm.messages[1])
+    assert isinstance(result["messages"][-1], ToolMessage)
+    assert result["messages"][-1].tool_call_id == "call-2"
+    assert '"accepted": true' in result["messages"][-1].content
+
+
+def test_route_after_assign_task_stops_after_retry_limit():
+    rejected_messages = [
+        ToolMessage(content='{"accepted": false}', tool_call_id=f"call-{i}")
+        for i in range(3)
+    ]
+
+    assert route_after_assign_task({"messages": rejected_messages[:1]}) == "chat"
+    assert route_after_assign_task({"messages": rejected_messages[:2]}) == "chat"
+    assert route_after_assign_task({"messages": rejected_messages}) == "__end__"
+
+
+@pytest.mark.asyncio
+async def test_get_allowed_agent_names_loads_active_user_agent_names(monkeypatch):
+    class FakeAgentDAO:
+        def __init__(self, session):
+            self.session = session
+
+        async def list_by_user_id(self, user_id):
+            assert user_id == 123
+            return [
+                type("AgentObj", (), {"name": "Hephaestus", "is_active": True})(),
+                type("AgentObj", (), {"name": "OldAgent", "is_active": False})(),
+            ]
+
+    monkeypatch.setattr("backend.graph.agent.AgentDAO", FakeAgentDAO)
+    monkeypatch.setattr(
+        "backend.graph.agent.async_session_factory",
+        lambda: FakeAsyncSessionContext(),
+    )
+
+    names = await _get_allowed_agent_names({"configurable": {"user_db_id": 123}})
+
+    assert names == ["Hephaestus"]
 
 
 @pytest.mark.asyncio
@@ -244,6 +366,8 @@ class FakeGraph:
 
 
 class FakeAgent:
+    user_db_id = 1
+    agent_id = "agent-1"
     session_id = "session-1"
     models = object()
     sys_prompt = ""
@@ -273,7 +397,18 @@ async def test_prepare_sys_prompt_defaults_to_empty_string():
 
 
 @pytest.mark.asyncio
-async def test_agent_proc_send_streams_content_chunks():
+async def test_agent_proc_send_streams_content_chunks(monkeypatch):
+    recall_calls = []
+
+    class FakeMemoryManager:
+        async def recall(self, *, agent_id, session_key, user_text):
+            recall_calls.append((agent_id, session_key, user_text))
+
+    monkeypatch.setattr(
+        "backend.agent.agent.MemoryManager.instance",
+        lambda: FakeMemoryManager(),
+    )
+
     chunks = [
         chunk
         async for chunk in Agent.proc_send(
@@ -287,6 +422,7 @@ async def test_agent_proc_send_streams_content_chunks():
 
     assert [chunk.chunk_type for chunk in chunks] == ["content", "content", "text_end"]
     assert [chunk.content for chunk in chunks] == ["he", "llo", None]
+    assert recall_calls == [("agent-1", "session-1", "hello")]
 
 
 @pytest.mark.asyncio

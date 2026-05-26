@@ -20,8 +20,10 @@ def _replace_with_last(left: list, right: list):
     2. 保留該 HumanMessage 及其之後的所有消息
     3. 再加上新傳入的 right 消息
     """
-    if not right:
-        return left
+    if right:
+        for msg in right:
+            if isinstance(msg, HumanMessage):
+                return right
 
     # 從 left 中找到最後一個 HumanMessage 的位置
     keep_from = 0
@@ -31,6 +33,8 @@ def _replace_with_last(left: list, right: list):
             break
 
     # 保留最後一個 HumanMessage 開始的消息 + 新消息
+    if not right:
+        return left[keep_from:]
     return left[keep_from:] + right
 
 
@@ -196,6 +200,8 @@ class GraphNode:
         recv_name: str = "",
         stm_trigger_token: int = 0,
         stm_summary_token: int = 0,
+        user_db_id: int | None = None,
+        agent_id:str="",
     ) -> RunnableConfig:
         return {
             "configurable": {
@@ -210,5 +216,7 @@ class GraphNode:
                 "recv_name": recv_name,
                 "stm_trigger_token": stm_trigger_token,
                 "stm_summary_token": stm_summary_token,
+                "user_db_id": user_db_id,
+                "agent_id": agent_id,
             }
         }
