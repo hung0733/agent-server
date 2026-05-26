@@ -30,6 +30,7 @@ from backend.tdai_memory.models import (
 from backend.tdai_memory.offload.manager import OffloadManager
 from backend.tools.sandbox import SandboxTools
 from backend.tools.system import SystemTools, assign_task
+from backend.utils.tools import Tools
 
 logger = logging.getLogger(__name__)
 
@@ -53,8 +54,10 @@ async def chat_node(state: MessageState, config: RunnableConfig):
     messages: list[BaseMessage] = []
     if sys_prompt:
         messages.append(SystemMessage(content=sys_prompt))
+
     if timelines:
         messages += timelines
+
     if ltm_msg:
         messages.append(AIMessage(content=ltm_msg))
 
@@ -145,7 +148,9 @@ async def end_node(state: MessageState, config: RunnableConfig):
                 if tc.tool_call_id == message.tool_call_id:
                     tc.tool_result = str(message.content)
 
-    await MemoryManager.instance().capture(agent_id=agent_id, turn=turn)
+    Tools.start_async_task(
+        MemoryManager.instance().capture(agent_id=agent_id, turn=turn)
+    )
 
     return
 

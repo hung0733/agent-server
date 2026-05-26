@@ -23,6 +23,7 @@ from backend.queues.message_queue import MessageQueue
 from backend.queues.msg_queue_handle import handle_agent_message
 from backend.tdai_memory import MemoryManager
 from backend.tdai_memory.models import CompletedTurn, ConversationMessage
+from backend.utils.tools import Tools
 from logger_setup import setup_logging
 
 logger = logging.getLogger(__name__)
@@ -116,6 +117,7 @@ async def main(
         if shutdown_task in done:
             logger.info(t("main.shutdown_requested"))
     finally:
+        await Tools.wait_task_comp()
         listener_task.cancel()
         shutdown_task.cancel()
         with suppress(asyncio.CancelledError):

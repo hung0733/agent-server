@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime, timezone
 
 import asyncpg
@@ -10,6 +11,8 @@ from backend.i18n import t
 from ..models import L0Record, MemoryRecord, PipelineSessionState
 
 logger = logging.getLogger(__name__)
+
+_TSQUERY_TOKEN_RE = re.compile(r"\w+", re.UNICODE)
 
 L1_DB_COLUMNS = {
     "id",
@@ -57,9 +60,13 @@ def _jieba_segment(text: str) -> str:
 def _jieba_tsquery(query: str) -> str:
     import jieba
 
-    tokens = [t.strip() for t in jieba.cut_for_search(query) if t.strip()]
+    tokens = [
+        t.strip()
+        for t in jieba.cut_for_search(query)
+        if t.strip() and _TSQUERY_TOKEN_RE.fullmatch(t.strip())
+    ]
     if not tokens:
-        return query
+        return ""
     return " | ".join(tokens)
 
 

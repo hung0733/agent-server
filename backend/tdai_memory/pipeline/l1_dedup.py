@@ -137,7 +137,7 @@ async def batch_dedup(
         raw = response.choices[0].message.content or ""
         data = json.loads(raw)
     except Exception:
-        logger.exception("LLM batch dedup failed, storing all as new")
+        logger.exception(t("tdai_memory.pipeline.llm_batch_dedup_failed_storing_new"))
         return new_memories
 
     decisions = data.get("decisions", [])

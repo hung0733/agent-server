@@ -8,7 +8,7 @@ import pytest
 BACKEND_DIR = Path(__file__).resolve().parents[1] / "backend"
 sys.path.insert(0, str(BACKEND_DIR))
 
-from tdai_memory.store.postgres import PostgresStore
+from tdai_memory.store.postgres import PostgresStore, _jieba_tsquery
 
 
 class FakeConn:
@@ -62,3 +62,16 @@ async def test_read_pipeline_state_converts_datetime_fields_to_iso_strings():
     assert state.last_extraction_time == now.isoformat()
     assert state.last_extraction_updated_time == now.isoformat()
     assert state.l2_last_extraction_time == now.isoformat()
+
+
+def test_jieba_tsquery_drops_punctuation_tokens():
+    tsquery = _jieba_tsquery(
+        "用户接受由 Moss 作为指挥中心，将任务路由给 Hermes（创意）和 Prometheus（策略）。"
+    )
+
+    assert "Moss" in tsquery
+    assert "Hermes" in tsquery
+    assert "Prometheus" in tsquery
+    assert "（" not in tsquery
+    assert "）" not in tsquery
+    assert "。" not in tsquery

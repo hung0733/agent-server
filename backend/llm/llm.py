@@ -10,7 +10,7 @@ from backend.dao import AgentDAO, LlmEndpointDAO, LlmLevelDAO
 from backend.db.session import async_session_factory
 from backend.dto.llm_endpoint import LlmEndpointRead
 from backend.i18n import t
-from backend.utils.Tools import require_env
+from backend.utils.tools import Tools
 
 
 class LLMSet(BaseModel):
@@ -80,15 +80,15 @@ class LLMSet(BaseModel):
     @staticmethod
     def getRteModel() -> OpenAIClient:
         return OpenAIClient(
-            base_url=require_env("ROUTING_LLM_ENDPOINT"),
-            api_key=require_env("ROUTING_LLM_API_KEY"),
-            model=require_env("ROUTING_LLM_MODEL"),
+            base_url=Tools.require_env("ROUTING_LLM_ENDPOINT"),
+            api_key=Tools.require_env("ROUTING_LLM_API_KEY"),
+            model=Tools.require_env("ROUTING_LLM_MODEL"),
         )
 
     @staticmethod
     def getSysActModel() -> OpenAIClient:
         return OpenAIClient(
-            base_url=require_env("SYS_ACT_LLM_ENDPOINT"),
-            api_key=require_env("SYS_ACT_LLM_API_KEY"),
-            model=require_env("SYS_ACT_LLM_MODEL"),
+            base_url=Tools.require_env("SYS_ACT_LLM_ENDPOINT"),
+            api_key=Tools.require_env("SYS_ACT_LLM_API_KEY"),
+            model=Tools.require_env("SYS_ACT_LLM_MODEL"),
         )

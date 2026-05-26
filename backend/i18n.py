@@ -381,6 +381,7 @@ _MESSAGES["zh_HK"].update(
  'tdai_memory.pipeline.l2_scene_grouping_started': 'L2 scene grouping 開始：agent=%s',
  'tdai_memory.pipeline.l3_profile_generation_failed': 'L3 profile generation 失敗：agent=%s',
  'tdai_memory.pipeline.l3_profile_generation_started': 'L3 profile generation 開始：agent=%s',
+ 'tdai_memory.pipeline.llm_batch_dedup_failed_storing_new': 'LLM batch dedup 失敗，會全部當作新 memory 儲存',
  'tdai_memory.pipeline.llm_batch_dedup_failed_simple': 'LLM batch dedup 失敗，fallback 至 simple dedup',
  'tdai_memory.pipeline.memory_cleaner_loop_error': 'MemoryCleaner loop 發生錯誤',
  'tdai_memory.pipeline.memory_cleaner_retention_disabled': 'MemoryCleaner retention 已停用，略過清理',
@@ -462,7 +463,8 @@ _MESSAGES["zh_HK"].update(
  'tdai_memory.store.upsert_l1_failed': 'upsert_l1 失敗：record_id=%s',
  'tdai_memory.store.write_pipeline_state_failed': 'write_pipeline_state 失敗',
  'tdai_memory.store.write_runner_state_failed': 'write_runner_state 失敗',
- 'tdai_memory.utils.managed_timer_callback_failed': 'ManagedTimer[%s] callback 失敗'}
+ 'tdai_memory.utils.managed_timer_callback_failed': 'ManagedTimer[%s] callback 失敗',
+ 'utils.tools.waiting_pending_tasks': '正在等待 %d 個 pending task 完成'}
 )
 _MESSAGES["en"].update(
 {'tdai_memory.capture.background_l0_embed_failed': 'Background L0 embed failed for %s',
@@ -525,6 +527,7 @@ _MESSAGES["en"].update(
  'tdai_memory.pipeline.l2_scene_grouping_started': 'L2 scene grouping for agent=%s',
  'tdai_memory.pipeline.l3_profile_generation_failed': 'L3 profile generation failed for agent=%s',
  'tdai_memory.pipeline.l3_profile_generation_started': 'L3 profile generation for agent=%s',
+ 'tdai_memory.pipeline.llm_batch_dedup_failed_storing_new': 'LLM batch dedup failed, storing all as new',
  'tdai_memory.pipeline.llm_batch_dedup_failed_simple': 'LLM batch dedup failed, falling back to '
                                                        'simple dedup',
  'tdai_memory.pipeline.memory_cleaner_loop_error': 'MemoryCleaner loop error',
@@ -616,7 +619,8 @@ _MESSAGES["en"].update(
  'tdai_memory.store.upsert_l1_failed': 'upsert_l1 failed for %s',
  'tdai_memory.store.write_pipeline_state_failed': 'write_pipeline_state failed',
  'tdai_memory.store.write_runner_state_failed': 'write_runner_state failed',
- 'tdai_memory.utils.managed_timer_callback_failed': 'ManagedTimer[%s] callback failed'}
+ 'tdai_memory.utils.managed_timer_callback_failed': 'ManagedTimer[%s] callback failed',
+ 'utils.tools.waiting_pending_tasks': 'Waiting for %d pending tasks to complete'}
 )
 
 
