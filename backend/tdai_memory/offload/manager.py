@@ -229,12 +229,14 @@ class SessionRegistry:
 
 class OffloadManager:
     def __init__(
-        self, data_dir: str, llm_client: openai.AsyncOpenAI, config: MemoryConfig
+        self, data_dir: str, llm_client: openai.AsyncOpenAI, config: MemoryConfig,
+        pg_store: Any = None,
     ) -> None:
         self.data_dir = data_dir
         self.llm_client = llm_client
         self.config = config
         self._registry = SessionRegistry()
+        self._pg_store = pg_store
 
     async def initialize(self, agent_id: str) -> None:
         offload_dir = os.path.join(self.data_dir, agent_id, "offload")
@@ -268,6 +270,7 @@ class OffloadManager:
         result_text: str,
         conversation_messages: list[dict] | None = None,
         round_index: int = 0,
+        timestamp:int = 0
     ) -> None:
         state = await self._registry.get_or_create(
             session_key, agent_id, self.data_dir
@@ -283,6 +286,8 @@ class OffloadManager:
             return
 
         call_data["result_text"] = result_text
+        if timestamp > 0:
+            call_data["timestamp"] = timestamp
         if round_index > 0:
             call_data["round_index"] = round_index
         if conversation_messages:
@@ -354,9 +359,15 @@ class OffloadManager:
             for (tc_id, tool_name, tool_input, result_text), (summary, score) in zip(pairs, results):
                 ref_filename = f"{tc_id}.md"
                 ref_path = os.path.join(refs_dir, ref_filename)
-                entry_round_index = completed.get(tc_id, {}).get("round_index", 0)
+                entry_data = completed.get(tc_id, {})
+                entry_round_index = entry_data.get("round_index", 0)
+                entry_timestamp_epoch = entry_data.get("timestamp", 0)
+                if entry_timestamp_epoch > 0:
+                    entry_timestamp_iso = datetime.fromtimestamp(entry_timestamp_epoch / 1000.0, tz=timezone.utc).isoformat()
+                else:
+                    entry_timestamp_iso = timestamp
                 entry = OffloadEntry(
-                    timestamp=timestamp,
+                    timestamp=entry_timestamp_iso,
                     node_id=None,
                     tool_call=summary[:80] if summary else tool_name,
                     summary=summary,
@@ -375,6 +386,28 @@ class OffloadManager:
 
                 await asyncio.to_thread(_write)
                 state.mark_processed(tc_id)
+
+            if self._pg_store is not None:
+                from backend.tdai_memory.models import L0Record
+                for (tc_id, tool_name, tool_input, result_text), (summary, score) in zip(pairs, results):
+                    pg_entry_data = completed.get(tc_id, {})
+                    pg_timestamp_epoch = pg_entry_data.get("timestamp", 0)
+                    pg_iso = timestamp
+                    if pg_timestamp_epoch > 0:
+                        pg_iso = datetime.fromtimestamp(pg_timestamp_epoch / 1000.0, tz=timezone.utc).isoformat()
+                    tool_id = f"l0_tool_{tc_id}"
+                    try:
+                        await self._pg_store.upsert_l0(L0Record(
+                            id=tool_id,
+                            agent_id=agent_id,
+                            session_key=session_key,
+                            role="tool",
+                            message_text=summary or result_text,
+                            recorded_at=pg_iso,
+                            timestamp=pg_timestamp_epoch or int(datetime.fromisoformat(pg_iso).timestamp() * 1000),
+                        ))
+                    except Exception:
+                        pass
 
             for tc_id in completed:
                 pending.pop(tc_id, None)

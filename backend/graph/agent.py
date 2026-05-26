@@ -22,7 +22,11 @@ from backend.graph.graph_node import GraphNode, MessageState
 from backend.i18n import t
 from backend.llm.llm import LLMSet
 from backend.tdai_memory.manager import MemoryManager
-from backend.tdai_memory.models import CompletedTurn, ConversationMessage
+from backend.tdai_memory.models import (
+    CompletedTurn,
+    ConversationMessage,
+    ToolCallMessage,
+)
 from backend.tdai_memory.offload.manager import OffloadManager
 from backend.tools.sandbox import SandboxTools
 from backend.tools.system import SystemTools, assign_task
@@ -35,18 +39,29 @@ ASSIGN_TASK_MAX_RETRIES = 2
 
 async def chat_node(state: MessageState, config: RunnableConfig):
     models: LLMSet = config["configurable"]["models"]  # type: ignore
-    sys_prompt: str = config["configurable"]["sys_prompt"] or ""  # type: ignore
     involves_secrets: bool = config["configurable"]["involves_secrets"] or False  # type: ignore
     think_mode: bool = config["configurable"]["think_mode"] or False  # type: ignore
     args: Dict[str, Any] = config["configurable"]["args"] or {}  # type: ignore
+    sys_prompt: str = config["configurable"]["sys_prompt"] or ""  # type: ignore
+    ltm_msg: str = config["configurable"]["ltm_msg"] or ""  # type: ignore
+    timelines: list[BaseMessage] = config["configurable"]["timelines"] or ""  # type: ignore
 
     model_to_use: Optional[BaseChatModel] = models.getModel(2, involves_secrets)
     if not model_to_use:
         raise ValueError(t("graph.agent.llm_model_missing"))
 
-    messages: list[BaseMessage] = list(state["messages"])
+    messages: list[BaseMessage] = []
     if sys_prompt:
-        messages.insert(0, SystemMessage(content=sys_prompt))
+        messages.append(SystemMessage(content=sys_prompt))
+    if timelines:
+        messages += timelines
+    if ltm_msg:
+        messages.append(AIMessage(content=ltm_msg))
+
+    current_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S %Z")
+    messages.append(AIMessage(content="當前時間：%s" % current_time))
+
+    messages += list(state["messages"])
 
     logger.debug(
         t("graph.agent.chat_node_started"),
@@ -113,21 +128,22 @@ async def end_node(state: MessageState, config: RunnableConfig):
                     args = tc.get("args", {})
                     tool_call_id = str(tc.get("id") or "")
                     tool_name = str(tc.get("name") or "")
-                    await offload.record_tool_call(
-                        agent_id=agent_id,
-                        session_key=session_id,
-                        tool_call_id=tool_call_id,
-                        tool_name=tool_name,
-                        tool_input=args,
+                    turn.tool_call.append(
+                        ToolCallMessage(
+                            tool_call_id=tool_call_id,
+                            tool_name=tool_name,
+                            tool_input=args,
+                            tool_result="",
+                            timestamp=int(
+                                message.additional_kwargs["datetime"].timestamp() * 1000
+                            ),
+                        )
                     )
 
         elif isinstance(message, ToolMessage) and message.content:
-            await offload.record_tool_result(
-                agent_id=agent_id,
-                session_key=session_id,
-                tool_call_id=message.tool_call_id,
-                result_text=str(message.content),
-            )
+            for tc in turn.tool_call:
+                if tc.tool_call_id == message.tool_call_id:
+                    tc.tool_result = str(message.content)
 
     await MemoryManager.instance().capture(agent_id=agent_id, turn=turn)
 

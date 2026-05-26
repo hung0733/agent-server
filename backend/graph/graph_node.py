@@ -201,7 +201,9 @@ class GraphNode:
         stm_trigger_token: int = 0,
         stm_summary_token: int = 0,
         user_db_id: int | None = None,
-        agent_id:str="",
+        agent_id: str = "",
+        ltm_msg: str = "",
+        timelines: list[BaseMessage] = [],
     ) -> RunnableConfig:
         return {
             "configurable": {
@@ -218,5 +220,7 @@ class GraphNode:
                 "stm_summary_token": stm_summary_token,
                 "user_db_id": user_db_id,
                 "agent_id": agent_id,
+                "ltm_msg": ltm_msg,
+                "timelines": timelines,
             }
         }

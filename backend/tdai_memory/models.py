@@ -50,13 +50,19 @@ class MemoryRecord(BaseModel):
     agent_id: str
     content: str
     type: MemoryType
-    priority: int = Field(default=0, ge=-1, le=100, description="0-100, -1 = strict global instruction")
+    priority: int = Field(
+        default=0, ge=-1, le=100, description="0-100, -1 = strict global instruction"
+    )
     scene_name: str = ""
     source_message_ids: list[str] = Field(default_factory=list)
     metadata: EpisodicMetadata | dict[str, Any] = Field(default_factory=dict)
     timestamps: list[str] = Field(default_factory=list)
-    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    created_at: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+    updated_at: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
     session_key: str = ""
     session_id: str = ""
 
@@ -84,12 +90,21 @@ class ConversationMessage(BaseModel):
     timestamp: int
 
 
+class ToolCallMessage(BaseModel):
+    tool_call_id: str
+    tool_name: str
+    tool_input: dict
+    tool_result: str
+    timestamp: int
+
+
 class CompletedTurn(BaseModel):
     """A completed conversation turn passed to the capture hook."""
 
     user_text: str
     assistant_text: str
     messages: list[ConversationMessage] = Field(default_factory=list)
+    tool_call: list[ToolCallMessage] = Field(default_factory=list)
     session_key: str
     session_id: str = ""
     started_at: int | None = None  # epoch ms
@@ -105,7 +120,9 @@ class RecallResult(BaseModel):
     """Result from the auto-recall hook."""
 
     prepend_context: str | None = None  # Dynamic L1 memories for user prompt
-    append_system_context: str | None = None  # Stable persona + SOUL + IDENTITY + scenes
+    append_system_context: str | None = (
+        None  # Stable persona + SOUL + IDENTITY + scenes
+    )
     recalled_l1_memories: list[RecalledMemory] = Field(default_factory=list)
     recalled_l3_persona: str | None = None
     recalled_l3_soul: str | None = None

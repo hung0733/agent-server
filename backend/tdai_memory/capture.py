@@ -8,10 +8,17 @@ import re
 import time
 import uuid
 from datetime import datetime, timezone
-from typing import Awaitable, Callable
+from typing import Any, Awaitable, Callable, Optional
 
 from backend.i18n import t
-from .models import CaptureResult, CompletedTurn, ConversationMessage, L0Record
+from backend.tdai_memory.offload.manager import OffloadManager
+from .models import (
+    CaptureResult,
+    CompletedTurn,
+    ConversationMessage,
+    L0Record,
+    ToolCallMessage,
+)
 from .store.embedding import EmbeddingService
 from .store.postgres import PostgresStore
 from .store.qdrant import QdrantStore
@@ -50,7 +57,9 @@ async def _embed_l0_background(
             vec = await embedding.embed(record.message_text)
             await qdrant.upsert_l0(record, vec)
         except Exception:
-            logger.exception(t("tdai_memory.capture.background_l0_embed_failed"), record.id)
+            logger.exception(
+                t("tdai_memory.capture.background_l0_embed_failed"), record.id
+            )
 
 
 def _strip_memories_block(text: str) -> str:
@@ -72,7 +81,9 @@ def _apply_filtering(turn: CompletedTurn) -> list[ConversationMessage]:
 
     for i, msg in enumerate(messages):
         content = _strip_memories_block(msg.content)
-        content = re.sub(r'data:image\/[^;]+;base64,[A-Za-z0-9+/=]+', '[image]', content)
+        content = re.sub(
+            r"data:image\/[^;]+;base64,[A-Za-z0-9+/=]+", "[image]", content
+        )
         if msg.role == "assistant":
             content = strip_code_blocks(content)
         messages[i] = ConversationMessage(
@@ -94,6 +105,7 @@ async def perform_auto_capture(
     on_scheduler_notify: Callable[[str, str], Awaitable[None]] | None = None,
     bg_tasks: set[asyncio.Task] | None = None,
     plugin_start_timestamp: int = 0,
+    offload_manager: Optional[OffloadManager] = None,
 ) -> CaptureResult:
     t_start = time.monotonic()
 
@@ -134,6 +146,7 @@ async def perform_auto_capture(
         await asyncio.to_thread(_write_jsonl)
 
         records: list[L0Record] = []
+        msgs: list[dict] = []
         now_iso = datetime.now(timezone.utc).isoformat()
         for idx, msg in enumerate(filtered_msgs):
             content = msg.content
@@ -150,6 +163,7 @@ async def perform_auto_capture(
                 timestamp=msg.timestamp,
             )
             records.append(record)
+            msgs.append({"role": msg.role, "content": content})
 
         for record in records:
             try:
@@ -157,14 +171,46 @@ async def perform_auto_capture(
             except Exception:
                 logger.exception(t("tdai_memory.capture.upsert_l0_failed"), record.id)
 
+        if offload_manager is not None:
+            for tc in turn.tool_call:
+                try:
+                    await offload_manager.record_tool_call(
+                        agent_id=agent_id,
+                        session_key=turn.session_key,
+                        tool_call_id=tc.tool_call_id,
+                        tool_name=tc.tool_name,
+                        tool_input=tc.tool_input,
+                    )
+
+                    await offload_manager.record_tool_result(
+                        agent_id=agent_id,
+                        session_key=turn.session_key,
+                        tool_call_id=tc.tool_call_id,
+                        result_text=tc.tool_result,
+                        round_index=round_index,
+                        timestamp=tc.timestamp,
+                        conversation_messages=msgs,
+                    )
+                except Exception:
+                    logger.exception(
+                        t("tdai_memory.capture.offload_tool_message_failed"),
+                        tc.tool_call_id,
+                    )
+
         if len(records) > 0:
             try:
                 await postgres.write_runner_state(
-                    agent_id, turn.session_key, now_epoch_ms,
+                    agent_id,
+                    turn.session_key,
+                    now_epoch_ms,
                     round_index=round_index,
                 )
             except Exception:
-                logger.exception(t("tdai_memory.capture.write_runner_state_failed"), agent_id, turn.session_key)
+                logger.exception(
+                    t("tdai_memory.capture.write_runner_state_failed"),
+                    agent_id,
+                    turn.session_key,
+                )
 
     vectors_written = 0
     if qdrant is not None and embedding is not None and embedding.is_ready():
@@ -179,12 +225,19 @@ async def perform_auto_capture(
         try:
             await on_scheduler_notify(agent_id, turn.session_key)
         except Exception:
-            logger.exception(t("tdai_memory.capture.scheduler_notify_failed"), agent_id, turn.session_key)
+            logger.exception(
+                t("tdai_memory.capture.scheduler_notify_failed"),
+                agent_id,
+                turn.session_key,
+            )
 
     elapsed = (time.monotonic() - t_start) * 1000
     logger.debug(
         t("tdai_memory.capture.done"),
-        agent_id, turn.session_key, len(records), elapsed,
+        agent_id,
+        turn.session_key,
+        len(records),
+        elapsed,
     )
     return CaptureResult(
         scheduler_notified=on_scheduler_notify is not None,

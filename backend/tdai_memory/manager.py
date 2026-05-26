@@ -416,6 +416,7 @@ class MemoryManager:
                     data_dir=self.config.data_dir,
                     llm_client=self._client,
                     config=self.config,
+                    pg_store=self._postgres,
                 )
 
             self._initialized = True
@@ -488,6 +489,7 @@ class MemoryManager:
             ),
             bg_tasks=self._bg_tasks,
             plugin_start_timestamp=self._plugin_start_timestamp,
+            offload_manager=self._offload,
         )
 
     async def search_memories(

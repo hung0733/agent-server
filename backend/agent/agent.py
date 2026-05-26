@@ -4,7 +4,13 @@ import time
 from typing import Any, AsyncGenerator, Dict
 import uuid
 
-from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
+from langchain_core.messages import (
+    AIMessage,
+    AIMessageChunk,
+    BaseMessage,
+    HumanMessage,
+    ToolMessage,
+)
 from langchain_core.runnables import RunnableConfig
 
 from backend.dao import AgentSessionDAO
@@ -137,17 +143,26 @@ class Agent:
         )
 
         sys_prompt: str = ""
+        ltm_msg: str = ""
+        timelines: list[BaseMessage] = []
         if ret.append_system_context:
             sys_prompt = ret.append_system_context
 
         if ret.prepend_context:
-            logger.info("Recall L1 Memory: " + ret.prepend_context)
+            ltm_msg = ret.prepend_context
+
+        if ret.context_timeline:
+            for msg in ret.context_timeline:
+                if msg["type"] == "user":
+                    timelines.append(HumanMessage(content=msg["content"]))
+                elif msg["type"] == "assistant":
+                    timelines.append(AIMessage(content=msg["content"]))
 
         logger.debug(
             t("agent.proc_send_started"),
             step_id,
             agent.session_id,
-            len(message),
+            -len(message),
             think_mode,
         )
 
@@ -165,6 +180,8 @@ class Agent:
             stm_summary_token=agent.stm_summary_token,
             user_db_id=agent.user_db_id,
             agent_id=agent.agent_id,
+            ltm_msg=ltm_msg,
+            timelines=timelines,
         )
 
         async for chunk in graph.astream(
