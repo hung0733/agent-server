@@ -75,9 +75,6 @@ async def end_node(state: MessageState, config: RunnableConfig):
     messages: list[BaseMessage] = state["messages"]
     logger.info(messages)
 
-    memory: MemoryManager = MemoryManager.instance()
-    offload: OffloadManager = memory.get_offload()
-
     turn: CompletedTurn = CompletedTurn(
         session_key=session_id,
         user_text="",

@@ -12,6 +12,7 @@ async def summarize_tool_result(
     result_text: str,
     llm_client: openai.AsyncOpenAI,
     config,
+    conversation_messages: list[dict] | None = None,
 ) -> tuple[str, int]:
     truncated = result_text[:4000]
     system_prompt = (
@@ -23,11 +24,25 @@ async def summarize_tool_result(
         "Output ONLY a JSON object with no extra text:\n"
         '{"summary": "<concise summary>", "score": <integer 0-10>}'
     )
-    user_prompt = (
-        f"Tool: {tool_name}\n"
-        f"Arguments: {json.dumps(tool_input)}\n"
-        f"Result:\n{truncated}"
-    )
+
+    user_prompt_lines = []
+    if conversation_messages:
+        user_prompt_lines.append("## 对话上下文")
+        for msg in conversation_messages[-5:]:
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+            if role == "user":
+                user_prompt_lines.append(f"[user]: {content}")
+            elif role == "assistant":
+                user_prompt_lines.append(f"[assistant]: {content}")
+        user_prompt_lines.append("")
+
+    user_prompt_lines.append("## 工具调用")
+    user_prompt_lines.append(f"Tool: {tool_name}")
+    user_prompt_lines.append(f"Arguments: {json.dumps(tool_input)}")
+    user_prompt_lines.append("Result:")
+    user_prompt_lines.append(truncated)
+    user_prompt = "\n".join(user_prompt_lines)
 
     try:
         response = await llm_client.chat.completions.create(

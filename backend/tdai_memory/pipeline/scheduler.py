@@ -125,6 +125,15 @@ class PipelineScheduler:
     async def stop(self) -> None:
         self._running = False
 
+        flush_tasks = []
+        for key, state in list(self._sessions.items()):
+            if state.conversation_count > 0:
+                flush_tasks.append(
+                    self.flush_session(key[0], key[1])
+                )
+        if flush_tasks:
+            await asyncio.wait(flush_tasks, timeout=2.0)
+
         for key, task in list(self._idle_timers.items()):
             task.cancel()
         self._idle_timers.clear()
@@ -266,10 +275,18 @@ class PipelineScheduler:
         self._l1_queued.pop(key, None)
 
         now_iso = datetime.now(timezone.utc).isoformat()
+        pre_reset_count = state.conversation_count
         state.conversation_count = 0
         state.last_extraction_time = now_iso
         state.last_extraction_updated_time = now_iso
         state.l2_pending_l1_count = (state.l2_pending_l1_count or 0) + 1
+
+        report_metric("pipeline_l1_trigger", {
+            "agent_id": agent_id,
+            "session_key": session_key,
+            "conversation_count_before_reset": pre_reset_count,
+            "l1_extraction_time": now_iso,
+        })
 
         if self._config.pipeline.enable_warmup:
             if state.warmup_threshold > 0:
@@ -395,6 +412,11 @@ class PipelineScheduler:
                 data_dir=self._data_dir,
                 trigger_reason=f"Post-L2 trigger (L1 count: {l1_count})",
             )
+            report_metric("l3_persona_generation", {
+                "agent_id": agent_id,
+                "l1_count": l1_count,
+                "trigger_reason": f"Post-L2 trigger (L1 count: {l1_count})",
+            })
         except Exception:
             logger.exception(t("tdai_memory.pipeline.l3_profile_generation_failed"), agent_id)
         finally:

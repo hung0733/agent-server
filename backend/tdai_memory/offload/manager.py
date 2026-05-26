@@ -17,6 +17,65 @@ from .summarizer import summarize_tool_result
 logger = logging.getLogger(__name__)
 
 _OFFLOAD_JSONL = "offload.jsonl"
+
+_BATCH_SYSTEM_PROMPT = (
+    "You are a batch tool output summarizer. Given multiple tool calls and their results, "
+    "produce a concise summary and a replaceability score (0-10) for EACH tool call. "
+    "The replaceability score indicates how well the summary captures the essential information: "
+    "0 means the summary captures everything needed and the full result can be safely discarded; "
+    "10 means the summary is insufficient and the full result must be read.\n\n"
+    "Output ONLY a JSON array of objects, one per tool call:\n"
+    '[{"summary": "<concise summary>", "score": <integer 0-10>}, ...]'
+)
+
+
+async def _summarize_batch(
+    pairs: list[tuple[str, str, dict, str]],
+    llm_client: openai.AsyncOpenAI,
+    config,
+    conversation_messages: list[dict] | None = None,
+) -> list[tuple[str, int]]:
+    prompt_parts = []
+    if conversation_messages:
+        prompt_parts.append("## 对话上下文")
+        for msg in conversation_messages[-5:]:
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+            if role == "user":
+                prompt_parts.append(f"[user]: {content}")
+            elif role == "assistant":
+                prompt_parts.append(f"[assistant]: {content}")
+        prompt_parts.append("")
+
+    prompt_parts.append("## 工具调用批次")
+    for i, (tc_id, tool_name, tool_input, result_text) in enumerate(pairs):
+        truncated = result_text[:3000]
+        prompt_parts.append(f"---")
+        prompt_parts.append(f"Pair {i + 1}:")
+        prompt_parts.append(f"Tool: {tool_name}")
+        prompt_parts.append(f"Arguments: {json.dumps(tool_input)}")
+        prompt_parts.append(f"Result:\n{truncated}")
+
+    user_prompt = "\n".join(prompt_parts)
+
+    response = await llm_client.chat.completions.create(
+        model=config.llm.model,
+        messages=[
+            {"role": "system", "content": _BATCH_SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
+        ],
+        temperature=0.0,
+        timeout=config.llm.timeout_ms / 1000.0,
+    )
+    content = response.choices[0].message.content.strip()
+    parsed = json.loads(content)
+    results: list[tuple[str, int]] = []
+    for item in parsed:
+        summary = item["summary"]
+        score = min(max(int(item["score"]), 0), 10)
+        results.append((summary, score))
+    return results
+
 _REFS_DIR = "refs"
 _MMDS_DIR = "mmds"
 _STATE_FILE = "state.json"
@@ -33,6 +92,7 @@ class OffloadEntry:
     result_ref: str
     tool_call_id: str
     session_key: str = ""
+    round_index: int = 0
     score: int = 0
 
 
@@ -51,6 +111,9 @@ class OffloadStateManager:
         self._confirmed_offload_ids: set[str] = set()
         self._deleted_offload_ids: set[str] = set()
         self._consecutive_null_count: int = 0
+        self._pending_count: int = 0
+        self._flush_task: asyncio.Task | None = None
+        self._pending_messages: list[dict] | None = None
 
     def load_state(self, agent_id: str, data_dir: str) -> None:
         state_path = os.path.join(data_dir, agent_id, "offload", _STATE_FILE)
@@ -198,13 +261,19 @@ class OffloadManager:
         state.add_tool_pair(tool_call_id, tool_name, tool_input, "")
 
     async def record_tool_result(
-        self, agent_id: str, session_key: str, tool_call_id: str, result_text: str
+        self,
+        agent_id: str,
+        session_key: str,
+        tool_call_id: str,
+        result_text: str,
+        conversation_messages: list[dict] | None = None,
+        round_index: int = 0,
     ) -> None:
         state = await self._registry.get_or_create(
             session_key, agent_id, self.data_dir
         )
         pending = state.get_pending_pairs()
-        call_data = pending.pop(tool_call_id, None)
+        call_data = pending.get(tool_call_id)
         if call_data is None:
             logger.warning(
                 t("tdai_memory.offload.pending_tool_call_missing"),
@@ -213,39 +282,134 @@ class OffloadManager:
             )
             return
 
-        tool_name = call_data["tool_name"]
-        tool_input = call_data["tool_input"]
+        call_data["result_text"] = result_text
+        if round_index > 0:
+            call_data["round_index"] = round_index
+        if conversation_messages:
+            state._pending_messages = conversation_messages
+        state._pending_count += 1
 
-        summary, score = await summarize_tool_result(
-            tool_name, tool_input, result_text, self.llm_client, self.config
-        )
+        if state._pending_count >= 5:
+            if state._flush_task and not state._flush_task.done():
+                state._flush_task.cancel()
+            await self._flush_pending(agent_id, session_key, state)
+        else:
+            if state._flush_task is None or state._flush_task.done():
+                state._flush_task = asyncio.create_task(
+                    self._flush_timer_task(agent_id, session_key, state)
+                )
 
+    async def _flush_timer_task(
+        self, agent_id: str, session_key: str, state: OffloadStateManager
+    ) -> None:
+        try:
+            await asyncio.sleep(5)
+        except asyncio.CancelledError:
+            return
+        await self._flush_pending(agent_id, session_key, state)
+
+    async def _flush_pending(
+        self, agent_id: str, session_key: str, state: OffloadStateManager
+    ) -> None:
+        async with state._l1_mutex:
+            pending = state.get_pending_pairs()
+            completed = {k: v for k, v in pending.items() if v.get("result_text", "")}
+            if not completed:
+                return
+
+            conversation_msgs = state._pending_messages
+            pairs = [
+                (tc_id, v["tool_name"], v["tool_input"], v["result_text"])
+                for tc_id, v in completed.items()
+            ]
+
+            results: list[tuple[str, int]] = []
+            for attempt in range(3):
+                try:
+                    results = await _summarize_batch(
+                        pairs, self.llm_client, self.config, conversation_msgs
+                    )
+                    break
+                except Exception:
+                    delay = 2 ** attempt
+                    logger.warning(
+                        t("tdai_memory.offload.batch_summarize_retry"),
+                        attempt + 1,
+                        delay,
+                        exc_info=True,
+                    )
+                    if attempt < 2:
+                        await asyncio.sleep(delay)
+                    else:
+                        results = [
+                            (v["result_text"][:200], 10)
+                            for _, _, _, v in pairs
+                        ]
+
+            offload_dir = os.path.join(self.data_dir, agent_id, "offload")
+            refs_dir = os.path.join(offload_dir, _REFS_DIR)
+            jsonl_path = os.path.join(offload_dir, _OFFLOAD_JSONL)
+            timestamp = datetime.now(timezone.utc).isoformat()
+
+            for (tc_id, tool_name, tool_input, result_text), (summary, score) in zip(pairs, results):
+                ref_filename = f"{tc_id}.md"
+                ref_path = os.path.join(refs_dir, ref_filename)
+                entry_round_index = completed.get(tc_id, {}).get("round_index", 0)
+                entry = OffloadEntry(
+                    timestamp=timestamp,
+                    node_id=None,
+                    tool_call=summary[:80] if summary else tool_name,
+                    summary=summary,
+                    result_ref=os.path.join(_REFS_DIR, ref_filename),
+                    tool_call_id=tc_id,
+                    session_key=session_key,
+                    round_index=entry_round_index,
+                    score=score,
+                )
+
+                def _write(ep=ref_path, rfn=ref_filename, tn=tool_name, rt=result_text, ent=entry, jp=jsonl_path):
+                    with open(ep, "w") as f:
+                        f.write(f"# Tool: {tn}\n\n{rt}")
+                    with open(jp, "a") as f:
+                        f.write(json.dumps(ent.__dict__, ensure_ascii=False) + "\n")
+
+                await asyncio.to_thread(_write)
+                state.mark_processed(tc_id)
+
+            for tc_id in completed:
+                pending.pop(tc_id, None)
+            state._pending_count = 0
+            state._pending_messages = None
+            state._flush_task = None
+
+    async def get_offload_entries(
+        self,
+        agent_id: str,
+        session_key: str | None = None,
+        limit: int = 100,
+    ) -> list[dict]:
         offload_dir = os.path.join(self.data_dir, agent_id, "offload")
-        refs_dir = os.path.join(offload_dir, _REFS_DIR)
-        ref_filename = f"{tool_call_id}.md"
-        ref_path = os.path.join(refs_dir, ref_filename)
         jsonl_path = os.path.join(offload_dir, _OFFLOAD_JSONL)
 
-        timestamp = datetime.now(timezone.utc).isoformat()
-        entry = OffloadEntry(
-            timestamp=timestamp,
-            node_id=None,
-            tool_call=summary[:80] if summary else tool_name,
-            summary=summary,
-            result_ref=os.path.join(_REFS_DIR, ref_filename),
-            tool_call_id=tool_call_id,
-            session_key=session_key,
-            score=score,
-        )
+        def _read():
+            if not os.path.exists(jsonl_path):
+                return []
+            entries: list[dict] = []
+            with open(jsonl_path, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        entry = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if session_key is None or entry.get("session_key") == session_key:
+                        entries.append(entry)
+            entries.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+            return entries[:limit]
 
-        def _write():
-            with open(ref_path, "w") as f:
-                f.write(f"# Tool: {tool_name}\n\n{result_text}")
-            with open(jsonl_path, "a") as f:
-                f.write(json.dumps(entry.__dict__, ensure_ascii=False) + "\n")
-
-        await asyncio.to_thread(_write)
-        state.mark_processed(tool_call_id)
+        return await asyncio.to_thread(_read)
 
     async def get_offload_context(
         self, agent_id: str, session_key: str = "", compression_level: str = "mild"
@@ -360,3 +524,176 @@ class OffloadManager:
             self.config,
             target_tokens,
         )
+
+    async def judge_task_boundary(
+        self, agent_id: str, session_key: str, recent_messages: list[dict]
+    ) -> dict:
+        offload_dir = os.path.join(self.data_dir, agent_id, "offload")
+        jsonl_path = os.path.join(offload_dir, _OFFLOAD_JSONL)
+
+        def _read():
+            if not os.path.exists(jsonl_path):
+                return []
+            entries = []
+            with open(jsonl_path, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        entries.append(json.loads(line))
+            return entries[-20:]
+
+        recent_entries = await asyncio.to_thread(_read)
+
+        system_prompt = (
+            "Given these recent messages and offload entries, determine if the current task "
+            "is completed, continuing, or starting a new task. "
+            "Output ONLY a JSON object with no extra text:\n"
+            '{"status": "completed"|"continuing"|"new_task", "reason": "..."}'
+        )
+
+        user_data = {
+            "messages": recent_messages,
+            "recent_tool_executions": recent_entries,
+        }
+        user_prompt = json.dumps(user_data, ensure_ascii=False, indent=2)
+
+        try:
+            response = await self.llm_client.chat.completions.create(
+                model=self.config.llm.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.0,
+                timeout=self.config.llm.timeout_ms / 1000.0,
+            )
+            content = response.choices[0].message.content.strip()
+            result = json.loads(content)
+        except Exception:
+            logger.warning(t("tdai_memory.offload.task_boundary_judge_failed"), exc_info=True)
+            return {"status": "continuing", "reason": "error"}
+
+        status = result.get("status", "continuing")
+        if status in ("completed", "new_task"):
+            state = await self._registry.resolve_if_allowed(session_key)
+            if state:
+                state.mmd_counter += 1
+                state.active_mmd_id = f"mmd_{state.mmd_counter}"
+                state.active_mmd_file = f"{state.active_mmd_id}.mmd"
+                state._l15_boundaries.append(datetime.now(timezone.utc).isoformat())
+                await asyncio.to_thread(state.save_state, agent_id, self.data_dir)
+
+        return result
+
+    async def create_skill(
+        self, agent_id: str, mmd_name: str, focus: str = ""
+    ) -> str | None:
+        import re
+
+        offload_dir = os.path.join(self.data_dir, agent_id, "offload")
+        mmd_path = os.path.join(offload_dir, _MMDS_DIR, f"{mmd_name}.mmd")
+
+        def _read_mmd():
+            if not os.path.exists(mmd_path):
+                return None
+            with open(mmd_path, "r") as f:
+                return f.read()
+
+        mmd_content = await asyncio.to_thread(_read_mmd)
+        if not mmd_content:
+            logger.warning(t("tdai_memory.offload.mmd_not_found"), mmd_name)
+            return None
+
+        node_ids = re.findall(r"\bN\d+\b", mmd_content)
+        if not node_ids:
+            return None
+
+        jsonl_path = os.path.join(offload_dir, _OFFLOAD_JSONL)
+
+        def _read_offload():
+            if not os.path.exists(jsonl_path):
+                return []
+            entries = []
+            with open(jsonl_path, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        entries.append(json.loads(line))
+            return entries
+
+        all_entries = await asyncio.to_thread(_read_offload)
+        filtered = [e for e in all_entries if e.get("node_id") in node_ids]
+        if not filtered:
+            return None
+
+        system_prompt = (
+            "Generate a reusable skill from these tool interactions. "
+            "A skill is a reusable pattern that can be applied to similar situations. "
+            "Include the tool calls, their purpose, parameters, and how to interpret results. "
+            "Format as a SKILL.md file with clear sections: purpose, prerequisites, steps, and examples."
+        )
+        entries_json = json.dumps(filtered, ensure_ascii=False, indent=2)
+        focus_hint = f"\nFocus area: {focus}" if focus else ""
+        user_prompt = f"Tool interactions:{focus_hint}\n{entries_json}"
+
+        try:
+            response = await self.llm_client.chat.completions.create(
+                model=self.config.llm.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.0,
+                timeout=self.config.llm.timeout_ms / 1000.0,
+            )
+            skill_content = response.choices[0].message.content
+        except Exception:
+            logger.warning(t("tdai_memory.offload.skill_generation_failed"), mmd_name, exc_info=True)
+            return None
+
+        skill_name = mmd_name
+        skill_dir = os.path.join(self.data_dir, agent_id, "offload", "skills", skill_name)
+        skill_path = os.path.join(skill_dir, "SKILL.md")
+
+        def _write_skill():
+            os.makedirs(skill_dir, exist_ok=True)
+            with open(skill_path, "w") as f:
+                f.write(skill_content)
+
+        await asyncio.to_thread(_write_skill)
+
+        logger.info(t("tdai_memory.offload.skill_created"), skill_name, agent_id)
+        return skill_content
+
+    def on_before_tool_call(
+        self, agent_id: str, session_key: str, tool_call_id: str,
+        tool_name: str, tool_input: dict,
+    ) -> None:
+        self.record_tool_call(agent_id, session_key, tool_call_id, tool_name, tool_input)
+
+    async def on_after_tool_call(
+        self, agent_id: str, session_key: str, tool_call_id: str,
+        result_text: str, conversation_messages: list[dict] | None = None,
+    ) -> None:
+        await self.record_tool_result(
+            agent_id, session_key, tool_call_id, result_text, conversation_messages
+        )
+
+    async def on_before_prompt_build(
+        self, agent_id: str, session_key: str,
+        current_messages: list[dict], target_tokens: int | None = None,
+    ) -> list[dict]:
+        state = await self._registry.resolve_if_allowed(session_key)
+        if state:
+            pending = state.get_pending_pairs()
+            if pending:
+                has_completed = any(
+                    v.get("result_text", "") for v in pending.values()
+                )
+                if has_completed:
+                    await self._flush_pending(agent_id, session_key, state)
+        if target_tokens:
+            return await self.compress_context(
+                agent_id, session_key, current_messages, target_tokens
+            )
+        return current_messages

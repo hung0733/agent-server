@@ -19,6 +19,17 @@ from .utils.sanitize import should_capture_l0, strip_code_blocks
 
 logger = logging.getLogger(__name__)
 
+_capture_locks: dict[str, asyncio.Lock] = {}
+_capture_locks_lock = asyncio.Lock()
+
+
+async def _get_capture_lock(session_key: str) -> asyncio.Lock:
+    async with _capture_locks_lock:
+        if session_key not in _capture_locks:
+            _capture_locks[session_key] = asyncio.Lock()
+    return _capture_locks[session_key]
+
+
 _RE_MEMORIES_BLOCK = re.compile(
     r"<relevant-memories>.*?</relevant-memories>\s*", re.DOTALL
 )
@@ -82,6 +93,7 @@ async def perform_auto_capture(
     data_dir: str,
     on_scheduler_notify: Callable[[str, str], Awaitable[None]] | None = None,
     bg_tasks: set[asyncio.Task] | None = None,
+    plugin_start_timestamp: int = 0,
 ) -> CaptureResult:
     t_start = time.monotonic()
 
@@ -92,59 +104,67 @@ async def perform_auto_capture(
     filtered_msgs = _apply_filtering(turn)
     filtered_msgs = [m for m in filtered_msgs if should_capture_l0(m.content)]
 
-    runner_state = await postgres.read_runner_state(agent_id, turn.session_key)
-    cursor = 0
-    if runner_state is not None:
-        cursor = runner_state["last_captured_timestamp"]
+    async with await _get_capture_lock(turn.session_key):
+        runner_state = await postgres.read_runner_state(agent_id, turn.session_key)
+        cursor = 0
+        if runner_state is not None:
+            cursor = runner_state["last_captured_timestamp"]
+            round_index = runner_state.get("round_index", 0) + 1
+        else:
+            round_index = 1
 
-    if cursor > 0:
-        filtered_msgs = [m for m in filtered_msgs if m.timestamp > cursor]
+        if cursor == 0 and plugin_start_timestamp > 0:
+            cursor = plugin_start_timestamp
 
-    now_epoch_ms = int(time.time() * 1000)
+        if cursor > 0:
+            filtered_msgs = [m for m in filtered_msgs if m.timestamp > cursor]
 
-    date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    conversations_dir = os.path.join(data_dir, agent_id, "conversations")
-    jsonl_path = os.path.join(conversations_dir, f"{date_str}.jsonl")
+        now_epoch_ms = int(time.time() * 1000)
 
-    def _write_jsonl() -> None:
-        os.makedirs(conversations_dir, exist_ok=True)
-        with open(jsonl_path, "a", encoding="utf-8") as f:
-            for msg in filtered_msgs:
-                f.write(json.dumps(_msg_to_dict(msg), ensure_ascii=False) + "\n")
+        date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        conversations_dir = os.path.join(data_dir, agent_id, "conversations")
+        jsonl_path = os.path.join(conversations_dir, f"{date_str}.jsonl")
 
-    await asyncio.to_thread(_write_jsonl)
+        def _write_jsonl() -> None:
+            os.makedirs(conversations_dir, exist_ok=True)
+            with open(jsonl_path, "a", encoding="utf-8") as f:
+                for msg in filtered_msgs:
+                    f.write(json.dumps(_msg_to_dict(msg), ensure_ascii=False) + "\n")
 
-    records: list[L0Record] = []
-    now_iso = datetime.now(timezone.utc).isoformat()
-    for idx, msg in enumerate(filtered_msgs):
-        content = msg.content
-        if msg.role == "assistant":
-            content = strip_code_blocks(content)
-        record = L0Record(
-            id=_make_l0_id(turn.session_key, msg.timestamp, idx),
-            agent_id=agent_id,
-            session_key=turn.session_key,
-            session_id=turn.session_id,
-            role=msg.role,
-            message_text=content,
-            recorded_at=now_iso,
-            timestamp=msg.timestamp,
-        )
-        records.append(record)
+        await asyncio.to_thread(_write_jsonl)
 
-    for record in records:
-        try:
-            await postgres.upsert_l0(record)
-        except Exception:
-            logger.exception(t("tdai_memory.capture.upsert_l0_failed"), record.id)
-
-    if len(records) > 0:
-        try:
-            await postgres.write_runner_state(
-                agent_id, turn.session_key, now_epoch_ms
+        records: list[L0Record] = []
+        now_iso = datetime.now(timezone.utc).isoformat()
+        for idx, msg in enumerate(filtered_msgs):
+            content = msg.content
+            if msg.role == "assistant":
+                content = strip_code_blocks(content)
+            record = L0Record(
+                id=_make_l0_id(turn.session_key, msg.timestamp, idx),
+                agent_id=agent_id,
+                session_key=turn.session_key,
+                session_id=turn.session_id,
+                role=msg.role,
+                message_text=content,
+                recorded_at=now_iso,
+                timestamp=msg.timestamp,
             )
-        except Exception:
-            logger.exception(t("tdai_memory.capture.write_runner_state_failed"), agent_id, turn.session_key)
+            records.append(record)
+
+        for record in records:
+            try:
+                await postgres.upsert_l0(record)
+            except Exception:
+                logger.exception(t("tdai_memory.capture.upsert_l0_failed"), record.id)
+
+        if len(records) > 0:
+            try:
+                await postgres.write_runner_state(
+                    agent_id, turn.session_key, now_epoch_ms,
+                    round_index=round_index,
+                )
+            except Exception:
+                logger.exception(t("tdai_memory.capture.write_runner_state_failed"), agent_id, turn.session_key)
 
     vectors_written = 0
     if qdrant is not None and embedding is not None and embedding.is_ready():

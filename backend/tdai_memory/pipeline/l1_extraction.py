@@ -41,13 +41,19 @@ _EXTRACTION_PROMPT = """你是一个记忆提取助手。从对话中提取结�
 输出格式（严格JSON）：
 ```json
 {{
-  "memories": [
+  "scenes": [
     {{
-      "content": "记忆内容",
-      "type": "persona|episodic|instruction",
-      "priority": 80,
-      "source_message_ids": [1, 2],
-      "metadata": {{}}
+      "scene_name": "场景标籤（例如：技术偏好、工作习惯）",
+      "message_ids": [1, 2],
+      "memories": [
+        {{
+          "content": "记忆内容",
+          "type": "persona|episodic|instruction",
+          "priority": 80,
+          "source_message_ids": [1],
+          "metadata": {{}}
+        }}
+      ]
     }}
   ]
 }}
@@ -73,7 +79,46 @@ def _parse_llm_extraction_response(response_text: str) -> list[dict]:
         logger.warning(t("tdai_memory.pipeline.failed_parse_llm_json"))
         return []
 
-    if not isinstance(data, dict) or "memories" not in data:
+    if not isinstance(data, dict):
+        return []
+
+    if "scenes" in data:
+        result = []
+        scenes = data["scenes"]
+        if not isinstance(scenes, list):
+            return []
+        for scene in scenes:
+            if not isinstance(scene, dict):
+                continue
+            scene_name = str(scene.get("scene_name", "")).strip()
+            memories = scene.get("memories", [])
+            if not isinstance(memories, list):
+                continue
+            for m in memories:
+                if not isinstance(m, dict):
+                    continue
+                content = str(m.get("content", "")).strip()
+                mem_type = str(m.get("type", "")).strip()
+                if not content or mem_type not in _VALID_TYPES:
+                    continue
+                try:
+                    priority = int(m.get("priority", 0))
+                except (ValueError, TypeError):
+                    priority = 0
+                priority = max(-1, min(100, priority))
+                metadata = m.get("metadata", {})
+                if not isinstance(metadata, dict):
+                    metadata = {}
+                result.append({
+                    "content": content,
+                    "type": mem_type,
+                    "priority": priority,
+                    "metadata": metadata,
+                    "scene_name": scene_name,
+                })
+        return result
+
+    if "memories" not in data:
         return []
 
     memories = data["memories"]
@@ -125,6 +170,22 @@ async def run_l1_extraction(
     l0_messages = await postgres.query_l0_for_l1(
         agent_id, session_key, after_recorded_at_epoch_ms=after_recorded_at_epoch_ms, limit=100
     )
+
+    if not l0_messages:
+        logger.debug(t("tdai_memory.pipeline.no_l0_messages"), agent_id, session_key)
+        return []
+
+    filtered_l0 = []
+    for m in l0_messages:
+        content = (m.get("message_text") or "").strip()
+        if len(content) < 2:
+            continue
+        if len(content) > 50000:
+            continue
+        if content.startswith("```") and content.endswith("```") and len(content) < 50:
+            continue
+        filtered_l0.append(m)
+    l0_messages = filtered_l0
 
     if not l0_messages:
         logger.debug(t("tdai_memory.pipeline.no_l0_messages"), agent_id, session_key)
@@ -194,7 +255,7 @@ async def run_l1_extraction(
             content=item["content"],
             type=item["type"],
             priority=item["priority"],
-            scene_name="",
+            scene_name=item.get("scene_name", ""),
             source_message_ids=item.get("source_message_ids", []),
             timestamps=[now_iso],
             created_at=now_iso,

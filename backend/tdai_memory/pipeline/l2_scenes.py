@@ -358,6 +358,28 @@ async def run_l2_scene_grouping(
 
     await asyncio.to_thread(_sweep_deleted)
 
+    def _sweep_orphans() -> None:
+        try:
+            for filename in os.listdir(blocks_dir):
+                if not filename.endswith(".md"):
+                    continue
+                path = os.path.join(blocks_dir, filename)
+                content = _read_md(path)
+                if content is None:
+                    continue
+                _, body = _parse_meta(content)
+                if not body.strip() or body.strip() == DELETED_MARKER:
+                    os.remove(path)
+                    name = filename[:-3]
+                    for i, entry in enumerate(new_index):
+                        if entry.get("name") == name:
+                            new_index.pop(i)
+                            break
+        except FileNotFoundError:
+            pass
+
+    await asyncio.to_thread(_sweep_orphans)
+
     persona_path = os.path.join(data_dir, agent_id, "persona.md")
 
     def _update_persona_nav() -> None:

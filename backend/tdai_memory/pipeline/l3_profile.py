@@ -635,7 +635,7 @@ async def run_l3_profile_generation(
             agent_id=agent_id,
         )
         persona_text = _strip_scene_navigation(persona_text)
-        persona_text = escape_xml_tags(persona_text)
+        persona_text = escape_xml_tags(persona_text.strip()).strip()
         if not persona_text.strip():
             logger.error(t("tdai_memory.pipeline.persona_body_empty"), agent_id)
         else:

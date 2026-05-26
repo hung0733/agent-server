@@ -111,6 +111,7 @@ class RecallResult(BaseModel):
     recalled_l3_soul: str | None = None
     recalled_l3_identity: str | None = None
     recall_strategy: str = "hybrid"
+    context_timeline: list[dict] | None = None
 
 
 # ───────────────────────────────────────

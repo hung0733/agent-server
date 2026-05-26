@@ -242,6 +242,7 @@ async def perform_auto_recall(
     embedding: EmbeddingService,
     data_dir: str,
     config: MemoryConfig,
+    get_timeline_cb: Any = None,
 ) -> RecallResult:
     t_start = time.monotonic()
 
@@ -303,6 +304,12 @@ async def perform_auto_recall(
         "yes" if scene_nav_text else "no",
         (time.monotonic() - t_start) * 1000,
     )
+    context_timeline = None
+    if get_timeline_cb is not None:
+        try:
+            context_timeline = await get_timeline_cb(agent_id, session_key)
+        except Exception:
+            pass
     return RecallResult(
         prepend_context=prepend_context,
         append_system_context=append_system_context,
@@ -311,6 +318,7 @@ async def perform_auto_recall(
         recalled_l3_soul=soul_content,
         recalled_l3_identity=identity_content,
         recall_strategy=strategy,
+        context_timeline=context_timeline,
     )
 
 

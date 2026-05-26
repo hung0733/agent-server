@@ -344,6 +344,7 @@ class MemoryManager:
         self._user_client = openai_client
         self._client: openai.AsyncOpenAI | None = None
         self._instance_id: str | None = None
+        self._plugin_start_timestamp = int(time.time() * 1000)
 
         self._postgres: PostgresStore | None = None
         self._qdrant: QdrantStore | None = None
@@ -468,6 +469,7 @@ class MemoryManager:
             embedding=self._embedding,
             data_dir=self.config.data_dir,
             config=self.config,
+            get_timeline_cb=self.get_unified_timeline,
         )
 
     async def capture(self, *, agent_id: str, turn: CompletedTurn) -> CaptureResult:
@@ -485,6 +487,7 @@ class MemoryManager:
                 else None
             ),
             bg_tasks=self._bg_tasks,
+            plugin_start_timestamp=self._plugin_start_timestamp,
         )
 
     async def search_memories(
@@ -585,3 +588,68 @@ class MemoryManager:
 
     def set_instance_id(self, instance_id: str) -> None:
         self._instance_id = instance_id
+
+    async def get_unified_timeline(
+        self,
+        agent_id: str,
+        session_key: str,
+        max_tokens: int | None = None,
+    ) -> list[dict]:
+        if max_tokens is None:
+            max_tokens = self.config.offload.default_context_window
+
+        items: list[dict] = []
+
+        l0_msgs = await self._postgres.query_l0_for_l1(agent_id, session_key, limit=200)
+        for m in l0_msgs:
+            items.append({
+                "type": m["role"],
+                "content": m["message_text"],
+                "timestamp": str(m.get("recorded_at", "")),
+            })
+
+        if self._offload is not None:
+            entries = await self._offload.get_offload_entries(
+                agent_id, session_key=session_key, limit=100
+            )
+            for e in entries:
+                has_summary = bool(e.get("summary"))
+                result_ref = e.get("result_ref", "")
+
+                if has_summary:
+                    content = f"[{e['tool_call']}] {e['summary']}"
+                else:
+                    content = self._read_full_result(agent_id, result_ref)
+
+                items.append({
+                    "type": "tool",
+                    "content": content,
+                    "timestamp": e.get("timestamp", ""),
+                    "tool_call": e.get("tool_call", ""),
+                    "has_summary": has_summary,
+                    "round_index": e.get("round_index", 0),
+                })
+
+        items.sort(key=lambda x: x["timestamp"])
+
+        total = 0
+        timeline = []
+        for item in items:
+            tokens = len(item["content"]) // 2
+            if total + tokens > max_tokens:
+                break
+            total += tokens
+            timeline.append(item)
+
+        return timeline
+
+    def _read_full_result(self, agent_id: str, result_ref: str) -> str:
+        import os
+        ref_path = os.path.join(self.config.data_dir, agent_id, "offload", result_ref)
+        if not os.path.exists(ref_path):
+            return result_ref
+        try:
+            with open(ref_path, "r") as f:
+                return f.read()
+        except Exception:
+            return result_ref

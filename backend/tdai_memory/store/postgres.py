@@ -172,6 +172,7 @@ class PostgresStore:
                         last_captured_timestamp BIGINT NOT NULL DEFAULT 0,
                         last_l1_cursor TEXT,
                         last_scene_name TEXT DEFAULT '',
+                        round_index INTEGER NOT NULL DEFAULT 0,
                         PRIMARY KEY (agent_id, session_key)
                     )
                 """)
@@ -613,7 +614,7 @@ class PostgresStore:
                 row = await conn.fetchrow(
                     """
                     SELECT agent_id, session_key, last_captured_timestamp,
-                           last_l1_cursor, last_scene_name
+                           last_l1_cursor, last_scene_name, round_index
                     FROM runner_states
                     WHERE agent_id = $1 AND session_key = $2
                     """,
@@ -634,6 +635,7 @@ class PostgresStore:
         last_captured_timestamp: int,
         last_l1_cursor: str | None = None,
         last_scene_name: str = "",
+        round_index: int = 0,
     ) -> bool:
         if self._degraded or self._pool is None:
             return False
@@ -641,18 +643,20 @@ class PostgresStore:
             async with self._pool.acquire() as conn:
                 await conn.execute(
                     """
-                    INSERT INTO runner_states (agent_id, session_key, last_captured_timestamp, last_l1_cursor, last_scene_name)
-                    VALUES ($1, $2, $3, $4, $5)
+                    INSERT INTO runner_states (agent_id, session_key, last_captured_timestamp, last_l1_cursor, last_scene_name, round_index)
+                    VALUES ($1, $2, $3, $4, $5, $6)
                     ON CONFLICT (agent_id, session_key) DO UPDATE SET
                         last_captured_timestamp = EXCLUDED.last_captured_timestamp,
                         last_l1_cursor = EXCLUDED.last_l1_cursor,
-                        last_scene_name = EXCLUDED.last_scene_name
+                        last_scene_name = EXCLUDED.last_scene_name,
+                        round_index = EXCLUDED.round_index
                     """,
                     agent_id,
                     session_key,
                     last_captured_timestamp,
                     last_l1_cursor,
                     last_scene_name,
+                    round_index,
                 )
             return True
         except Exception:
