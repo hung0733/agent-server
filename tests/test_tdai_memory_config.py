@@ -2,12 +2,21 @@ import os
 import sys
 from pathlib import Path
 
+import pytest
+
 
 BACKEND_DIR = Path(__file__).resolve().parents[1] / "backend"
 sys.path.insert(0, str(BACKEND_DIR))
 
 from tdai_memory.config import MemoryConfig, resolve_openai_api_key
 from tdai_memory.manager import MemoryManager
+
+
+def test_memory_manager_instance_requires_initialize():
+    MemoryManager._instance = None
+
+    with pytest.raises(RuntimeError, match="MemoryManager"):
+        MemoryManager.instance()
 
 
 LEGACY_ENV_NAMES = (

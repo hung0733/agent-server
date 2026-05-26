@@ -67,7 +67,11 @@ async def batch_dedup(
         try:
             candidates = await qdrant.search_l1(agent_id, emb, limit=top_k)
         except Exception:
-            logger.warning(t("tdai_memory.pipeline.dedup_search_failed_storing_new"), new_mem.id)
+            logger.warning(
+                t("tdai_memory.pipeline.dedup_search_failed_storing_new"),
+                new_mem.id,
+                exc_info=True,
+            )
             continue
 
         if len(candidates) < 3:

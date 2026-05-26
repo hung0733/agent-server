@@ -4,7 +4,7 @@ import asyncio
 import logging
 from os import getenv
 import time
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 import openai
 from dotenv import load_dotenv
@@ -69,6 +69,14 @@ def _apply_env(
 
 
 class MemoryManager:
+    _instance: Optional[MemoryManager] = None
+
+    @staticmethod
+    def instance() -> MemoryManager:
+        if MemoryManager._instance is None:
+            raise RuntimeError(t("tdai_memory.manager.not_initialized"))
+        return MemoryManager._instance
+
     @staticmethod
     def from_env() -> MemoryConfig:
         config = MemoryConfig()
@@ -124,7 +132,9 @@ class MemoryManager:
             _env_bool,
         )
 
-        _apply_env(config.extraction, "enabled", "TDAI_MEM_EXTRACTION_ENABLED", _env_bool)
+        _apply_env(
+            config.extraction, "enabled", "TDAI_MEM_EXTRACTION_ENABLED", _env_bool
+        )
         _apply_env(
             config.extraction,
             "enable_dedup",
@@ -144,7 +154,9 @@ class MemoryManager:
             _env_optional_str,
         )
 
-        _apply_env(config.persona, "trigger_every_n", "TDAI_MEM_PERSONA_TRIGGER_EVERY_N", int)
+        _apply_env(
+            config.persona, "trigger_every_n", "TDAI_MEM_PERSONA_TRIGGER_EVERY_N", int
+        )
         _apply_env(config.persona, "max_scenes", "TDAI_MEM_PERSONA_MAX_SCENES", int)
         _apply_env(config.persona, "backup_count", "TDAI_MEM_PERSONA_BACKUP_COUNT", int)
         _apply_env(
@@ -200,7 +212,9 @@ class MemoryManager:
 
         _apply_env(config.recall, "enabled", "TDAI_MEM_RECALL_ENABLED", _env_bool)
         _apply_env(config.recall, "max_results", "TDAI_MEM_RECALL_MAX_RESULTS", int)
-        _apply_env(config.recall, "score_threshold", "TDAI_MEM_RECALL_SCORE_THRESHOLD", float)
+        _apply_env(
+            config.recall, "score_threshold", "TDAI_MEM_RECALL_SCORE_THRESHOLD", float
+        )
         _apply_env(config.recall, "strategy", "TDAI_MEM_RECALL_STRATEGY")
         _apply_env(config.recall, "timeout_ms", "TDAI_MEM_RECALL_TIMEOUT_MS", int)
 
@@ -224,7 +238,9 @@ class MemoryManager:
             "TDAI_MEM_OFFLOAD_FORCE_TRIGGER_THRESHOLD",
             int,
         )
-        _apply_env(config.offload, "data_dir", "TDAI_MEM_OFFLOAD_DATA_DIR", _env_optional_str)
+        _apply_env(
+            config.offload, "data_dir", "TDAI_MEM_OFFLOAD_DATA_DIR", _env_optional_str
+        )
         _apply_env(
             config.offload,
             "default_context_window",
@@ -237,16 +253,36 @@ class MemoryManager:
             "TDAI_MEM_OFFLOAD_MAX_PAIRS_PER_BATCH",
             int,
         )
-        _apply_env(config.offload, "l2_null_threshold", "TDAI_MEM_OFFLOAD_L2_NULL_THRESHOLD", int)
-        _apply_env(config.offload, "l2_timeout_seconds", "TDAI_MEM_OFFLOAD_L2_TIMEOUT_SECONDS", int)
-        _apply_env(config.offload, "mild_offload_ratio", "TDAI_MEM_OFFLOAD_MILD_OFFLOAD_RATIO", float)
+        _apply_env(
+            config.offload,
+            "l2_null_threshold",
+            "TDAI_MEM_OFFLOAD_L2_NULL_THRESHOLD",
+            int,
+        )
+        _apply_env(
+            config.offload,
+            "l2_timeout_seconds",
+            "TDAI_MEM_OFFLOAD_L2_TIMEOUT_SECONDS",
+            int,
+        )
+        _apply_env(
+            config.offload,
+            "mild_offload_ratio",
+            "TDAI_MEM_OFFLOAD_MILD_OFFLOAD_RATIO",
+            float,
+        )
         _apply_env(
             config.offload,
             "aggressive_compress_ratio",
             "TDAI_MEM_OFFLOAD_AGGRESSIVE_COMPRESS_RATIO",
             float,
         )
-        _apply_env(config.offload, "mmd_max_token_ratio", "TDAI_MEM_OFFLOAD_MMD_MAX_TOKEN_RATIO", float)
+        _apply_env(
+            config.offload,
+            "mmd_max_token_ratio",
+            "TDAI_MEM_OFFLOAD_MMD_MAX_TOKEN_RATIO",
+            float,
+        )
         _apply_env(
             config.offload,
             "offload_retention_days",
@@ -259,15 +295,21 @@ class MemoryManager:
             "TDAI_MEM_OFFLOAD_BACKEND_URL",
             _env_optional_str,
         )
-        _apply_env(config.offload, "backend_api_key", "TDAI_MEM_OFFLOAD_BACKEND_API_KEY")
+        _apply_env(
+            config.offload, "backend_api_key", "TDAI_MEM_OFFLOAD_BACKEND_API_KEY"
+        )
         _apply_env(
             config.offload,
             "backend_timeout_ms",
             "TDAI_MEM_OFFLOAD_BACKEND_TIMEOUT_MS",
             int,
         )
-        _apply_env(config.offload, "log_max_size_mb", "TDAI_MEM_OFFLOAD_LOG_MAX_SIZE_MB", int)
-        _apply_env(config.offload, "user_id", "TDAI_MEM_OFFLOAD_USER_ID", _env_optional_str)
+        _apply_env(
+            config.offload, "log_max_size_mb", "TDAI_MEM_OFFLOAD_LOG_MAX_SIZE_MB", int
+        )
+        _apply_env(
+            config.offload, "user_id", "TDAI_MEM_OFFLOAD_USER_ID", _env_optional_str
+        )
         _apply_env(
             config.offload,
             "mild_offload_scan_ratio",
@@ -337,15 +379,15 @@ class MemoryManager:
                     api_key=resolve_openai_api_key(llm_cfg.api_key, llm_cfg.base_url),
                     base_url=llm_cfg.base_url,
                     timeout=(
-                        llm_cfg.timeout_ms / 1000.0
-                        if llm_cfg.timeout_ms > 0
-                        else 30.0
+                        llm_cfg.timeout_ms / 1000.0 if llm_cfg.timeout_ms > 0 else 30.0
                     ),
                 )
 
             self._embedding = EmbeddingService(self.config.embedding)
 
-            self._postgres = PostgresStore(self.config.postgres_url, self.config.postgres_schema)
+            self._postgres = PostgresStore(
+                self.config.postgres_url, self.config.postgres_schema
+            )
             await self._postgres.initialize()
 
             self._qdrant = QdrantStore(
@@ -376,6 +418,7 @@ class MemoryManager:
                 )
 
             self._initialized = True
+            MemoryManager._instance = self
             logger.info(t("tdai_memory.manager.initialized"))
         finally:
             event.set()
@@ -407,6 +450,8 @@ class MemoryManager:
             self._client = None
 
         self._initialized = False
+        if MemoryManager._instance is self:
+            MemoryManager._instance = None
         _init_cache.pop(self.config.data_dir, None)
         logger.info(t("tdai_memory.manager.destroyed"))
 
@@ -425,9 +470,7 @@ class MemoryManager:
             config=self.config,
         )
 
-    async def capture(
-        self, *, agent_id: str, turn: CompletedTurn
-    ) -> CaptureResult:
+    async def capture(self, *, agent_id: str, turn: CompletedTurn) -> CaptureResult:
         await self._store_ready.wait()
         return await perform_auto_capture(
             turn=turn,

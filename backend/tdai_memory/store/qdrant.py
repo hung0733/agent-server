@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import uuid
 
 from qdrant_client import AsyncQdrantClient, models
 
@@ -8,6 +9,15 @@ from backend.i18n import t
 from ..models import L0Record, MemoryRecord
 
 logger = logging.getLogger(__name__)
+
+_POINT_ID_NAMESPACE = uuid.UUID("8bd66d4a-9056-4a0d-bd69-e97f1562a9d4")
+
+
+def _to_point_id(record_id: str) -> str:
+    try:
+        return str(uuid.UUID(record_id))
+    except ValueError:
+        return str(uuid.uuid5(_POINT_ID_NAMESPACE, record_id))
 
 
 class QdrantStore:
@@ -71,7 +81,7 @@ class QdrantStore:
             collection_name=self.l0_collection,
             points=[
                 models.PointStruct(
-                    id=record.id,
+                    id=_to_point_id(record.id),
                     vector=embedding,
                     payload=record.model_dump(),
                 )
@@ -82,16 +92,16 @@ class QdrantStore:
         await self.client.delete(
             collection_name=self.l0_collection,
             points_selector=models.PointIdsList(
-                points=[record_id],
+                points=[_to_point_id(record_id)],
             ),
         )
 
     async def search_l0(
         self, agent_id: str, query_embedding: list[float], limit: int = 10
     ) -> list[dict]:
-        results = await self.client.search(
+        response = await self.client.query_points(
             collection_name=self.l0_collection,
-            query_vector=query_embedding,
+            query=query_embedding,
             limit=limit,
             query_filter=models.Filter(
                 must=[
@@ -103,6 +113,7 @@ class QdrantStore:
             ),
             with_payload=True,
         )
+        results = response.points
         return [
             {"id": r.id, "score": r.score, **r.payload}
             for r in results
@@ -117,7 +128,7 @@ class QdrantStore:
             collection_name=self.l1_collection,
             points=[
                 models.PointStruct(
-                    id=record.id,
+                    id=_to_point_id(record.id),
                     vector=embedding,
                     payload=record.model_dump(),
                 )
@@ -128,16 +139,16 @@ class QdrantStore:
         await self.client.delete(
             collection_name=self.l1_collection,
             points_selector=models.PointIdsList(
-                points=[record_id],
+                points=[_to_point_id(record_id)],
             ),
         )
 
     async def search_l1(
         self, agent_id: str, query_embedding: list[float], limit: int = 10
     ) -> list[dict]:
-        results = await self.client.search(
+        response = await self.client.query_points(
             collection_name=self.l1_collection,
-            query_vector=query_embedding,
+            query=query_embedding,
             limit=limit,
             query_filter=models.Filter(
                 must=[
@@ -149,6 +160,7 @@ class QdrantStore:
             ),
             with_payload=True,
         )
+        results = response.points
         return [
             {"id": r.id, "score": r.score, **r.payload}
             for r in results

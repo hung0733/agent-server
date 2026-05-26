@@ -37,6 +37,14 @@ def _parse_iso(iso_str: str) -> datetime:
         return datetime.now(timezone.utc)
 
 
+def _to_iso(value) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return value
+
+
 def _jieba_segment(text: str) -> str:
     import jieba
 
@@ -545,7 +553,15 @@ class PostgresStore:
                 )
                 if row is None:
                     return None
-                return PipelineSessionState(**dict(row))
+                data = dict(row)
+                data["last_extraction_time"] = _to_iso(data.get("last_extraction_time"))
+                data["last_extraction_updated_time"] = _to_iso(
+                    data.get("last_extraction_updated_time")
+                )
+                data["l2_last_extraction_time"] = _to_iso(
+                    data.get("l2_last_extraction_time")
+                )
+                return PipelineSessionState(**data)
         except Exception:
             logger.exception(t("tdai_memory.store.read_pipeline_state_failed"))
             return None

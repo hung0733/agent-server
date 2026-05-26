@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 import logging
 import signal
 from collections.abc import Awaitable
@@ -21,6 +22,7 @@ from backend.i18n import t
 from backend.queues.message_queue import MessageQueue
 from backend.queues.msg_queue_handle import handle_agent_message
 from backend.tdai_memory import MemoryManager
+from backend.tdai_memory.models import CompletedTurn, ConversationMessage
 from logger_setup import setup_logging
 
 logger = logging.getLogger(__name__)
@@ -74,7 +76,9 @@ async def main(
     channel_factory: Callable[[], EvolutionWhatsAppChannel] = EvolutionWhatsAppChannel,
     memory_manager_factory: Callable[[], Any] = create_memory_manager,
     setup_logging_func: Callable[[], None] = setup_logging,
-    upgrade_database_schema_func: Callable[[], Awaitable[Any]] = upgrade_database_schema,
+    upgrade_database_schema_func: Callable[
+        [], Awaitable[Any]
+    ] = upgrade_database_schema,
     shutdown_event: asyncio.Event | None = None,
 ) -> None:
     load_dotenv()
@@ -84,7 +88,7 @@ async def main(
     await check_database(db_engine)
     await upgrade_database_schema_func()
     await GraphStore.init_langgraph_checkpointer()
-    memory_manager = memory_manager_factory()
+    memory_manager: MemoryManager = memory_manager_factory()
     try:
         await memory_manager.initialize()
     except Exception:
