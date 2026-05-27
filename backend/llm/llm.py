@@ -1,8 +1,8 @@
 from typing import Dict, Optional
 
+from langchain_openai import ChatOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from langchain_core.language_models.chat_models import BaseChatModel
 from pydantic import BaseModel, ConfigDict, SecretStr
 
 from backend.client.openai import OpenAIClient
@@ -58,7 +58,7 @@ class LLMSet(BaseModel):
 
         return level, sec_level
 
-    def getModel(self, level: int, is_sec: bool = False) -> Optional[BaseChatModel]:
+    def getModel(self, level: int, is_sec: bool = False) -> Optional[ChatOpenAI]:
         models: Dict[int, list[LlmEndpointRead]] = (
             self.sec_level if is_sec else self.level
         )
@@ -66,8 +66,6 @@ class LLMSet(BaseModel):
         for model in models[level]:
             if not model.model_name:
                 continue
-
-            from langchain_openai.chat_models.base import ChatOpenAI
 
             return ChatOpenAI(
                 base_url=model.endpoint,
