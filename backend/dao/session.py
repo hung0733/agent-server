@@ -23,7 +23,7 @@ class AgentSessionDAO(BaseDAO[AgentSession]):
 
     async def get_agent_runtime_data(
         self, agent_id: str, session_id: str
-    ) -> tuple[int, int, int, str, str, str, str, str, str] | None:
+    ) -> tuple[int, int, int, str, str, str, str, str, int | None, str] | None:
         recv_agent = aliased(Agent)
         sender_agent = aliased(Agent)
         stmt = (
@@ -36,6 +36,7 @@ class AgentSessionDAO(BaseDAO[AgentSession]):
                 AgentSession.session_id,
                 recv_agent.agent_type,
                 recv_agent.name,
+                AgentSession.sender_agent_id,
                 func.coalesce(sender_agent.name, UserAcc.name),
             )
             .join(recv_agent, AgentSession.recv_agent_id == recv_agent.id)

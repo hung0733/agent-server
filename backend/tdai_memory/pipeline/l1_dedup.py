@@ -210,6 +210,15 @@ async def _update_existing(
     if existing is None:
         return
 
+    existing_metadata = existing.get("metadata")
+    if not isinstance(existing_metadata, dict):
+        try:
+            existing_metadata = json.loads(existing.get("metadata_json", "{}"))
+        except (TypeError, json.JSONDecodeError):
+            existing_metadata = {}
+    if not isinstance(existing_metadata, dict):
+        existing_metadata = {}
+
     record = MemoryRecord(
         id=record_id,
         agent_id=agent_id,
@@ -226,6 +235,7 @@ async def _update_existing(
         updated_at=datetime.now(timezone.utc).isoformat(),
         session_key=str(existing.get("session_key", "")),
         session_id=str(existing.get("session_id", "")),
+        metadata={**existing_metadata, **new_mem.metadata},
     )
 
     await postgres.upsert_l1(record)

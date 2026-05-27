@@ -41,7 +41,11 @@ class Agent:
     agent_type: str
 
     recv_agent_name: str
+    sender_agent_id: int | None
     sender_agent_name: str
+    sender_type: str
+    recv_type: str
+    conversation_kind: str
 
     models: LLMSet
 
@@ -55,8 +59,13 @@ class Agent:
         session_id: str,
         agent_type: str,
         recv_agent_name: str,
-        sender_agent_name: str,
+        sender_agent_id: int | str | None = None,
+        sender_agent_name: str | None = None,
     ):
+        if sender_agent_name is None and isinstance(sender_agent_id, str):
+            sender_agent_name = sender_agent_id
+            sender_agent_id = None
+
         self.agent_db_id = agent_db_id
         self.agent_id = agent_id
         self.session_db_id = session_db_id
@@ -65,7 +74,13 @@ class Agent:
         self.user_id = user_id
         self.agent_type = agent_type
         self.recv_agent_name = recv_agent_name
-        self.sender_agent_name = sender_agent_name
+        self.sender_agent_id = sender_agent_id
+        self.sender_agent_name = sender_agent_name or ""
+        self.sender_type = "agent" if sender_agent_id is not None else "user"
+        self.recv_type = "agent"
+        self.conversation_kind = (
+            "agent_to_agent" if sender_agent_id is not None else "user_to_agent"
+        )
 
         if Agent._graph is None:
             Agent._graph = workflow.compile(checkpointer=GraphStore.checkpointer)
@@ -176,6 +191,9 @@ class Agent:
             args=metadata,
             sender_name=agent.sender_agent_name,
             recv_name=agent.recv_agent_name,
+            sender_type=getattr(agent, "sender_type", "user"),
+            recv_type=getattr(agent, "recv_type", "agent"),
+            conversation_kind=getattr(agent, "conversation_kind", "user_to_agent"),
             user_db_id=agent.user_db_id,
             agent_id=agent.agent_id,
             ltm_msg=ltm_msg,

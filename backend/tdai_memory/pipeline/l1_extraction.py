@@ -68,6 +68,58 @@ _EXTRACTION_PROMPT = """你是一个记忆提取助手。从对话中提取结�
 _VALID_TYPES = {"persona", "episodic", "instruction"}
 
 
+def _first_conversation_metadata(l0_messages: list[dict]) -> dict:
+    for message in l0_messages:
+        metadata = message.get("metadata")
+        if isinstance(metadata, dict) and metadata:
+            return metadata
+    return {}
+
+
+def _session_conversation_metadata(l0_messages: list[dict]) -> dict:
+    metadata = _first_conversation_metadata(l0_messages)
+    if not metadata:
+        return {}
+
+    result: dict = {}
+    conversation_kind = metadata.get("conversation_kind")
+    if isinstance(conversation_kind, str) and conversation_kind:
+        result["conversation_kind"] = conversation_kind
+
+    sender = {
+        "name": str(metadata.get("sender_name") or ""),
+        "type": str(metadata.get("sender_type") or "unknown"),
+    }
+    receiver = {
+        "name": str(metadata.get("recv_name") or ""),
+        "type": str(metadata.get("recv_type") or "agent"),
+    }
+    result["participants"] = {
+        "sender": sender,
+        "receiver": receiver,
+    }
+    return result
+
+
+def _format_message_line(message: dict) -> str:
+    metadata = message.get("metadata")
+    if not isinstance(metadata, dict):
+        metadata = {}
+
+    sender_type = str(metadata.get("sender_type") or "unknown")
+    sender_name = str(metadata.get("sender_name") or "").strip()
+    recv_type = str(metadata.get("recv_type") or "agent")
+    recv_name = str(metadata.get("recv_name") or "").strip()
+
+    if sender_name or recv_name:
+        left = f"{sender_type}: {sender_name}" if sender_name else sender_type
+        right = f"{recv_type}: {recv_name}" if recv_name else recv_type
+        prefix = f"[{left} -> {right}][{message['role']}]"
+    else:
+        prefix = f"[{message['role']}]"
+    return f"{prefix}: {message['message_text']}"
+
+
 def _parse_llm_extraction_response(response_text: str) -> list[dict]:
     text = response_text.strip()
     m = re.search(r"```(?:json)?\s*\n(.*?)```", text, re.DOTALL)
@@ -203,7 +255,7 @@ async def run_l1_extraction(
     new = l0_messages[split_idx:][-30:]
 
     def _build_section(messages, label):
-        lines = [f"[{m['role']}]: {m['message_text']}" for m in messages]
+        lines = [_format_message_line(m) for m in messages]
         return f"## {label}\n" + "\n".join(lines)
 
     conversation_text = (
@@ -246,9 +298,16 @@ async def run_l1_extraction(
 
     max_memories = config.extraction.max_memories_per_session
     now_iso = datetime.now(timezone.utc).isoformat()
+    conversation_metadata = _session_conversation_metadata(l0_messages)
 
     new_memories: list[MemoryRecord] = []
     for item in extracted[:max_memories]:
+        item_metadata = item.get("metadata", {})
+        if not isinstance(item_metadata, dict):
+            item_metadata = {}
+        metadata = {**item_metadata}
+        for key, value in conversation_metadata.items():
+            metadata.setdefault(key, value)
         record = MemoryRecord(
             id=f"mem_{uuid4().hex[:12]}",
             agent_id=agent_id,
@@ -262,7 +321,7 @@ async def run_l1_extraction(
             updated_at=now_iso,
             session_key=session_key,
             session_id="",
-            metadata=item.get("metadata", {}),
+            metadata=metadata,
         )
         new_memories.append(record)
 

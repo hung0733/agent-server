@@ -77,6 +77,7 @@ def _apply_filtering(turn: CompletedTurn) -> list[ConversationMessage]:
                 role=messages[target_index].role,
                 content=stripped,
                 timestamp=messages[target_index].timestamp,
+                metadata=messages[target_index].metadata,
             )
 
     for i, msg in enumerate(messages):
@@ -90,6 +91,7 @@ def _apply_filtering(turn: CompletedTurn) -> list[ConversationMessage]:
             role=msg.role,
             content=content,
             timestamp=msg.timestamp,
+            metadata=msg.metadata,
         )
 
     return messages
@@ -141,7 +143,12 @@ async def perform_auto_capture(
             os.makedirs(conversations_dir, exist_ok=True)
             with open(jsonl_path, "a", encoding="utf-8") as f:
                 for msg in filtered_msgs:
-                    f.write(json.dumps(_msg_to_dict(msg), ensure_ascii=False) + "\n")
+                    f.write(
+                        json.dumps(
+                            _msg_to_dict(msg, turn.metadata), ensure_ascii=False
+                        )
+                        + "\n"
+                    )
 
         await asyncio.to_thread(_write_jsonl)
 
@@ -161,6 +168,7 @@ async def perform_auto_capture(
                 message_text=content,
                 recorded_at=now_iso,
                 timestamp=msg.timestamp,
+                metadata={**turn.metadata, **msg.metadata},
             )
             records.append(record)
             msgs.append({"role": msg.role, "content": content})
@@ -247,5 +255,9 @@ async def perform_auto_capture(
     )
 
 
-def _msg_to_dict(msg: ConversationMessage) -> dict:
-    return {"role": msg.role, "content": msg.content, "timestamp": msg.timestamp}
+def _msg_to_dict(msg: ConversationMessage, turn_metadata: dict[str, Any]) -> dict:
+    metadata = {**turn_metadata, **msg.metadata}
+    data = {"role": msg.role, "content": msg.content, "timestamp": msg.timestamp}
+    if metadata:
+        data["metadata"] = metadata
+    return data

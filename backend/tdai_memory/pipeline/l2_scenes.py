@@ -322,6 +322,7 @@ async def run_l2_scene_grouping(
                             priority=r.get("priority", 0),
                             scene_name=name,
                             timestamps=list(r.get("timestamps", [])),
+                            metadata=json.loads(r["metadata_json"]) if r.get("metadata_json") else {},
                             created_at=str(r.get("created_at", "")),
                             updated_at=datetime.now(timezone.utc).isoformat(),
                             session_key=str(r.get("session_key", "")),

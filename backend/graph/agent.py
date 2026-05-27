@@ -61,8 +61,17 @@ async def chat_node(state: MessageState, config: RunnableConfig):
 
 
 async def end_node(state: MessageState, config: RunnableConfig):
-    session_id: str = config["configurable"]["thread_id"] or ""  # type: ignore
-    agent_id: str = config["configurable"]["agent_id"] or ""  # type: ignore
+    session_id: str = GraphNode.get_configure(config, "thread_id", "")
+    agent_id: str = GraphNode.get_configure(config, "agent_id", "")
+    conversation_metadata = {
+        "conversation_kind": GraphNode.get_configure(
+            config, "conversation_kind", "unknown"
+        ),
+        "sender_name": GraphNode.get_configure(config, "sender_name", ""),
+        "sender_type": GraphNode.get_configure(config, "sender_type", "unknown"),
+        "recv_name": GraphNode.get_configure(config, "recv_name", ""),
+        "recv_type": GraphNode.get_configure(config, "recv_type", "agent"),
+    }
     messages: list[BaseMessage] = state["messages"]
     # logger.info(messages)
 
@@ -71,6 +80,7 @@ async def end_node(state: MessageState, config: RunnableConfig):
         user_text="",
         assistant_text="",
         messages=[],
+        metadata=conversation_metadata,
     )
 
     message: BaseMessage
@@ -84,6 +94,7 @@ async def end_node(state: MessageState, config: RunnableConfig):
                     timestamp=int(
                         message.additional_kwargs["datetime"].timestamp() * 1000
                     ),
+                    metadata=conversation_metadata,
                 )
             )
         elif isinstance(message, AIMessage):
@@ -96,6 +107,7 @@ async def end_node(state: MessageState, config: RunnableConfig):
                         timestamp=int(
                             message.additional_kwargs["datetime"].timestamp() * 1000
                         ),
+                        metadata=conversation_metadata,
                     )
                 )
 

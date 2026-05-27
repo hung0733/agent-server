@@ -396,9 +396,12 @@ def test_supervisor_route_after_chat_routes_assign_task_to_assign_task_node():
 
 
 class FakeGraph:
+    configs = []
+
     async def astream(self, payload, config, stream_mode):
         assert payload["messages"][0].content == "hello"
         assert config["configurable"]["thread_id"] == "session-1"
+        self.configs.append(config)
         assert stream_mode == "messages"
         yield (AIMessageChunk(content="he"), {"node": "chat"})
         yield AIMessage(content="llo", additional_kwargs={"text_done": True})
@@ -435,6 +438,44 @@ async def test_prepare_sys_prompt_defaults_to_empty_string():
     assert agent.sys_prompt == ""
 
 
+def test_agent_runtime_marks_user_to_agent_conversation():
+    agent = Agent(
+        1,
+        2,
+        3,
+        "user-1",
+        "agent-1",
+        "session-1",
+        "assistant",
+        "Receiver",
+        None,
+        "Alice",
+    )
+
+    assert agent.sender_type == "user"
+    assert agent.recv_type == "agent"
+    assert agent.conversation_kind == "user_to_agent"
+
+
+def test_agent_runtime_marks_agent_to_agent_conversation():
+    agent = Agent(
+        1,
+        2,
+        3,
+        "user-1",
+        "agent-1",
+        "session-1",
+        "assistant",
+        "Receiver",
+        99,
+        "Sender",
+    )
+
+    assert agent.sender_type == "agent"
+    assert agent.recv_type == "agent"
+    assert agent.conversation_kind == "agent_to_agent"
+
+
 @pytest.mark.asyncio
 async def test_agent_proc_send_streams_content_chunks(monkeypatch):
     recall_calls = []
@@ -448,6 +489,7 @@ async def test_agent_proc_send_streams_content_chunks(monkeypatch):
         lambda: FakeMemoryManager(),
     )
 
+    graph = FakeGraph()
     chunks = [
         chunk
         async for chunk in Agent.proc_send(
@@ -455,13 +497,15 @@ async def test_agent_proc_send_streams_content_chunks(monkeypatch):
             message="hello",
             think_mode=False,
             metadata={"source": "test"},
-            graph=FakeGraph(),
+            graph=graph,
         )
     ]
 
     assert [chunk.chunk_type for chunk in chunks] == ["content", "content", "text_end"]
     assert [chunk.content for chunk in chunks] == ["he", "llo", None]
     assert recall_calls == [("agent-1", "session-1", "hello")]
+    assert graph.configs[0]["configurable"]["conversation_kind"] == "user_to_agent"
+    assert graph.configs[0]["configurable"]["sender_type"] == "user"
 
 
 @pytest.mark.asyncio

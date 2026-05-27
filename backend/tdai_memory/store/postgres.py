@@ -48,6 +48,22 @@ def _to_iso(value) -> str | None:
     return value
 
 
+def _json_dict(value: str | None) -> dict:
+    if not value:
+        return {}
+    try:
+        data = json.loads(value)
+    except json.JSONDecodeError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _decode_l0_row(row) -> dict:
+    data = dict(row)
+    data["metadata"] = _json_dict(data.get("metadata_json"))
+    return data
+
+
 def _jieba_segment(text: str) -> str:
     import jieba
 
@@ -108,10 +124,15 @@ class PostgresStore:
                         session_id TEXT DEFAULT '',
                         role TEXT NOT NULL,
                         message_text TEXT NOT NULL,
+                        metadata_json TEXT NOT NULL DEFAULT '{}',
                         fts_text TEXT NOT NULL DEFAULT '',
                         recorded_at TIMESTAMPTZ NOT NULL,
                         timestamp BIGINT NOT NULL
                     )
+                """)
+                await conn.execute("""
+                    ALTER TABLE l0_conversations
+                    ADD COLUMN IF NOT EXISTS metadata_json TEXT NOT NULL DEFAULT '{}'
                 """)
                 await conn.execute("""
                     CREATE INDEX IF NOT EXISTS idx_l0_agent_session
@@ -210,14 +231,15 @@ class PostgresStore:
             async with self._pool.acquire() as conn:
                 await conn.execute(
                     """
-                    INSERT INTO l0_conversations (id, agent_id, session_key, session_id, role, message_text, fts_text, recorded_at, timestamp)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                    INSERT INTO l0_conversations (id, agent_id, session_key, session_id, role, message_text, metadata_json, fts_text, recorded_at, timestamp)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
                     ON CONFLICT (id) DO UPDATE SET
                         agent_id = EXCLUDED.agent_id,
                         session_key = EXCLUDED.session_key,
                         session_id = EXCLUDED.session_id,
                         role = EXCLUDED.role,
                         message_text = EXCLUDED.message_text,
+                        metadata_json = EXCLUDED.metadata_json,
                         fts_text = EXCLUDED.fts_text,
                         recorded_at = EXCLUDED.recorded_at,
                         timestamp = EXCLUDED.timestamp
@@ -228,6 +250,7 @@ class PostgresStore:
                     record.session_id,
                     record.role,
                     record.message_text,
+                    json.dumps(record.metadata, ensure_ascii=False),
                     _jieba_segment(record.message_text),
                     _parse_iso(record.recorded_at),
                     record.timestamp,
@@ -290,7 +313,7 @@ class PostgresStore:
             async with self._pool.acquire() as conn:
                 rows = await conn.fetch(
                     """
-                    SELECT id, agent_id, session_key, session_id, role, message_text, recorded_at, timestamp
+                    SELECT id, agent_id, session_key, session_id, role, message_text, metadata_json, recorded_at, timestamp
                     FROM l0_conversations
                     WHERE agent_id = $1 AND session_key = $2 AND recorded_at > $3
                     ORDER BY recorded_at
@@ -301,7 +324,7 @@ class PostgresStore:
                     _parse_iso(after_iso),
                     limit,
                 )
-                return [dict(row) for row in rows]
+                return [_decode_l0_row(row) for row in rows]
         except Exception:
             logger.exception(t("tdai_memory.store.query_l0_for_l1_failed"))
             return []
@@ -312,9 +335,9 @@ class PostgresStore:
         try:
             async with self._pool.acquire() as conn:
                 rows = await conn.fetch(
-                    "SELECT id, message_text, recorded_at FROM l0_conversations WHERE agent_id = $1", agent_id
+                    "SELECT id, message_text, metadata_json, recorded_at FROM l0_conversations WHERE agent_id = $1", agent_id
                 )
-                return [dict(row) for row in rows]
+                return [_decode_l0_row(row) for row in rows]
         except Exception:
             logger.exception(t("tdai_memory.store.get_all_l0_texts_failed"))
             return []
@@ -498,7 +521,7 @@ class PostgresStore:
             async with self._pool.acquire() as conn:
                 rows = await conn.fetch(
                     """
-                    SELECT id, role, message_text, recorded_at,
+                    SELECT id, role, message_text, metadata_json, recorded_at,
                            ts_rank(to_tsvector('simple', fts_text), to_tsquery('simple', $3)) AS score
                     FROM l0_conversations
                     WHERE agent_id = $1
@@ -510,7 +533,7 @@ class PostgresStore:
                     limit,
                     tsquery,
                 )
-                return [dict(row) for row in rows]
+                return [_decode_l0_row(row) for row in rows]
         except Exception:
             logger.exception(t("tdai_memory.store.search_l0_fts_failed"))
             return []
@@ -802,6 +825,7 @@ class PostgresStore:
                         message_text=row["message_text"],
                         recorded_at=str(row["recorded_at"]),
                         timestamp=row["timestamp"],
+                        metadata=row.get("metadata", {}),
                     )
                     await qdrant_store.upsert_l0(record, embedding)
                 except Exception:
@@ -817,9 +841,9 @@ class PostgresStore:
         try:
             async with self._pool.acquire() as conn:
                 rows = await conn.fetch(
-                    "SELECT id, agent_id, session_key, session_id, role, message_text, recorded_at, timestamp FROM l0_conversations"
+                    "SELECT id, agent_id, session_key, session_id, role, message_text, metadata_json, recorded_at, timestamp FROM l0_conversations"
                 )
-                return [dict(row) for row in rows]
+                return [_decode_l0_row(row) for row in rows]
         except Exception:
             return []
 

@@ -1,4 +1,5 @@
 import sys
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -8,6 +9,7 @@ import pytest
 BACKEND_DIR = Path(__file__).resolve().parents[1] / "backend"
 sys.path.insert(0, str(BACKEND_DIR))
 
+from tdai_memory.models import L0Record
 from tdai_memory.store.postgres import PostgresStore, _jieba_tsquery
 
 
@@ -36,6 +38,23 @@ class FakePool:
 
     def acquire(self):
         return FakeAcquire(FakeConn(self.row))
+
+
+class FakeExecuteConn:
+    def __init__(self):
+        self.calls = []
+
+    async def execute(self, query, *args):
+        self.calls.append((query, args))
+        return "INSERT 0 1"
+
+
+class FakeExecutePool:
+    def __init__(self, conn):
+        self.conn = conn
+
+    def acquire(self):
+        return FakeAcquire(self.conn)
 
 
 @pytest.mark.asyncio
@@ -75,3 +94,32 @@ def test_jieba_tsquery_drops_punctuation_tokens():
     assert "（" not in tsquery
     assert "）" not in tsquery
     assert "。" not in tsquery
+
+
+@pytest.mark.asyncio
+async def test_upsert_l0_writes_metadata_json():
+    conn = FakeExecuteConn()
+    store = PostgresStore("postgresql://example/db")
+    store._pool = FakeExecutePool(conn)
+    record = L0Record(
+        id="l0_1",
+        agent_id="agent-1",
+        session_key="session-1",
+        role="user",
+        message_text="你好",
+        recorded_at="2026-05-26T02:21:37+00:00",
+        timestamp=1779762096,
+        metadata={
+            "conversation_kind": "agent_to_agent",
+            "sender_name": "Sender",
+            "sender_type": "agent",
+            "recv_name": "Receiver",
+            "recv_type": "agent",
+        },
+    )
+
+    assert await store.upsert_l0(record) is True
+
+    query, args = conn.calls[0]
+    assert "metadata_json" in query
+    assert json.loads(args[6]) == record.metadata

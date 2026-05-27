@@ -32,10 +32,11 @@ class L0Record(BaseModel):
     agent_id: str
     session_key: str
     session_id: str = ""
-    role: Literal["user", "assistant"]
+    role: Literal["user", "assistant", "tool"]
     message_text: str
     recorded_at: str  # ISO 8601
     timestamp: int  # epoch ms
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 # ───────────────────────────────────────
@@ -55,7 +56,7 @@ class MemoryRecord(BaseModel):
     )
     scene_name: str = ""
     source_message_ids: list[str] = Field(default_factory=list)
-    metadata: EpisodicMetadata | dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] | EpisodicMetadata = Field(default_factory=dict)
     timestamps: list[str] = Field(default_factory=list)
     created_at: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
@@ -88,6 +89,7 @@ class ConversationMessage(BaseModel):
     role: str
     content: str
     timestamp: int
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class ToolCallMessage(BaseModel):
@@ -109,6 +111,7 @@ class CompletedTurn(BaseModel):
     session_id: str = ""
     started_at: int | None = None  # epoch ms
     original_user_message_count: int | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 # ───────────────────────────────────────
