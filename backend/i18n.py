@@ -31,6 +31,7 @@ _MESSAGES = {
         "graph.agent.chat_node_started": "Agent graph chat node 開始：messages=%s think_mode=%s has_args=%s",
         "graph.agent.chat_node_tool_chunk_received": "Agent graph chat node 收到工具調用：tool_name=%s",
         "graph.agent.chat_node_tool_result_chunk_received": "Agent graph chat node 收到工具結果：content_length=%s",
+        "graph.agent.current_time_message": "當前時間：%s",
         "graph.agent.empty_llm_response": "LLM 回覆沒有可輸出的內容",
         "graph.agent.llm_model_missing": "LLM model 未設置",
         "graph_node.tool_call_invalid_arguments": "工具調用 arguments 必須是 JSON object",
@@ -138,6 +139,7 @@ _MESSAGES = {
         "graph.agent.chat_node_started": "Agent graph chat node started: messages=%s think_mode=%s has_args=%s",
         "graph.agent.chat_node_tool_chunk_received": "Agent graph chat node received tool call: tool_name=%s",
         "graph.agent.chat_node_tool_result_chunk_received": "Agent graph chat node received tool result: content_length=%s",
+        "graph.agent.current_time_message": "Current time: %s",
         "graph.agent.empty_llm_response": "LLM response has no output content",
         "graph.agent.llm_model_missing": "LLM model is not configured",
         "graph_node.tool_call_invalid_arguments": "Tool call arguments must be a JSON object",
@@ -339,8 +341,10 @@ _MESSAGES["zh_HK"].update(
  'tdai_memory.offload.backend_health_check_failed': 'Backend health check 失敗',
  'tdai_memory.offload.backend_judge_l15_failed': 'Backend judge_l15 失敗',
  'tdai_memory.offload.backend_summarize_failed': 'Backend summarize 失敗',
+ 'tdai_memory.offload.batch_summarize_retry': 'Batch summarize 失敗，準備重試：attempt=%d delay_seconds=%d',
  'tdai_memory.offload.build_mermaid_flowchart_failed': '建立 Mermaid flowchart 失敗',
  'tdai_memory.offload.generate_mmd_summary_failed': '生成 MMD summary 失敗',
+ 'tdai_memory.offload.invalid_batch_summary_response': 'Batch summarize response 格式無效',
  'tdai_memory.offload.pending_tool_call_missing': '找不到 pending tool call：tool_call_id=%s '
                                                   'session=%s',
  'tdai_memory.offload.reclaimed_data': '已回收 offload data：agent=%s expired_entries=%d '
@@ -484,8 +488,10 @@ _MESSAGES["en"].update(
  'tdai_memory.offload.backend_health_check_failed': 'Backend health check failed',
  'tdai_memory.offload.backend_judge_l15_failed': 'Backend judge_l15 failed',
  'tdai_memory.offload.backend_summarize_failed': 'Backend summarize failed',
+ 'tdai_memory.offload.batch_summarize_retry': 'Batch summarize failed, retrying: attempt=%d delay_seconds=%d',
  'tdai_memory.offload.build_mermaid_flowchart_failed': 'Failed to build Mermaid flowchart',
  'tdai_memory.offload.generate_mmd_summary_failed': 'Failed to generate MMD summary',
+ 'tdai_memory.offload.invalid_batch_summary_response': 'Invalid batch summarize response format',
  'tdai_memory.offload.pending_tool_call_missing': 'No pending tool call found for tool_call_id=%s '
                                                   'session=%s',
  'tdai_memory.offload.reclaimed_data': 'Reclaimed offload data for agent=%s: expired_entries=%d, '

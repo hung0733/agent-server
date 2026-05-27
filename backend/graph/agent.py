@@ -61,8 +61,12 @@ async def chat_node(state: MessageState, config: RunnableConfig):
     if ltm_msg:
         messages.append(AIMessage(content=ltm_msg))
 
-    current_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S %Z")
-    messages.append(AIMessage(content="當前時間：%s" % current_time))
+    current_time = datetime.now(timezone.utc).strftime(
+        "%A, %B %-d, %Y — %I:%M %p %Z"
+    )
+    messages.append(
+        AIMessage(content=t("graph.agent.current_time_message") % current_time)
+    )
 
     messages += list(state["messages"])
 
@@ -72,10 +76,10 @@ async def chat_node(state: MessageState, config: RunnableConfig):
         think_mode,
         bool(args),
     )
-    logger.info(messages)
+    # logger.info(messages)
 
     model_with_tools = _bind_tools(model_to_use, _tools_for_config(config))
-    response: AIMessage = await model_to_use.ainvoke(messages)
+    response: AIMessage = await model_with_tools.ainvoke(messages)
     GraphNode.log_base_message_response(response)
     response.additional_kwargs = {
         **response.additional_kwargs,
@@ -91,7 +95,7 @@ async def end_node(state: MessageState, config: RunnableConfig):
     session_id: str = config["configurable"]["thread_id"] or ""  # type: ignore
     agent_id: str = config["configurable"]["agent_id"] or ""  # type: ignore
     messages: list[BaseMessage] = state["messages"]
-    logger.info(messages)
+    # logger.info(messages)
 
     turn: CompletedTurn = CompletedTurn(
         session_key=session_id,

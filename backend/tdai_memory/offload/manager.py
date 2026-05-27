@@ -68,13 +68,37 @@ async def _summarize_batch(
         timeout=config.llm.timeout_ms / 1000.0,
     )
     content = response.choices[0].message.content.strip()
-    parsed = json.loads(content)
+    parsed = _parse_batch_summary_content(content)
     results: list[tuple[str, int]] = []
     for item in parsed:
-        summary = item["summary"]
-        score = min(max(int(item["score"]), 0), 10)
+        if isinstance(item, str):
+            summary = item
+            score = 10
+        elif isinstance(item, dict):
+            summary = str(item.get("summary", ""))
+            score = min(max(int(item.get("score", 10)), 0), 10)
+        else:
+            raise ValueError(t("tdai_memory.offload.invalid_batch_summary_response"))
         results.append((summary, score))
     return results
+
+
+def _parse_batch_summary_content(content: str) -> list:
+    parsed = json.loads(content)
+    if isinstance(parsed, str):
+        try:
+            parsed = json.loads(parsed)
+        except json.JSONDecodeError:
+            return [parsed]
+    if isinstance(parsed, dict):
+        for key in ("results", "summaries", "items"):
+            value = parsed.get(key)
+            if isinstance(value, list):
+                return value
+    if isinstance(parsed, list):
+        return parsed
+    raise ValueError(t("tdai_memory.offload.invalid_batch_summary_response"))
+
 
 _REFS_DIR = "refs"
 _MMDS_DIR = "mmds"
@@ -347,8 +371,8 @@ class OffloadManager:
                         await asyncio.sleep(delay)
                     else:
                         results = [
-                            (v["result_text"][:200], 10)
-                            for _, _, _, v in pairs
+                            (result_text[:200], 10)
+                            for _, _, _, result_text in pairs
                         ]
 
             offload_dir = os.path.join(self.data_dir, agent_id, "offload")
