@@ -101,7 +101,7 @@ async def generate_mmd_summary(
             ],
             temperature=0.0,
             timeout=config.llm.timeout_ms / 1000.0,
-            **tdai_memory_thinking_kwargs(),
+            **tdai_memory_thinking_kwargs(config.llm.model),
         )
         return response.choices[0].message.content.strip()
     except Exception:

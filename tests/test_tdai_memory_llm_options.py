@@ -8,10 +8,18 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 TDAI_MEMORY_DIR = PROJECT_ROOT / "backend" / "tdai_memory"
 
 
-def test_tdai_memory_thinking_kwargs_enables_thinking():
-    assert tdai_memory_thinking_kwargs() == {
-        "extra_body": {"chat_template_kwargs": {"enable_thinking": True}}
-    }
+def test_tdai_memory_thinking_kwargs_enables_thinking_for_qwen36():
+    expected = {"extra_body": {"chat_template_kwargs": {"enable_thinking": True}}}
+
+    assert tdai_memory_thinking_kwargs("qwen3.6") == expected
+    assert tdai_memory_thinking_kwargs("Qwen3.6-xxx") == expected
+
+
+def test_tdai_memory_thinking_kwargs_skips_non_qwen36_models():
+    assert tdai_memory_thinking_kwargs("qwen3") == {}
+    assert tdai_memory_thinking_kwargs("qwen2.5") == {}
+    assert tdai_memory_thinking_kwargs("gpt-4o") == {}
+    assert tdai_memory_thinking_kwargs(None) == {}
 
 
 def test_tdai_memory_chat_completion_calls_enable_thinking():
@@ -47,6 +55,6 @@ def _has_thinking_kwargs(node: ast.Call) -> bool:
             continue
         value = keyword.value
         if isinstance(value, ast.Call) and isinstance(value.func, ast.Name):
-            if value.func.id == "tdai_memory_thinking_kwargs":
+            if value.func.id == "tdai_memory_thinking_kwargs" and len(value.args) == 1:
                 return True
     return False

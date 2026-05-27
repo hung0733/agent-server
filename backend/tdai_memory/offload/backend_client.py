@@ -90,7 +90,7 @@ class BackendClient:
                 ],
                 temperature=0.0,
                 timeout=self._timeout,
-                **tdai_memory_thinking_kwargs(),
+                **tdai_memory_thinking_kwargs(model),
             )
             content = response.choices[0].message.content.strip()
             return json.loads(content)
@@ -110,7 +110,7 @@ class BackendClient:
                 ],
                 temperature=0.0,
                 timeout=self._timeout,
-                **tdai_memory_thinking_kwargs(),
+                **tdai_memory_thinking_kwargs(model),
             )
             content = response.choices[0].message.content.strip()
             return json.loads(content)
@@ -130,7 +130,7 @@ class BackendClient:
                 ],
                 temperature=0.0,
                 timeout=self._timeout,
-                **tdai_memory_thinking_kwargs(),
+                **tdai_memory_thinking_kwargs(model),
             )
             content = response.choices[0].message.content.strip()
             if "```mermaid" in content:
@@ -164,7 +164,7 @@ class BackendClient:
                 ],
                 temperature=0.0,
                 timeout=self._timeout,
-                **tdai_memory_thinking_kwargs(),
+                **tdai_memory_thinking_kwargs(model),
             )
             content = response.choices[0].message.content.strip()
             return json.loads(content)

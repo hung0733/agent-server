@@ -461,7 +461,7 @@ async def _call_llm(
         ],
         max_tokens=config.llm.max_tokens,
         timeout=config.llm.timeout_ms / 1000.0,
-        **tdai_memory_thinking_kwargs(),
+        **tdai_memory_thinking_kwargs(model),
     )
     return response.choices[0].message.content or ""
 
@@ -784,7 +784,7 @@ async def bootstrap_agent_profile(
         response_format={"type": "json_object"},
         max_tokens=config.llm.max_tokens,
         timeout=config.llm.timeout_ms / 1000.0,
-        **tdai_memory_thinking_kwargs(),
+        **tdai_memory_thinking_kwargs(model),
     )
     raw = response.choices[0].message.content or ""
 

@@ -55,7 +55,7 @@ async def summarize_tool_result(
             ],
             temperature=0.0,
             timeout=config.llm.timeout_ms / 1000.0,
-            **tdai_memory_thinking_kwargs(),
+            **tdai_memory_thinking_kwargs(config.llm.model),
         )
         content = response.choices[0].message.content.strip()
         parsed = json.loads(content)

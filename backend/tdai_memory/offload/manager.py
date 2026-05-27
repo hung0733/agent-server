@@ -67,7 +67,7 @@ async def _summarize_batch(
         ],
         temperature=0.0,
         timeout=config.llm.timeout_ms / 1000.0,
-        **tdai_memory_thinking_kwargs(),
+        **tdai_memory_thinking_kwargs(config.llm.model),
     )
     content = response.choices[0].message.content.strip()
     parsed = _parse_batch_summary_content(content)
@@ -625,7 +625,7 @@ class OffloadManager:
                 ],
                 temperature=0.0,
                 timeout=self.config.llm.timeout_ms / 1000.0,
-                **tdai_memory_thinking_kwargs(),
+                **tdai_memory_thinking_kwargs(self.config.llm.model),
             )
             content = response.choices[0].message.content.strip()
             result = json.loads(content)
@@ -705,7 +705,7 @@ class OffloadManager:
                 ],
                 temperature=0.0,
                 timeout=self.config.llm.timeout_ms / 1000.0,
-                **tdai_memory_thinking_kwargs(),
+                **tdai_memory_thinking_kwargs(self.config.llm.model),
             )
             skill_content = response.choices[0].message.content
         except Exception:

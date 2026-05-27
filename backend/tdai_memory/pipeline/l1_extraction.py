@@ -287,7 +287,7 @@ async def run_l1_extraction(
         temperature=0.3,
         max_tokens=config.llm.max_tokens,
         timeout=config.llm.timeout_ms / 1000,
-        **tdai_memory_thinking_kwargs(),
+        **tdai_memory_thinking_kwargs(model),
     )
 
     response_text = response.choices[0].message.content or ""
