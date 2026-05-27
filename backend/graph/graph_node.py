@@ -11,6 +11,7 @@ from langchain_core.messages import (
     HumanMessage,
 )
 from langchain_core.runnables import RunnableConfig
+from langchain_openai import ChatOpenAI
 
 from backend.i18n import t
 from backend.llm.llm import LLMSet
@@ -52,6 +53,27 @@ class MessageState(TypedDict):
 
 
 class GraphNode:
+    RUNTIME_MODEL_ARG_KEYS = ("temperature", "top_p", "presence_penalty")
+    RUNTIME_EXTRA_BODY_ARG_KEYS = ("top_k", "repetition_penalty", "min_p")
+    RUNTIME_MODEL_ARG_DEFAULTS = {
+        False: {
+            "temperature": 0.7,
+            "top_p": 0.8,
+            "presence_penalty": 1.5,
+            "top_k": 20,
+            "repetition_penalty": 1.0,
+            "min_p": 0.0,
+        },
+        True: {
+            "temperature": 1.0,
+            "top_p": 0.95,
+            "presence_penalty": 1.5,
+            "top_k": 20,
+            "repetition_penalty": 1.0,
+            "min_p": 0.0,
+        },
+    }
+
     @staticmethod
     def pack_message(state: MessageState, config: RunnableConfig) -> list[BaseMessage]:
         sys_prompt: str = GraphNode.get_configure(config, "sys_prompt", "")
@@ -85,6 +107,69 @@ class GraphNode:
             return config["configurable"][name]  # type: ignore
 
         return dflt_val
+
+    @staticmethod
+    def with_runtime_model_args(
+        config: RunnableConfig, model: ChatOpenAI
+    ) -> ChatOpenAI:
+        if not isinstance(model, ChatOpenAI):
+            return model
+
+        configurable = config.get("configurable", {}) if config else {}
+        args = configurable.get("args") or {}
+        if not isinstance(args, dict):
+            args = {}
+
+        think_mode = bool(configurable.get("think_mode"))
+        runtime_args: dict[str, Any] = {}
+        qwen36_model = model.model.lower().startswith("qwen3.6")
+        if qwen36_model:
+            runtime_args.update(GraphNode.RUNTIME_MODEL_ARG_DEFAULTS[think_mode])
+
+        runtime_args.update(
+            {
+                key: args[key]
+                for key in (
+                    *GraphNode.RUNTIME_MODEL_ARG_KEYS,
+                    *GraphNode.RUNTIME_EXTRA_BODY_ARG_KEYS,
+                )
+                if key in args and args[key] is not None
+            }
+        )
+
+        if not runtime_args:
+            return model
+
+        update = {
+            key: runtime_args[key]
+            for key in GraphNode.RUNTIME_MODEL_ARG_KEYS
+            if key in runtime_args and runtime_args[key] is not None
+        }
+        runtime_extra_body = {
+            key: runtime_args[key]
+            for key in GraphNode.RUNTIME_EXTRA_BODY_ARG_KEYS
+            if key in runtime_args and runtime_args[key] is not None
+        }
+        if qwen36_model:
+            runtime_extra_body = {
+                "chat_template_kwargs": {"enable_thinking": think_mode},
+                **runtime_extra_body,
+            }
+        if runtime_extra_body:
+            update["extra_body"] = {
+                **GraphNode._model_extra_body(model),
+                **runtime_extra_body,
+            }
+
+        return model.model_copy(update=update)
+
+    @staticmethod
+    def _model_extra_body(model: ChatOpenAI) -> dict[str, Any]:
+        extra_body: dict[str, Any] = {}
+        if isinstance(model.extra_body, dict):
+            extra_body.update(model.extra_body)
+
+        return extra_body
 
     @staticmethod
     def stream_chunks_to_content(chunks: list[StreamChunk]) -> str:

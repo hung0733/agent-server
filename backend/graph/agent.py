@@ -10,6 +10,7 @@ from langchain_core.messages import (
     HumanMessage,
 )
 from langchain_core.runnables import RunnableConfig
+from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
 
@@ -27,13 +28,14 @@ from backend.utils.tools import Tools
 
 logger = logging.getLogger(__name__)
 
+
 async def chat_node(state: MessageState, config: RunnableConfig):
     models: LLMSet = GraphNode.get_configure(config, "models")
     involves_secrets: bool = GraphNode.get_configure(config, "involves_secrets", False)
     think_mode: bool = GraphNode.get_configure(config, "think_mode", False)
     args: Dict[str, Any] = GraphNode.get_configure(config, "args", {})
 
-    model_to_use: Optional[BaseChatModel] = models.getModel(2, involves_secrets)
+    model_to_use: Optional[ChatOpenAI] = models.getModel(2, involves_secrets)
     if not model_to_use:
         raise ValueError(t("graph.agent.llm_model_missing"))
 
@@ -47,6 +49,7 @@ async def chat_node(state: MessageState, config: RunnableConfig):
     )
     # logger.info(messages)
 
+    model_to_use = GraphNode.with_runtime_model_args(config, model_to_use)
     model_with_tools = _bind_tools(model_to_use, _tools_for_config(config))
     response: AIMessage = await model_with_tools.ainvoke(messages)
     GraphNode.log_base_message_response(response)

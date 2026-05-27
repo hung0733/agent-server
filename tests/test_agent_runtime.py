@@ -8,6 +8,7 @@ from langchain_core.messages import (
     SystemMessage,
     ToolMessage,
 )
+from langchain_openai import ChatOpenAI
 
 from backend.agent.agent import Agent
 from backend.graph.agent import (
@@ -65,6 +66,127 @@ class FakeAsyncSessionContext:
         return None
 
 
+def _chat_openai(model: str, extra_body=None) -> ChatOpenAI:
+    return ChatOpenAI(
+        api_key="test-key",
+        base_url="http://example.com",
+        model=model,
+        extra_body=extra_body,
+    )
+
+
+def test_runtime_model_args_uses_non_thinking_defaults():
+    model = _chat_openai("qwen3.6-chat")
+    config = GraphNode.prepare_chat_node_config(
+        thread_id="session-1",
+        models=FakeModels(model),
+        sys_prompt="",
+        involves_secrets=False,
+        think_mode=False,
+        args={"source": "test"},
+    )
+
+    bound = GraphNode.with_runtime_model_args(config, model)
+
+    assert bound.temperature == 0.7
+    assert bound.top_p == 0.8
+    assert bound.presence_penalty == 1.5
+    assert bound.extra_body == {
+        "chat_template_kwargs": {"enable_thinking": False},
+        "top_k": 20,
+        "repetition_penalty": 1.0,
+        "min_p": 0.0,
+    }
+
+
+def test_runtime_model_args_uses_thinking_defaults():
+    model = _chat_openai("qwen3.6-chat")
+    config = GraphNode.prepare_chat_node_config(
+        thread_id="session-1",
+        models=FakeModels(model),
+        sys_prompt="",
+        involves_secrets=False,
+        think_mode=True,
+        args={},
+    )
+
+    bound = GraphNode.with_runtime_model_args(config, model)
+
+    assert bound.temperature == 1.0
+    assert bound.top_p == 0.95
+    assert bound.presence_penalty == 1.5
+    assert bound.extra_body == {
+        "chat_template_kwargs": {"enable_thinking": True},
+        "top_k": 20,
+        "repetition_penalty": 1.0,
+        "min_p": 0.0,
+    }
+
+
+def test_runtime_model_args_only_defaults_for_qwen36_models():
+    model = _chat_openai("gpt-4.1-mini")
+    config = GraphNode.prepare_chat_node_config(
+        thread_id="session-1",
+        models=FakeModels(model),
+        sys_prompt="",
+        involves_secrets=False,
+        think_mode=True,
+        args={},
+    )
+
+    assert GraphNode.with_runtime_model_args(config, model) is model
+
+
+def test_runtime_model_args_still_applies_explicit_args_for_other_models():
+    model = _chat_openai("gpt-4.1-mini")
+    config = GraphNode.prepare_chat_node_config(
+        thread_id="session-1",
+        models=FakeModels(model),
+        sys_prompt="",
+        involves_secrets=False,
+        think_mode=True,
+        args={"temperature": 0.3, "top_k": 12, "source": "test"},
+    )
+
+    bound = GraphNode.with_runtime_model_args(config, model)
+
+    assert bound.temperature == 0.3
+    assert bound.extra_body == {"top_k": 12}
+
+
+def test_runtime_model_args_allows_args_to_override_defaults_and_preserves_zero():
+    model = _chat_openai("qwen3.6-chat", extra_body={"existing": True, "top_k": 99})
+    config = GraphNode.prepare_chat_node_config(
+        thread_id="session-1",
+        models=FakeModels(model),
+        sys_prompt="",
+        involves_secrets=False,
+        think_mode=True,
+        args={
+            "temperature": 0,
+            "top_p": 0.5,
+            "presence_penalty": None,
+            "top_k": 0,
+            "repetition_penalty": 1.2,
+            "min_p": 0.0,
+            "source": "test",
+        },
+    )
+
+    bound = GraphNode.with_runtime_model_args(config, model)
+
+    assert bound.temperature == 0
+    assert bound.top_p == 0.5
+    assert bound.presence_penalty == 1.5
+    assert bound.extra_body == {
+        "existing": True,
+        "chat_template_kwargs": {"enable_thinking": True},
+        "top_k": 0,
+        "repetition_penalty": 1.2,
+        "min_p": 0.0,
+    }
+
+
 @pytest.mark.asyncio
 async def test_chat_node_waits_for_llm_and_returns_ai_message():
     llm = FakeLLM()
@@ -91,6 +213,58 @@ async def test_chat_node_waits_for_llm_and_returns_ai_message():
 
     assert isinstance(result["messages"][0], AIMessage)
     assert result["messages"][0].content == "你好"
+
+
+@pytest.mark.asyncio
+async def test_chat_node_applies_runtime_model_args_before_binding_tools(monkeypatch):
+    captured = {}
+
+    class BoundLLM:
+        async def ainvoke(self, messages):
+            captured["messages"] = messages
+            return AIMessage(content="你好")
+
+    def fake_bind_tools(model, tools):
+        captured["model"] = model
+        captured["tools"] = tools
+        return BoundLLM()
+
+    monkeypatch.setattr("backend.graph.agent._bind_tools", fake_bind_tools)
+    llm = _chat_openai("qwen3.6-chat")
+    config = GraphNode.prepare_chat_node_config(
+        thread_id="session-1",
+        models=FakeModels(llm),
+        sys_prompt="",
+        involves_secrets=False,
+        think_mode=False,
+        args={"temperature": 0.2, "top_k": 10},
+    )
+    config["configurable"]["sandbox"] = FakeSandbox()
+
+    result = await chat_node({"messages": [HumanMessage(content="你好")]}, config)
+
+    assert isinstance(result["messages"][0], AIMessage)
+    assert [tool.name for tool in captured["tools"]] == [
+        "run_command",
+        "write_file",
+        "read_file",
+        "list_files",
+        "delete_file",
+        "copy",
+        "rename",
+        "pwd",
+        "cd",
+    ]
+    assert captured["model"].temperature == 0.2
+    assert captured["model"].top_p == 0.8
+    assert captured["model"].presence_penalty == 1.5
+    assert captured["model"].extra_body == {
+        "chat_template_kwargs": {"enable_thinking": False},
+        "top_k": 10,
+        "repetition_penalty": 1.0,
+        "min_p": 0.0,
+    }
+    assert captured["messages"]
 
 
 @pytest.mark.asyncio
