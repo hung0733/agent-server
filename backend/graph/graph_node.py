@@ -1,8 +1,15 @@
+from datetime import datetime, timezone
 import json
 import logging
 from typing import Annotated, Any, Dict, Optional, TypedDict
 
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    SystemMessage,
+    ToolMessage,
+    HumanMessage,
+)
 from langchain_core.runnables import RunnableConfig
 
 from backend.i18n import t
@@ -45,6 +52,40 @@ class MessageState(TypedDict):
 
 
 class GraphNode:
+    @staticmethod
+    def pack_message(state: MessageState, config: RunnableConfig) -> list[BaseMessage]:
+        sys_prompt: str = GraphNode.get_configure(config, "sys_prompt", "")
+        ltm_msg: str = GraphNode.get_configure(config, "ltm_msg", "")
+        timelines: list[BaseMessage] = GraphNode.get_configure(config, "timelines", [])
+
+        messages: list[BaseMessage] = []
+        if sys_prompt:
+            messages.append(SystemMessage(content=sys_prompt))
+
+        if timelines:
+            messages += timelines
+
+        if ltm_msg:
+            messages.append(AIMessage(content=ltm_msg))
+
+        current_time = datetime.now(timezone.utc).strftime(
+            "%A, %B %-d, %Y — %I:%M %p %Z"
+        )
+        messages.append(
+            AIMessage(content=t("graph.agent.current_time_message") % current_time)
+        )
+
+        messages += list(state["messages"])
+
+        return messages
+
+    @staticmethod
+    def get_configure(config: RunnableConfig, name: str, dflt_val: Any = None) -> Any:
+        if config and config["configurable"] and config["configurable"][name]:  # type: ignore
+            return config["configurable"][name]  # type: ignore
+
+        return dflt_val
+
     @staticmethod
     def stream_chunks_to_content(chunks: list[StreamChunk]) -> str:
         return "".join(
@@ -198,8 +239,6 @@ class GraphNode:
         args: Optional[Dict[str, Any]] = None,
         sender_name: str = "",
         recv_name: str = "",
-        stm_trigger_token: int = 0,
-        stm_summary_token: int = 0,
         user_db_id: int | None = None,
         agent_id: str = "",
         ltm_msg: str = "",
@@ -216,8 +255,6 @@ class GraphNode:
                 "step_id": step_id,
                 "sender_name": sender_name,
                 "recv_name": recv_name,
-                "stm_trigger_token": stm_trigger_token,
-                "stm_summary_token": stm_summary_token,
                 "user_db_id": user_db_id,
                 "agent_id": agent_id,
                 "ltm_msg": ltm_msg,

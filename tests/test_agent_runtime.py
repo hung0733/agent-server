@@ -11,14 +11,18 @@ from langchain_core.messages import (
 
 from backend.agent.agent import Agent
 from backend.graph.agent import (
-    _get_allowed_agent_names,
-    assign_task_node,
     chat_node,
-    graph,
-    route_after_assign_task,
-    route_after_chat,
+    graph as agent_graph,
+    route_after_chat as agent_route_after_chat,
 )
 from backend.graph.graph_node import GraphNode
+from backend.graph.supervisor import (
+    _get_allowed_agent_names,
+    assign_task_node,
+    graph as supervisor_graph,
+    route_after_assign_task,
+    route_after_chat as supervisor_route_after_chat,
+)
 from backend.llm.types import StreamChunk
 
 
@@ -131,7 +135,7 @@ async def test_graph_routes_assign_task_tool_calls_through_assign_task_node():
     )
     config["configurable"]["assign_task_allowed_agent_names"] = ["Hephaestus"]
 
-    result = await graph.ainvoke(
+    result = await supervisor_graph.ainvoke(
         {"messages": [HumanMessage(content="hello")]},
         config=config,
     )
@@ -219,7 +223,7 @@ async def test_graph_retries_invalid_assign_task_payload():
     )
     config["configurable"]["assign_task_allowed_agent_names"] = ["Hephaestus"]
 
-    result = await graph.ainvoke(
+    result = await supervisor_graph.ainvoke(
         {"messages": [HumanMessage(content="hello")]},
         config=config,
     )
@@ -255,9 +259,9 @@ async def test_get_allowed_agent_names_loads_active_user_agent_names(monkeypatch
                 type("AgentObj", (), {"name": "OldAgent", "is_active": False})(),
             ]
 
-    monkeypatch.setattr("backend.graph.agent.AgentDAO", FakeAgentDAO)
+    monkeypatch.setattr("backend.graph.supervisor.AgentDAO", FakeAgentDAO)
     monkeypatch.setattr(
-        "backend.graph.agent.async_session_factory",
+        "backend.graph.supervisor.async_session_factory",
         lambda: FakeAsyncSessionContext(),
     )
 
@@ -306,13 +310,12 @@ async def test_graph_routes_other_tool_calls_through_tools_node():
     )
     config["configurable"]["sandbox"] = FakeSandbox()
 
-    result = await graph.ainvoke(
+    result = await agent_graph.ainvoke(
         {"messages": [HumanMessage(content="hello")]},
         config=config,
     )
 
     assert [tool.name for tool in llm.bound_tools] == [
-        "assign_task",
         "run_command",
         "write_file",
         "read_file",
@@ -329,7 +332,7 @@ async def test_graph_routes_other_tool_calls_through_tools_node():
     assert result["messages"][-1].additional_kwargs["text_done"] is True
 
 
-def test_route_after_chat_routes_assign_task_and_other_tool_calls():
+def test_agent_route_after_chat_routes_tool_calls_to_tools_node():
     assign_task_message = AIMessage(
         content="",
         tool_calls=[
@@ -351,9 +354,45 @@ def test_route_after_chat_routes_assign_task_and_other_tool_calls():
         ],
     )
 
-    assert route_after_chat({"messages": [assign_task_message]}) == "assign_task"
-    assert route_after_chat({"messages": [other_tool_message]}) == "tools"
-    assert route_after_chat({"messages": [HumanMessage(content="hello")]}) == "__end__"
+    assert agent_route_after_chat({"messages": [assign_task_message]}) == "tools"
+    assert agent_route_after_chat({"messages": [other_tool_message]}) == "tools"
+    assert (
+        agent_route_after_chat({"messages": [HumanMessage(content="hello")]})
+        == "__end__"
+    )
+
+
+def test_supervisor_route_after_chat_routes_assign_task_to_assign_task_node():
+    assign_task_message = AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": "assign_task",
+                "args": {"task_json": "{}"},
+                "id": "call-1",
+            }
+        ],
+    )
+    other_tool_message = AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": "run_command",
+                "args": {"command": "pwd"},
+                "id": "call-2",
+            }
+        ],
+    )
+
+    assert (
+        supervisor_route_after_chat({"messages": [assign_task_message]})
+        == "assign_task"
+    )
+    assert supervisor_route_after_chat({"messages": [other_tool_message]}) == "tools"
+    assert (
+        supervisor_route_after_chat({"messages": [HumanMessage(content="hello")]})
+        == "__end__"
+    )
 
 
 class FakeGraph:
@@ -391,7 +430,7 @@ async def test_prepare_sys_prompt_defaults_to_empty_string():
         "user",
     )
 
-    await agent.prepare_sys_prompt()
+    await agent.prepare_sys_prompt("")
 
     assert agent.sys_prompt == ""
 
@@ -442,7 +481,9 @@ async def test_chat_node_logs_content_lengths_and_tool_chunks(monkeypatch):
                 ],
             )
 
-    monkeypatch.setattr("backend.graph.graph_node.logger.info", lambda *args: calls.append(args))
+    monkeypatch.setattr(
+        "backend.graph.graph_node.logger.info", lambda *args: calls.append(args)
+    )
     config = GraphNode.prepare_chat_node_config(
         thread_id="session-1",
         models=FakeModels(LoggingLLM()),
@@ -500,7 +541,12 @@ def test_stream_chunks_to_message_preserves_ai_message_fields():
     assert message.content == "hello"
     assert message.additional_kwargs["reasoning_content"] == "reason"
     assert message.tool_calls == [
-        {"name": "search", "args": {"query": "hello"}, "id": "call-1", "type": "tool_call"}
+        {
+            "name": "search",
+            "args": {"query": "hello"},
+            "id": "call-1",
+            "type": "tool_call",
+        }
     ]
 
 
@@ -511,7 +557,7 @@ def test_stream_chunks_to_message_parses_openai_tool_call_arguments():
                 chunk_type="tool",
                 data={
                     "id": "call-1",
-                    "function": {"name": "search", "arguments": "{\"query\": \"hello\"}"},
+                    "function": {"name": "search", "arguments": '{"query": "hello"}'},
                 },
             )
         ]
@@ -519,7 +565,12 @@ def test_stream_chunks_to_message_parses_openai_tool_call_arguments():
 
     assert isinstance(message, AIMessage)
     assert message.tool_calls == [
-        {"name": "search", "args": {"query": "hello"}, "id": "call-1", "type": "tool_call"}
+        {
+            "name": "search",
+            "args": {"query": "hello"},
+            "id": "call-1",
+            "type": "tool_call",
+        }
     ]
 
 
@@ -594,5 +645,10 @@ async def test_chat_node_preserves_reasoning_and_tool_calls():
     assert message.additional_kwargs["reasoning_content"] == "reason"
     assert message.additional_kwargs["text_done"] is True
     assert message.tool_calls == [
-        {"name": "search", "args": {"query": "hello"}, "id": "call-1", "type": "tool_call"}
+        {
+            "name": "search",
+            "args": {"query": "hello"},
+            "id": "call-1",
+            "type": "tool_call",
+        }
     ]

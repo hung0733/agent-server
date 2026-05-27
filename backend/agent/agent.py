@@ -15,7 +15,6 @@ from langchain_core.runnables import RunnableConfig
 
 from backend.dao import AgentSessionDAO
 from backend.db.session import async_session_factory
-from backend.dto.agent import SUMMARY_TRIGGER_TOKEN, SUMMARY_USAGE_TOKEN
 from backend.graph.graph_node import GraphNode
 from backend.graph.graph_store import GraphStore
 from backend.graph.agent import workflow
@@ -44,9 +43,6 @@ class Agent:
     recv_agent_name: str
     sender_agent_name: str
 
-    stm_trigger_token: int
-    stm_summary_token: int
-
     models: LLMSet
 
     def __init__(
@@ -71,9 +67,6 @@ class Agent:
         self.recv_agent_name = recv_agent_name
         self.sender_agent_name = sender_agent_name
 
-        self.stm_trigger_token = SUMMARY_TRIGGER_TOKEN
-        self.stm_summary_token = SUMMARY_USAGE_TOKEN
-
         if Agent._graph is None:
             Agent._graph = workflow.compile(checkpointer=GraphStore.checkpointer)
 
@@ -93,13 +86,19 @@ class Agent:
 
     @classmethod
     async def get_agent(cls, agent_id: str, session_id: str):
-        agent = cls(*(await cls.get_db_agent(agent_id, session_id)))
+        row = await cls.get_db_agent(agent_id, session_id)
+        if row[6] == "supervisor":
+            from backend.agent.supervisor import Supervisor
+
+            agent = Supervisor(*row)
+        else:
+            agent = cls(*row)
         await agent.init_llm_models()
 
         return agent
 
-    async def prepare_sys_prompt(self):
-        self.sys_prompt = ""
+    async def prepare_sys_prompt(self, mem_prompt: str):
+        self.sys_prompt = mem_prompt
 
     async def init_llm_models(self):
         self.models = await LLMSet.from_model(self.agent_db_id)
@@ -142,11 +141,12 @@ class Agent:
             user_text=message,
         )
 
-        sys_prompt: str = ""
         ltm_msg: str = ""
         timelines: list[BaseMessage] = []
-        if ret.append_system_context:
-            sys_prompt = ret.append_system_context
+
+        await agent.prepare_sys_prompt(
+            ret.append_system_context if ret.append_system_context else ""
+        )
 
         if ret.prepend_context:
             ltm_msg = ret.prepend_context
@@ -169,15 +169,13 @@ class Agent:
         config: RunnableConfig = GraphNode.prepare_chat_node_config(
             thread_id=agent.session_id,
             models=agent.models,
-            sys_prompt=sys_prompt,
+            sys_prompt=agent.sys_prompt,
             involves_secrets=False,
             think_mode=think_mode,
             step_id=step_id,
             args=metadata,
             sender_name=agent.sender_agent_name,
             recv_name=agent.recv_agent_name,
-            stm_trigger_token=agent.stm_trigger_token,
-            stm_summary_token=agent.stm_summary_token,
             user_db_id=agent.user_db_id,
             agent_id=agent.agent_id,
             ltm_msg=ltm_msg,
