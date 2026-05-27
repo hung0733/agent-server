@@ -7,6 +7,8 @@ import httpx
 import openai
 
 from backend.i18n import t
+from backend.tdai_memory.llm_options import tdai_memory_thinking_kwargs
+
 logger = logging.getLogger(__name__)
 
 _SUMMARIZE_PROMPT = (
@@ -88,6 +90,7 @@ class BackendClient:
                 ],
                 temperature=0.0,
                 timeout=self._timeout,
+                **tdai_memory_thinking_kwargs(),
             )
             content = response.choices[0].message.content.strip()
             return json.loads(content)
@@ -107,6 +110,7 @@ class BackendClient:
                 ],
                 temperature=0.0,
                 timeout=self._timeout,
+                **tdai_memory_thinking_kwargs(),
             )
             content = response.choices[0].message.content.strip()
             return json.loads(content)
@@ -126,6 +130,7 @@ class BackendClient:
                 ],
                 temperature=0.0,
                 timeout=self._timeout,
+                **tdai_memory_thinking_kwargs(),
             )
             content = response.choices[0].message.content.strip()
             if "```mermaid" in content:
@@ -159,6 +164,7 @@ class BackendClient:
                 ],
                 temperature=0.0,
                 timeout=self._timeout,
+                **tdai_memory_thinking_kwargs(),
             )
             content = response.choices[0].message.content.strip()
             return json.loads(content)

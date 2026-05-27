@@ -7,6 +7,8 @@ import os
 import openai
 
 from backend.i18n import t
+from backend.tdai_memory.llm_options import tdai_memory_thinking_kwargs
+
 logger = logging.getLogger(__name__)
 
 
@@ -99,6 +101,7 @@ async def generate_mmd_summary(
             ],
             temperature=0.0,
             timeout=config.llm.timeout_ms / 1000.0,
+            **tdai_memory_thinking_kwargs(),
         )
         return response.choices[0].message.content.strip()
     except Exception:

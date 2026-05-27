@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 import openai
 
 from backend.i18n import t
+from backend.tdai_memory.llm_options import tdai_memory_thinking_kwargs
 from ..config import MemoryConfig
 from .summarizer import summarize_tool_result
 
@@ -66,6 +67,7 @@ async def _summarize_batch(
         ],
         temperature=0.0,
         timeout=config.llm.timeout_ms / 1000.0,
+        **tdai_memory_thinking_kwargs(),
     )
     content = response.choices[0].message.content.strip()
     parsed = _parse_batch_summary_content(content)
@@ -623,6 +625,7 @@ class OffloadManager:
                 ],
                 temperature=0.0,
                 timeout=self.config.llm.timeout_ms / 1000.0,
+                **tdai_memory_thinking_kwargs(),
             )
             content = response.choices[0].message.content.strip()
             result = json.loads(content)
@@ -702,6 +705,7 @@ class OffloadManager:
                 ],
                 temperature=0.0,
                 timeout=self.config.llm.timeout_ms / 1000.0,
+                **tdai_memory_thinking_kwargs(),
             )
             skill_content = response.choices[0].message.content
         except Exception:

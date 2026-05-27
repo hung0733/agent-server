@@ -6,6 +6,8 @@ import re
 import openai
 
 from backend.i18n import t
+from backend.tdai_memory.llm_options import tdai_memory_thinking_kwargs
+
 logger = logging.getLogger(__name__)
 
 _NODE_ID_RE = re.compile(r"\bN\d+\b")
@@ -65,6 +67,7 @@ async def build_mermaid_flowchart(
             ],
             temperature=0.0,
             timeout=config.llm.timeout_ms / 1000.0,
+            **tdai_memory_thinking_kwargs(),
         )
         content = response.choices[0].message.content.strip()
 
