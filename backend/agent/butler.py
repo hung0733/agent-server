@@ -5,19 +5,19 @@ from backend.agent.agent import Agent
 from backend.graph.graph_store import GraphStore
 from backend.i18n import t
 from backend.llm.types import StreamChunk
-from backend.graph.supervisor import workflow
+from backend.graph.bulter import workflow
 
 logger = logging.getLogger(__name__)
 
 
-class Supervisor(Agent):
+class Bulter(Agent):
     _graph: Any = None
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        if Supervisor._graph is None:
-            Supervisor._graph = workflow.compile(checkpointer=GraphStore.checkpointer)
+        if Bulter._graph is None:
+            Bulter._graph = workflow.compile(checkpointer=GraphStore.checkpointer)
 
     async def send(
         self,
@@ -36,7 +36,6 @@ class Supervisor(Agent):
             message=message,
             think_mode=think_mode,
             metadata=metadata,
-            graph=Supervisor._graph,
+            graph=Bulter._graph,
         ):
             yield chunk
-    

@@ -17,7 +17,7 @@ from backend.graph.agent import (
     route_after_chat as agent_route_after_chat,
 )
 from backend.graph.graph_node import GraphNode
-from backend.graph.supervisor import (
+from backend.graph.bulter import (
     _get_allowed_agent_names,
     assign_task_node,
     graph as supervisor_graph,

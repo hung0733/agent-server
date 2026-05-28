@@ -59,7 +59,7 @@ class Agent:
         session_id: str,
         agent_type: str,
         recv_agent_name: str,
-        sender_agent_id: int | str | None = None,
+        sender_agent_id: int | None = None,
         sender_agent_name: str | None = None,
     ):
         if sender_agent_name is None and isinstance(sender_agent_id, str):
@@ -88,7 +88,7 @@ class Agent:
     @classmethod
     async def get_db_agent(
         cls, agent_id: str, session_id: str
-    ) -> tuple[int, int, int, str, str, str, str, str, str]:
+    ) -> tuple[int, int, int, str, str, str, str, str, int | None, str]:
         async with async_session_factory() as session:
             row = await AgentSessionDAO(session).get_agent_runtime_data(
                 agent_id, session_id
@@ -102,10 +102,10 @@ class Agent:
     @classmethod
     async def get_agent(cls, agent_id: str, session_id: str):
         row = await cls.get_db_agent(agent_id, session_id)
-        if row[6] == "supervisor":
-            from backend.agent.supervisor import Supervisor
+        if row[6] == "bulter":
+            from backend.agent.butler import Bulter
 
-            agent = Supervisor(*row)
+            agent = Bulter(*row)
         else:
             agent = cls(*row)
         await agent.init_llm_models()
