@@ -27,8 +27,8 @@ class LLMSet(BaseModel):
             level, sec_level = await cls._load_levels(session, agent_db_id)
 
         return cls(
-            rte_model=LLMSet.getRteModel(),
-            sys_act_model=LLMSet.getSysActModel(),
+            rte_model=await LLMSet.getRteModel(),
+            sys_act_model=await LLMSet.getSysActModel(),
             level=level,
             sec_level=sec_level,
         )
@@ -76,17 +76,25 @@ class LLMSet(BaseModel):
         return None
 
     @staticmethod
-    def getRteModel() -> OpenAIClient:
+    async def getModelByName(name: str) -> OpenAIClient:
+        async with async_session_factory() as session:
+            endpoint = await LlmEndpointDAO(session).list_by_sys_llm_name(name)
+
+        if endpoint is None:
+            raise RuntimeError(t("llm.system_endpoint_not_found") % name)
+        if not endpoint.model_name:
+            raise RuntimeError(t("llm.system_endpoint_model_missing") % name)
+
         return OpenAIClient(
-            base_url=Tools.require_env("ROUTING_LLM_ENDPOINT"),
-            api_key=Tools.require_env("ROUTING_LLM_API_KEY"),
-            model=Tools.require_env("ROUTING_LLM_MODEL"),
+            base_url=endpoint.endpoint,
+            api_key=endpoint.enc_key or "NO_KEY",
+            model=endpoint.model_name,
         )
 
     @staticmethod
-    def getSysActModel() -> OpenAIClient:
-        return OpenAIClient(
-            base_url=Tools.require_env("SYS_ACT_LLM_ENDPOINT"),
-            api_key=Tools.require_env("SYS_ACT_LLM_API_KEY"),
-            model=Tools.require_env("SYS_ACT_LLM_MODEL"),
-        )
+    async def getRteModel() -> OpenAIClient:
+        return await LLMSet.getModelByName(Tools.require_env("ROUTING_LLM_REC_NAME"))
+
+    @staticmethod
+    async def getSysActModel() -> OpenAIClient:
+        return await LLMSet.getModelByName(Tools.require_env("SYS_ACT_LLM_REC_NAME"))

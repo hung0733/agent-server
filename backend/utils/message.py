@@ -1,4 +1,5 @@
 import json
+import logging
 from datetime import datetime, timezone
 from typing import Any, Dict
 
@@ -15,6 +16,8 @@ from backend.i18n import t
 from backend.tdai_memory.models import ConversationMessage, ToolCallMessage
 from backend.db.session import async_session_factory
 
+logger = logging.getLogger(__name__)
+
 
 class MsgUtil:
     @staticmethod
@@ -24,6 +27,11 @@ class MsgUtil:
             for dto in dtos:
                 await dao.create(dto)
             await session.commit()
+
+    @staticmethod
+    async def save_msg_hist_rec(dtos: list[AgentMsgHistCreate]):
+        await MsgUtil.save_agent_msg_hist(dtos)
+        logger.info(t("utils.message.saved_count") % len(dtos))
 
     @staticmethod
     def _ts_to_dt(ts: int) -> datetime:

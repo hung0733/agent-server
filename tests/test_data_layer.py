@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from backend.client.openai import OpenAIClient
 from backend.dao import (
     AgentDAO,
     AgentSessionDAO,
@@ -158,7 +159,7 @@ def test_dto_validation_and_from_attributes():
 
 
 @pytest.mark.asyncio
-async def test_dao_crud_happy_path():
+async def test_dao_crud_happy_path(monkeypatch):
     test_database_url = build_test_database_url()
     test_schema = get_test_schema()
     await recreate_test_schema(test_database_url, test_schema)
@@ -194,6 +195,34 @@ async def test_dao_crud_happy_path():
             assert await user_dao.get_by_user_id("u-1") == user
             assert await agent_dao.get_by_agent_id("agent-1") == agent
             assert await group_dao.list_by_user_id(user.id) == [group]
+
+            sys_endpoint = await endpoint_dao.create(
+                LlmEndpointCreate(
+                    user_id=None,
+                    name="sys-model",
+                    endpoint="http://sys.example/v1",
+                    model_name="sys-model",
+                )
+            )
+            await endpoint_dao.create(
+                LlmEndpointCreate(
+                    user_id=user.id,
+                    name="sys-model",
+                    endpoint="http://user-sys.example/v1",
+                    model_name="user-sys-model",
+                )
+            )
+            assert await endpoint_dao.list_by_sys_llm_name("sys-model") == sys_endpoint
+            assert await endpoint_dao.list_by_sys_llm_name("missing") is None
+            await session.commit()
+            monkeypatch.setattr("backend.llm.llm.async_session_factory", async_session)
+            monkeypatch.setenv("ROUTING_LLM_REC_NAME", "sys-model")
+            monkeypatch.setenv("SYS_ACT_LLM_REC_NAME", "sys-model")
+            assert isinstance(await LLMSet.getModelByName("sys-model"), OpenAIClient)
+            assert isinstance(await LLMSet.getRteModel(), OpenAIClient)
+            assert isinstance(await LLMSet.getSysActModel(), OpenAIClient)
+            with pytest.raises(RuntimeError):
+                await LLMSet.getModelByName("missing")
 
             normal_endpoint = await endpoint_dao.create(
                 LlmEndpointCreate(

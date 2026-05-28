@@ -39,6 +39,8 @@ _MESSAGES = {
         "graph_node.tool_result_missing_tool_call_id": "工具結果缺少 tool_call_id",
         "llm.agent_not_found": "找不到 Agent：id=%s",
         "llm.missing_config": "缺少 LLM 設定：%s",
+        "llm.system_endpoint_model_missing": "System LLM endpoint 缺少 model_name：name=%s",
+        "llm.system_endpoint_not_found": "找不到 System LLM endpoint：name=%s",
         "channels.evolution.duplicate_message_skipped": "已略過短時間內重覆收到的 WhatsApp 訊息",
         "channels.evolution.invalid_media_type": "訊息媒體類型必須是 image、video、audio 或 document",
         "channels.evolution.missing_global_api_key": "需要設定 EVOLUTION_API_KEY 或 whatsapp_key",
@@ -147,6 +149,8 @@ _MESSAGES = {
         "graph_node.tool_result_missing_tool_call_id": "Tool result is missing tool_call_id",
         "llm.agent_not_found": "Agent not found: id=%s",
         "llm.missing_config": "LLM configuration is missing: %s",
+        "llm.system_endpoint_model_missing": "System LLM endpoint is missing model_name: name=%s",
+        "llm.system_endpoint_not_found": "System LLM endpoint not found: name=%s",
         "channels.evolution.duplicate_message_skipped": "Skipped duplicated WhatsApp message received within the TTL window",
         "channels.evolution.invalid_media_type": "Message media type must be image, video, audio, or document",
         "channels.evolution.missing_global_api_key": "EVOLUTION_API_KEY or whatsapp_key is required",
@@ -274,6 +278,7 @@ _MESSAGES["zh_HK"].update(
         "scripts.bootstrap_agent_memory.prompt_file_missing": "找不到 prompt 檔案：%s",
         "scripts.bootstrap_agent_memory.started": "開始 bootstrap agent memory profile：agent=%s prompt_file=%s",
         "utils.message.tool_call_content": "🔧 工具調用：%s, 📥 傳入參數: %s",
+        "utils.message.saved_count": "已儲存 %d 筆訊息歷史記錄",
     }
 )
 _MESSAGES["en"].update(
@@ -321,6 +326,7 @@ _MESSAGES["en"].update(
         "scripts.bootstrap_agent_memory.prompt_file_missing": "Prompt file not found: %s",
         "scripts.bootstrap_agent_memory.started": "Starting agent memory profile bootstrap: agent=%s prompt_file=%s",
         "utils.message.tool_call_content": "🔧 Tool call: %s, 📥 Input args: %s",
+        "utils.message.saved_count": "Saved %d message history records",
     }
 )
 

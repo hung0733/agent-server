@@ -11,3 +11,10 @@ class LlmEndpointDAO(BaseDAO[LlmEndpoint]):
         stmt = select(LlmEndpoint).where(LlmEndpoint.user_id == user_id)
         result = await self.session.scalars(stmt)
         return list(result)
+
+    async def list_by_sys_llm_name(self, name: str) -> LlmEndpoint | None:
+        stmt = select(LlmEndpoint).where(
+            LlmEndpoint.user_id.is_(None),
+            LlmEndpoint.name == name,
+        )
+        return await self.session.scalar(stmt)
