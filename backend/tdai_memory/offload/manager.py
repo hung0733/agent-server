@@ -120,6 +120,7 @@ class OffloadEntry:
     session_key: str = ""
     round_index: int = 0
     score: int = 0
+    timestamp_epoch_ms: int = 0
 
 
 class OffloadStateManager:
@@ -402,6 +403,7 @@ class OffloadManager:
                     session_key=session_key,
                     round_index=entry_round_index,
                     score=score,
+                    timestamp_epoch_ms=entry_timestamp_epoch,
                 )
 
                 def _write(ep=ref_path, rfn=ref_filename, tn=tool_name, rt=result_text, ent=entry, jp=jsonl_path):
@@ -465,7 +467,19 @@ class OffloadManager:
                         continue
                     if session_key is None or entry.get("session_key") == session_key:
                         entries.append(entry)
-            entries.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+            def _sort_key(x):
+                ep = x.get("timestamp_epoch_ms")
+                if ep:
+                    return ep
+                ts = x.get("timestamp", "")
+                if ts and isinstance(ts, str):
+                    try:
+                        return int(datetime.fromisoformat(ts).timestamp() * 1000)
+                    except (ValueError, TypeError):
+                        return 0
+                return 0
+
+            entries.sort(key=_sort_key, reverse=True)
             return entries[:limit]
 
         return await asyncio.to_thread(_read)

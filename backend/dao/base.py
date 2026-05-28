@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import Any, Generic, TypeVar
 
 from pydantic import BaseModel
@@ -5,7 +7,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.db.base import Base
-
 
 ModelT = TypeVar("ModelT", bound=Base)
 
@@ -44,7 +45,9 @@ class BaseDAO(Generic[ModelT]):
         await self.session.delete(item)
         await self.session.flush()
 
-    def _to_dict(self, data: BaseModel | dict[str, Any], *, exclude_unset: bool = False) -> dict[str, Any]:
+    def _to_dict(
+        self, data: BaseModel | dict[str, Any], *, exclude_unset: bool = False
+    ) -> dict[str, Any]:
         if isinstance(data, BaseModel):
             return data.model_dump(exclude_unset=exclude_unset)
         return data

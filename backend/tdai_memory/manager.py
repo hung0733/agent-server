@@ -653,7 +653,7 @@ class MemoryManager:
                 items.append({
                     "type": "tool",
                     "content": content,
-                    "timestamp": e.get("timestamp", ""),
+                    "timestamp": e.get("timestamp_epoch_ms", 0),
                     "tool_call": e.get("tool_call", ""),
                     "has_summary": has_summary,
                     "round_index": e.get("round_index", 0),
@@ -679,14 +679,14 @@ class MemoryManager:
         return {
             "type": record.role,
             "content": record.message_text,
-            "timestamp": str(record.recorded_at),
+            "timestamp": record.timestamp,
         }
 
     def _l0_message_to_timeline_item(self, message: dict) -> dict:
         return {
             "type": message["role"],
             "content": message["message_text"],
-            "timestamp": str(message.get("recorded_at", "")),
+            "timestamp": message.get("timestamp", 0),
         }
 
     async def _get_cached_timeline(

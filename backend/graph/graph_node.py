@@ -328,6 +328,7 @@ class GraphNode:
         recv_type: str = "agent",
         conversation_kind: str = "",
         user_db_id: int | None = None,
+        session_db_id: int | None = None,
         agent_id: str = "",
         ltm_msg: str = "",
         timelines: list[BaseMessage] = [],
@@ -350,5 +351,6 @@ class GraphNode:
                 "agent_id": agent_id,
                 "ltm_msg": ltm_msg,
                 "timelines": timelines,
+                "session_db_id": session_db_id,
             }
         }

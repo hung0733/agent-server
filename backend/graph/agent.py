@@ -14,6 +14,7 @@ from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
 
+from backend.dto.agent_msg_hist import AgentMsgHistCreate
 from backend.graph.graph_node import GraphNode, MessageState
 from backend.i18n import t
 from backend.llm.llm import LLMSet
@@ -24,6 +25,7 @@ from backend.tdai_memory.models import (
     ToolCallMessage,
 )
 from backend.tools.sandbox import SandboxTools
+from backend.utils.message import MsgUtil
 from backend.utils.tools import Tools
 
 logger = logging.getLogger(__name__)
@@ -65,6 +67,8 @@ async def chat_node(state: MessageState, config: RunnableConfig):
 
 async def end_node(state: MessageState, config: RunnableConfig):
     session_id: str = GraphNode.get_configure(config, "thread_id", "")
+    session_db_id: int = GraphNode.get_configure(config, "session_db_id", 0)
+    step_id: str = GraphNode.get_configure(config, "step_id", "")
     agent_id: str = GraphNode.get_configure(config, "agent_id", "")
     conversation_metadata = {
         "conversation_kind": GraphNode.get_configure(
@@ -78,67 +82,28 @@ async def end_node(state: MessageState, config: RunnableConfig):
     messages: list[BaseMessage] = state["messages"]
     # logger.info(messages)
 
-    turn: CompletedTurn = CompletedTurn(
-        session_key=session_id,
-        user_text="",
-        assistant_text="",
-        messages=[],
-        metadata=conversation_metadata,
+    user_msg, assistant_msg, cm, tcm = MsgUtil.base_msg_to_tdai_memory_rec(
+        messages, conversation_metadata
     )
 
-    message: BaseMessage
-    for message in messages:
-        if isinstance(message, HumanMessage):
-            turn.user_text = str(message.content)
-            turn.messages.append(
-                ConversationMessage(
-                    role="user",
-                    content=str(message.content),
-                    timestamp=int(
-                        message.additional_kwargs["datetime"].timestamp() * 1000
-                    ),
-                    metadata=conversation_metadata,
-                )
-            )
-        elif isinstance(message, AIMessage):
-            if message.content:
-                turn.assistant_text += str(message.content) + "\n\n"
-                turn.messages.append(
-                    ConversationMessage(
-                        role="assistant",
-                        content=str(message.content),
-                        timestamp=int(
-                            message.additional_kwargs["datetime"].timestamp() * 1000
-                        ),
-                        metadata=conversation_metadata,
-                    )
-                )
+    dtos: list[AgentMsgHistCreate] = MsgUtil.base_msg_to_msg_hist_rec(
+        messages, session_db_id, step_id, conversation_metadata
+    )
 
-            if hasattr(message, "tool_calls") and len(message.tool_calls) > 0:
-                for tc in getattr(message, "tool_calls", []):
-                    args = tc.get("args", {})
-                    tool_call_id = str(tc.get("id") or "")
-                    tool_name = str(tc.get("name") or "")
-                    turn.tool_call.append(
-                        ToolCallMessage(
-                            tool_call_id=tool_call_id,
-                            tool_name=tool_name,
-                            tool_input=args,
-                            tool_result="",
-                            timestamp=int(
-                                message.additional_kwargs["datetime"].timestamp() * 1000
-                            ),
-                        )
-                    )
-
-        elif isinstance(message, ToolMessage) and message.content:
-            for tc in turn.tool_call:
-                if tc.tool_call_id == message.tool_call_id:
-                    tc.tool_result = str(message.content)
+    turn: CompletedTurn = CompletedTurn(
+        session_key=session_id,
+        user_text=user_msg,
+        assistant_text=assistant_msg,
+        messages=cm,
+        tool_call=tcm,
+        metadata=conversation_metadata,
+    )
 
     Tools.start_async_task(
         MemoryManager.instance().capture(agent_id=agent_id, turn=turn)
     )
+
+    Tools.start_async_task(MsgUtil.save_agent_msg_hist(dtos))
 
     return
 

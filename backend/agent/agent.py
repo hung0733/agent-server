@@ -23,6 +23,7 @@ from backend.llm.llm import LLMSet
 from backend.llm.types import StreamChunk
 from backend.tdai_memory.manager import MemoryManager
 from backend.tdai_memory.models import RecallResult
+from backend.utils.message import MsgUtil
 
 logger = logging.getLogger(__name__)
 
@@ -156,22 +157,15 @@ class Agent:
             user_text=message,
         )
 
-        ltm_msg: str = ""
-        timelines: list[BaseMessage] = []
-
         await agent.prepare_sys_prompt(
             ret.append_system_context if ret.append_system_context else ""
         )
 
-        if ret.prepend_context:
-            ltm_msg = ret.prepend_context
+        ltm_msg: str = ret.prepend_context if ret.prepend_context else ""
 
-        if ret.context_timeline:
-            for msg in ret.context_timeline:
-                if msg["type"] == "user":
-                    timelines.append(HumanMessage(content=msg["content"]))
-                elif msg["type"] == "assistant":
-                    timelines.append(AIMessage(content=msg["content"]))
+        timelines: list[BaseMessage] = MsgUtil.timelines_to_base_msg(
+            ret.context_timeline
+        )
 
         logger.debug(
             t("agent.proc_send_started"),
@@ -198,6 +192,7 @@ class Agent:
             agent_id=agent.agent_id,
             ltm_msg=ltm_msg,
             timelines=timelines,
+            session_db_id=agent.session_db_id,
         )
 
         async for chunk in graph.astream(
