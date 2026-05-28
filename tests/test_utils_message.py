@@ -301,9 +301,10 @@ async def test_save_llm_usage_uses_response_metadata_token_usage(monkeypatch):
     assert created[0].date_time == usage_dt
     assert created[0].in_token == 10
     assert created[0].out_token == 5
+    assert created[0].cached_in_token == 0
     assert created[0].total_token == 15
     assert session.committed is True
-    assert log_calls == [("utils.message.llm_usage_received", (15, 10, 5))]
+    assert log_calls == [("utils.message.llm_usage_received", (15, 10, 5, 0))]
 
 
 @pytest.mark.asyncio
@@ -322,6 +323,7 @@ async def test_save_llm_usage_prefers_usage_metadata(monkeypatch):
             "input_tokens": 12,
             "output_tokens": 6,
             "total_tokens": 18,
+            "input_token_details": {"cache_read": 9},
         },
     )
 
@@ -330,7 +332,34 @@ async def test_save_llm_usage_prefers_usage_metadata(monkeypatch):
     assert len(created) == 1
     assert created[0].llm_endpoint_id == 8
     assert created[0].in_token == 12
+    assert created[0].cached_in_token == 9
     assert created[0].out_token == 6
+    assert created[0].total_token == 18
+    assert session.committed is True
+
+
+@pytest.mark.asyncio
+async def test_save_llm_usage_uses_prompt_cached_tokens(monkeypatch):
+    created, session = patch_llm_usage_save(monkeypatch)
+    response = AIMessage(
+        content="hello",
+        response_metadata={
+            "token_usage": {
+                "prompt_tokens": 11,
+                "completion_tokens": 7,
+                "total_tokens": 18,
+                "prompt_tokens_details": {"cached_tokens": 4},
+            }
+        },
+    )
+
+    await MsgUtil.save_llm_usage(10, response)
+
+    assert len(created) == 1
+    assert created[0].llm_endpoint_id == 10
+    assert created[0].in_token == 11
+    assert created[0].cached_in_token == 4
+    assert created[0].out_token == 7
     assert created[0].total_token == 18
     assert session.committed is True
 
@@ -354,6 +383,7 @@ async def test_save_llm_usage_accepts_token_usage_object(monkeypatch):
     assert len(created) == 1
     assert created[0].llm_endpoint_id == 10
     assert created[0].in_token == 11
+    assert created[0].cached_in_token == 0
     assert created[0].out_token == 7
     assert created[0].total_token == 18
     assert session.committed is True

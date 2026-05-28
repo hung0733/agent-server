@@ -14,6 +14,7 @@ class LlmUsage(Base):
     date_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     total_token: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     in_token: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    cached_in_token: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     out_token: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
 
     llm_endpoint = relationship("LlmEndpoint", back_populates="usages")

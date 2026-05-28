@@ -48,6 +48,14 @@ class MsgUtil:
             or MsgUtil._usage_value(token_usage, "completion_tokens")
         )
 
+        input_token_details = MsgUtil._usage_value(
+            usage_metadata, "input_token_details"
+        ) or MsgUtil._usage_value(token_usage, "prompt_tokens_details")
+        cached_in_token = MsgUtil._token_count(
+            MsgUtil._usage_value(input_token_details, "cache_read")
+            or MsgUtil._usage_value(input_token_details, "cached_tokens")
+        )
+
         total_token = MsgUtil._token_count(
             MsgUtil._usage_value(usage_metadata, "total_tokens")
             or MsgUtil._usage_value(token_usage, "total_tokens")
@@ -56,7 +64,12 @@ class MsgUtil:
         usage_dt = response.additional_kwargs.get("datetime")
 
         await MsgUtil.proc_save_llm_usage(
-            llm_endpoint_id, in_token, out_token, total_token, usage_dt
+            llm_endpoint_id,
+            in_token,
+            out_token,
+            total_token,
+            usage_dt,  # type: ignore
+            cached_in_token,
         )
 
     @staticmethod
@@ -66,6 +79,7 @@ class MsgUtil:
         out_token: int,
         total_token: int,
         usage_dt: datetime,
+        cached_in_token: int = 0,
     ):
 
         if not any((in_token, out_token, total_token)):
@@ -76,6 +90,7 @@ class MsgUtil:
             total_token,
             in_token,
             out_token,
+            cached_in_token,
         )
 
         if not isinstance(usage_dt, datetime):
@@ -89,6 +104,7 @@ class MsgUtil:
                     date_time=usage_dt,
                     total_token=total_token,
                     in_token=in_token,
+                    cached_in_token=cached_in_token,
                     out_token=out_token,
                 )
             )

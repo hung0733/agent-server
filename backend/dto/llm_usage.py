@@ -8,6 +8,7 @@ class LlmUsageCreate(BaseModel):
     date_time: datetime | None = None
     total_token: int = 0
     in_token: int = 0
+    cached_in_token: int = 0
     out_token: int = 0
 
 
@@ -16,6 +17,7 @@ class LlmUsageUpdate(BaseModel):
     date_time: datetime | None = None
     total_token: int | None = None
     in_token: int | None = None
+    cached_in_token: int | None = None
     out_token: int | None = None
 
 

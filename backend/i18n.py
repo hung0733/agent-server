@@ -278,7 +278,7 @@ _MESSAGES["zh_HK"].update(
         "scripts.bootstrap_agent_memory.prompt_file_missing": "找不到 prompt 檔案：%s",
         "scripts.bootstrap_agent_memory.started": "開始 bootstrap agent memory profile：agent=%s prompt_file=%s",
         "utils.message.tool_call_content": "🔧 工具調用：%s, 📥 傳入參數: %s",
-        "utils.message.llm_usage_received": "收到 LLM usage tokens：total=%s in=%s out=%s",
+        "utils.message.llm_usage_received": "收到 LLM usage tokens：total=%s in=%s out=%s cached_in=%s",
         "utils.message.saved_count": "已儲存 %d 筆訊息歷史記錄",
     }
 )
@@ -327,7 +327,7 @@ _MESSAGES["en"].update(
         "scripts.bootstrap_agent_memory.prompt_file_missing": "Prompt file not found: %s",
         "scripts.bootstrap_agent_memory.started": "Starting agent memory profile bootstrap: agent=%s prompt_file=%s",
         "utils.message.tool_call_content": "🔧 Tool call: %s, 📥 Input args: %s",
-        "utils.message.llm_usage_received": "Received LLM usage tokens: total=%s in=%s out=%s",
+        "utils.message.llm_usage_received": "Received LLM usage tokens: total=%s in=%s out=%s cached_in=%s",
         "utils.message.saved_count": "Saved %d message history records",
     }
 )

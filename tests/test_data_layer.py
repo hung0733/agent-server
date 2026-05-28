@@ -268,12 +268,14 @@ async def test_dao_crud_happy_path(monkeypatch):
                     llm_endpoint_id=normal_endpoint.id,
                     total_token=100,
                     in_token=60,
+                    cached_in_token=20,
                     out_token=40,
                 )
             )
             assert usage.id is not None
             assert usage.total_token == 100
             assert usage.in_token == 60
+            assert usage.cached_in_token == 20
             assert usage.out_token == 40
             all_usages = await usage_dao.list()
             assert any(u.id == usage.id for u in all_usages)
