@@ -419,6 +419,7 @@ _MESSAGES["zh_HK"].update(
  'tdai_memory.pipeline.skipping_l2_no_active_sessions': '略過 L2：agent=%s 沒有 active sessions',
  'tdai_memory.pipeline.soul_generation_complete': 'SOUL 生成完成：agent=%s',
  'tdai_memory.pipeline.soul_written': 'SOUL.md 已寫入：agent=%s chars=%d',
+ 'tdai_memory.pipeline.timeline_cache_invalidate_failed': 'Timeline cache invalidate 失敗：agent=%s session=%s',
  'tdai_memory.pipeline.update_dedup_embedding_failed': '更新 dedup result embedding 失敗：record_id=%s',
  'tdai_memory.pipeline.update_existing_mem_failed': '更新既有 memory 失敗：memory_id=%s',
  'tdai_memory.pipeline.update_persona_nav_failed': '更新 persona.md navigation 失敗',
@@ -571,6 +572,7 @@ _MESSAGES["en"].update(
                                                         'sessions)',
  'tdai_memory.pipeline.soul_generation_complete': 'SOUL generation complete for agent %s',
  'tdai_memory.pipeline.soul_written': 'SOUL.md written for agent %s (%d chars)',
+ 'tdai_memory.pipeline.timeline_cache_invalidate_failed': 'Timeline cache invalidate failed for %s/%s',
  'tdai_memory.pipeline.update_dedup_embedding_failed': 'Failed to update embedding for dedup '
                                                        'result %s',
  'tdai_memory.pipeline.update_existing_mem_failed': 'Failed to update existing mem %s',

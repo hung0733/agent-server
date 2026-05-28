@@ -146,6 +146,7 @@ class CaptureResult(BaseModel):
     l0_recorded_count: int = 0
     l0_vectors_written: int = 0
     filtered_messages: list[ConversationMessage] = Field(default_factory=list)
+    l0_records: list[L0Record] = Field(default_factory=list)
 
 
 # ───────────────────────────────────────

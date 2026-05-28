@@ -87,6 +87,18 @@ class MemoryManager:
         _apply_env(config, "qdrant_l0_collection", "TDAI_MEM_QDRANT_L0_COLLECTION")
         _apply_env(config, "qdrant_l1_collection", "TDAI_MEM_QDRANT_L1_COLLECTION")
         _apply_env(config, "data_dir", "TDAI_MEM_DATA_DIR")
+        _apply_env(
+            config,
+            "timeline_cache_max_items",
+            "TDAI_MEM_TIMELINE_CACHE_MAX_ITEMS",
+            int,
+        )
+        _apply_env(
+            config,
+            "timeline_cache_max_sessions",
+            "TDAI_MEM_TIMELINE_CACHE_MAX_SESSIONS",
+            int,
+        )
 
         _apply_env(config.embedding, "api_key", "TDAI_MEM_EMBEDDING_API_KEY")
         _apply_env(config.embedding, "base_url", "TDAI_MEM_EMBEDDING_BASE_URL")
@@ -356,6 +368,9 @@ class MemoryManager:
         self._store_ready = asyncio.Event()
         self._bg_tasks: set[asyncio.Task] = set()
         self._initialized = False
+        self._timeline_cache: dict[tuple[str, str], list[dict]] = {}
+        self._timeline_cache_order: list[tuple[str, str]] = []
+        self._timeline_cache_lock = asyncio.Lock()
 
     async def initialize(self) -> None:
         cache_key = self.config.data_dir
@@ -408,6 +423,7 @@ class MemoryManager:
                 llm_client=self._client,
                 config=self.config,
                 data_dir=self.config.data_dir,
+                on_l1_complete=self._invalidate_timeline_cache,
             )
             await self._scheduler.start()
 
@@ -451,6 +467,10 @@ class MemoryManager:
             await self._client.close()
             self._client = None
 
+        async with self._timeline_cache_lock:
+            self._timeline_cache.clear()
+            self._timeline_cache_order.clear()
+
         self._initialized = False
         if MemoryManager._instance is self:
             MemoryManager._instance = None
@@ -475,7 +495,7 @@ class MemoryManager:
 
     async def capture(self, *, agent_id: str, turn: CompletedTurn) -> CaptureResult:
         await self._store_ready.wait()
-        return await perform_auto_capture(
+        result = await perform_auto_capture(
             turn=turn,
             agent_id=agent_id,
             postgres=self._postgres,
@@ -491,6 +511,12 @@ class MemoryManager:
             plugin_start_timestamp=self._plugin_start_timestamp,
             offload_manager=self._offload,
         )
+        await self._append_cached_timeline(
+            agent_id,
+            turn.session_key,
+            [self._l0_record_to_timeline_item(record) for record in result.l0_records],
+        )
+        return result
 
     async def search_memories(
         self,
@@ -537,6 +563,7 @@ class MemoryManager:
     async def end_session(self, *, agent_id: str, session_key: str) -> None:
         if self._scheduler is not None:
             await self._scheduler.flush_session(agent_id, session_key)
+        await self._invalidate_timeline_cache(agent_id, session_key)
 
     async def set_identity_seed(self, *, agent_id: str, content: str) -> None:
         await set_identity_seed(agent_id, self.config.data_dir, content)
@@ -600,15 +627,15 @@ class MemoryManager:
         if max_tokens is None:
             max_tokens = self.config.offload.default_context_window
 
+        cached = await self._get_cached_timeline(agent_id, session_key)
+        if cached is not None:
+            return self._limit_timeline_tokens(cached, max_tokens)
+
         items: list[dict] = []
 
         l0_msgs = await self._postgres.query_l0_for_l1(agent_id, session_key, limit=200)
         for m in l0_msgs:
-            items.append({
-                "type": m["role"],
-                "content": m["message_text"],
-                "timestamp": str(m.get("recorded_at", "")),
-            })
+            items.append(self._l0_message_to_timeline_item(m))
 
         if self._offload is not None:
             entries = await self._offload.get_offload_entries(
@@ -633,7 +660,11 @@ class MemoryManager:
                 })
 
         items.sort(key=lambda x: x["timestamp"])
+        await self._set_cached_timeline(agent_id, session_key, items)
 
+        return self._limit_timeline_tokens(items, max_tokens)
+
+    def _limit_timeline_tokens(self, items: list[dict], max_tokens: int) -> list[dict]:
         total = 0
         timeline = []
         for item in items:
@@ -642,8 +673,65 @@ class MemoryManager:
                 break
             total += tokens
             timeline.append(item)
-
         return timeline
+
+    def _l0_record_to_timeline_item(self, record) -> dict:
+        return {
+            "type": record.role,
+            "content": record.message_text,
+            "timestamp": str(record.recorded_at),
+        }
+
+    def _l0_message_to_timeline_item(self, message: dict) -> dict:
+        return {
+            "type": message["role"],
+            "content": message["message_text"],
+            "timestamp": str(message.get("recorded_at", "")),
+        }
+
+    async def _get_cached_timeline(
+        self, agent_id: str, session_key: str
+    ) -> list[dict] | None:
+        key = (agent_id, session_key)
+        async with self._timeline_cache_lock:
+            cached = self._timeline_cache.get(key)
+            if cached is None:
+                return None
+            return list(cached)
+
+    async def _set_cached_timeline(
+        self, agent_id: str, session_key: str, items: list[dict]
+    ) -> None:
+        key = (agent_id, session_key)
+        async with self._timeline_cache_lock:
+            self._timeline_cache[key] = list(items)[-self.config.timeline_cache_max_items:]
+            if key in self._timeline_cache_order:
+                self._timeline_cache_order.remove(key)
+            self._timeline_cache_order.append(key)
+            while len(self._timeline_cache_order) > self.config.timeline_cache_max_sessions:
+                old_key = self._timeline_cache_order.pop(0)
+                self._timeline_cache.pop(old_key, None)
+
+    async def _append_cached_timeline(
+        self, agent_id: str, session_key: str, items: list[dict]
+    ) -> None:
+        if not items:
+            return
+        key = (agent_id, session_key)
+        async with self._timeline_cache_lock:
+            cached = self._timeline_cache.get(key)
+            if cached is None:
+                return
+            cached.extend(items)
+            cached.sort(key=lambda x: x["timestamp"])
+            self._timeline_cache[key] = cached[-self.config.timeline_cache_max_items:]
+
+    async def _invalidate_timeline_cache(self, agent_id: str, session_key: str) -> None:
+        key = (agent_id, session_key)
+        async with self._timeline_cache_lock:
+            self._timeline_cache.pop(key, None)
+            if key in self._timeline_cache_order:
+                self._timeline_cache_order.remove(key)
 
     def _read_full_result(self, agent_id: str, result_ref: str) -> str:
         import os

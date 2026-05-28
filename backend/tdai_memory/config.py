@@ -141,6 +141,8 @@ class MemoryConfig:
 
     # ── Data directory (file-based assets: persona.md, scenes, etc.) ──
     data_dir: str = "./tdai_data"
+    timeline_cache_max_items: int = 1000
+    timeline_cache_max_sessions: int = 100
 
     # ── Embedding ──
     embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
@@ -245,6 +247,12 @@ def normalize_config(config: MemoryConfig) -> MemoryConfig:
 
     if config.embedding.timeout_ms <= 0:
         config.embedding.timeout_ms = 10000
+
+    if config.timeline_cache_max_items <= 0:
+        config.timeline_cache_max_items = 1000
+
+    if config.timeline_cache_max_sessions <= 0:
+        config.timeline_cache_max_sessions = 100
 
     return config
 

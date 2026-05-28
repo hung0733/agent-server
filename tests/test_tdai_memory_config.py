@@ -67,6 +67,8 @@ def test_from_env_reads_tdai_mem_values(monkeypatch):
     monkeypatch.setenv("TDAI_MEM_OFFLOAD_ENABLED", "yes")
     monkeypatch.setenv("TDAI_MEM_OFFLOAD_TEMPERATURE", "0.7")
     monkeypatch.setenv("TDAI_MEM_OFFLOAD_BACKEND_URL", "http://offload.example")
+    monkeypatch.setenv("TDAI_MEM_TIMELINE_CACHE_MAX_ITEMS", "1000")
+    monkeypatch.setenv("TDAI_MEM_TIMELINE_CACHE_MAX_SESSIONS", "50")
 
     config = MemoryManager.from_env()
 
@@ -91,6 +93,20 @@ def test_from_env_reads_tdai_mem_values(monkeypatch):
     assert config.offload.enabled is True
     assert config.offload.temperature == 0.7
     assert config.offload.backend_url == "http://offload.example"
+    assert config.timeline_cache_max_items == 1000
+    assert config.timeline_cache_max_sessions == 50
+
+
+def test_normalize_config_resets_invalid_timeline_cache_limits():
+    config = MemoryConfig(timeline_cache_max_items=0, timeline_cache_max_sessions=-1)
+
+    normalized = config.__class__(**config.__dict__)
+    from tdai_memory.config import normalize_config
+
+    normalize_config(normalized)
+
+    assert normalized.timeline_cache_max_items == 1000
+    assert normalized.timeline_cache_max_sessions == 100
 
 
 def test_from_env_empty_optional_strings_become_none(monkeypatch):

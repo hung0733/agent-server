@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timezone
+from typing import Awaitable, Callable
 
 import openai
 
@@ -79,6 +80,7 @@ class PipelineScheduler:
         llm_client: openai.AsyncOpenAI,
         config: MemoryConfig,
         data_dir: str,
+        on_l1_complete: Callable[[str, str], Awaitable[None]] | None = None,
     ) -> None:
         self._postgres = postgres
         self._qdrant = qdrant
@@ -86,6 +88,7 @@ class PipelineScheduler:
         self._llm_client = llm_client
         self._config = config
         self._data_dir = data_dir
+        self._on_l1_complete = on_l1_complete
 
         self._sessions: dict[tuple[str, str], PipelineSessionState] = {}
         self._idle_timers: dict[tuple[str, str], asyncio.Task] = {}
@@ -301,6 +304,16 @@ class PipelineScheduler:
             await self._postgres.write_pipeline_state(state)
         except Exception:
             logger.exception(t("tdai_memory.pipeline.write_pipeline_state_after_l1_failed"), agent_id, session_key)
+
+        if self._on_l1_complete is not None:
+            try:
+                await self._on_l1_complete(agent_id, session_key)
+            except Exception:
+                logger.exception(
+                    t("tdai_memory.pipeline.timeline_cache_invalidate_failed"),
+                    agent_id,
+                    session_key,
+                )
 
         if state.l2_pending_l1_count >= L2_MIN_L1_COUNT:
             await self._l2_queue.enqueue(self._maybe_trigger_l2, agent_id)

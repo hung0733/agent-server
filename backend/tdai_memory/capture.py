@@ -252,6 +252,7 @@ async def perform_auto_capture(
         l0_recorded_count=len(records),
         l0_vectors_written=vectors_written,
         filtered_messages=filtered_msgs,
+        l0_records=records,
     )
 
 

@@ -77,3 +77,4 @@ async def test_capture_preserves_conversation_metadata_on_l0_records(tmp_path):
 
     assert result.l0_recorded_count == 2
     assert [record.metadata for record in postgres.records] == [metadata, metadata]
+    assert result.l0_records == postgres.records
