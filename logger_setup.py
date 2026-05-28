@@ -22,6 +22,19 @@ _FMT = "%(asctime)s [%(levelname)s] [%(threadName)s] %(name)s: %(message)s"
 _DATE_FMT = "%Y-%m-%d %H:%M:%S"
 
 
+class _HttpxRequestDebugFilter(logging.Filter):
+    def __init__(self, handler_level: int) -> None:
+        super().__init__()
+        self._handler_level = handler_level
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.name == "httpx" and record.levelno == logging.INFO and str(record.msg).startswith("HTTP Request:"):
+            record.levelno = logging.DEBUG
+            record.levelname = logging.getLevelName(logging.DEBUG)
+            return record.levelno >= self._handler_level
+        return True
+
+
 def setup_logging(level: int = logging.INFO) -> None:
     """Configure root logger with console + daily rotating file handlers.
 
@@ -42,6 +55,7 @@ def setup_logging(level: int = logging.INFO) -> None:
     # Console handler
     console = logging.StreamHandler()
     console.setLevel(level)
+    console.addFilter(_HttpxRequestDebugFilter(level))
     console.setFormatter(formatter)
     root.addHandler(console)
 
@@ -57,6 +71,7 @@ def setup_logging(level: int = logging.INFO) -> None:
         utc=False,
     )
     file_handler.setLevel(level)
+    file_handler.addFilter(_HttpxRequestDebugFilter(level))
     file_handler.setFormatter(formatter)
 
     # Rename rotated files from agent-server.log.YYYY-MM-DD
