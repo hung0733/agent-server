@@ -8,7 +8,7 @@ class LlmEndpoint(Base):
     __tablename__ = "llm_endpoint"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("user_acc.id"), nullable=False, index=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("user_acc.id"), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     endpoint: Mapped[str] = mapped_column(String(1024), nullable=False)
     enc_key: Mapped[str | None] = mapped_column(String(1024))
@@ -17,3 +17,4 @@ class LlmEndpoint(Base):
 
     user = relationship("UserAcc", back_populates="llm_endpoints")
     levels = relationship("LlmLevel", back_populates="llm_endpoint")
+    usages = relationship("LlmUsage", back_populates="llm_endpoint")

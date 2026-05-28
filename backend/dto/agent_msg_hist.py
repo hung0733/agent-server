@@ -9,9 +9,8 @@ class AgentMsgHistCreate(BaseModel):
     sender: str
     msg_type: str
     content: str | None = None
-    token: int | None = None
     meta_data: str | None = None
-    model_name: str | None = None
+    create_dt: datetime | None = None
 
 
 class AgentMsgHistUpdate(BaseModel):
@@ -20,13 +19,10 @@ class AgentMsgHistUpdate(BaseModel):
     sender: str | None = None
     msg_type: str | None = None
     content: str | None = None
-    token: int | None = None
     meta_data: str | None = None
-    model_name: str | None = None
 
 
 class AgentMsgHistRead(AgentMsgHistCreate):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    create_dt: datetime

@@ -2,7 +2,7 @@ from pydantic import BaseModel, ConfigDict
 
 
 class LlmEndpointCreate(BaseModel):
-    user_id: int
+    user_id: int | None = None
     name: str
     endpoint: str
     enc_key: str | None = None

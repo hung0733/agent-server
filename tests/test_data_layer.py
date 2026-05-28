@@ -14,6 +14,7 @@ from backend.dao import (
     LlmEndpointDAO,
     LlmGroupDAO,
     LlmLevelDAO,
+    LlmUsageDAO,
     UserAccDAO,
 )
 from backend.db.base import Base
@@ -28,6 +29,7 @@ from backend.dto import (
     LlmGroupCreate,
     LlmLevelCreate,
     LlmGroupRead,
+    LlmUsageCreate,
     UserAccCreate,
     UserAccRead,
     UserAccUpdate,
@@ -42,6 +44,7 @@ EXPECTED_TABLES = {
     "llm_endpoint",
     "llm_group",
     "llm_level",
+    "llm_usage",
     "session",
     "user_acc",
 }
@@ -229,6 +232,22 @@ async def test_dao_crud_happy_path():
             levels, sec_levels = await LLMSet._load_levels(session, agent.id)
             assert [endpoint.id for endpoint in levels[2]] == [normal_endpoint.id]
             assert [endpoint.id for endpoint in sec_levels[3]] == [confidential_endpoint.id]
+
+            usage_dao = LlmUsageDAO(session)
+            usage = await usage_dao.create(
+                LlmUsageCreate(
+                    llm_endpoint_id=normal_endpoint.id,
+                    total_token=100,
+                    in_token=60,
+                    out_token=40,
+                )
+            )
+            assert usage.id is not None
+            assert usage.total_token == 100
+            assert usage.in_token == 60
+            assert usage.out_token == 40
+            all_usages = await usage_dao.list()
+            assert any(u.id == usage.id for u in all_usages)
 
             updated_agent = await agent_dao.update(agent, AgentUpdate(name="Renamed Agent"))
             assert updated_agent.name == "Renamed Agent"
