@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from backend.i18n import t
+
 logger = logging.getLogger(__name__)
 
 
@@ -68,6 +69,7 @@ class RecallConfig:
 class EmbeddingConfig:
     """Embedding service configuration."""
 
+    llm_ep_id: int = 0
     api_key: str = ""
     base_url: str = "https://api.openai.com/v1"
     model: str = "text-embedding-3-small"
@@ -92,6 +94,7 @@ class LLMConfig:
     """LLM configuration for extraction / scenes / persona."""
 
     enabled: bool = False
+    llm_ep_id: int = 0
     model: str = "gpt-4o"
     base_url: str = "https://api.openai.com/v1"
     api_key: str = ""
@@ -212,13 +215,20 @@ def validate_config(config: MemoryConfig) -> str | None:
     if config.recall.strategy not in ("embedding", "keyword", "hybrid"):
         return "Invalid recall strategy: must be one of embedding, keyword, hybrid"
 
-    if config.capture.l0_l1_retention_days in (1, 2) and not config.capture.allow_aggressive_cleanup:
+    if (
+        config.capture.l0_l1_retention_days in (1, 2)
+        and not config.capture.allow_aggressive_cleanup
+    ):
         return "Retention days must be >= 3 or 0 to disable, unless allow_aggressive_cleanup is True"
 
     if config.embedding.dimensions > 0 and config.embedding.api_key == "":
         return "Embedding API key required when dimensions configured"
 
-    if config.offload.enabled and config.offload.mode == "backend" and not config.offload.backend_url:
+    if (
+        config.offload.enabled
+        and config.offload.mode == "backend"
+        and not config.offload.backend_url
+    ):
         logger.warning(t("tdai_memory.config.offload_backend_url_missing"))
 
     return None

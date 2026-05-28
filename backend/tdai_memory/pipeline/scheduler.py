@@ -254,7 +254,7 @@ class PipelineScheduler:
                     t("tdai_memory.pipeline.l1_extraction_started"),
                     agent_id, session_key, attempt, L1_MAX_RETRIES, state.conversation_count,
                 )
-                await run_l1_extraction(
+                extracted_memories = await run_l1_extraction(
                     agent_id=agent_id,
                     session_key=session_key,
                     postgres=self._postgres,
@@ -282,7 +282,8 @@ class PipelineScheduler:
         state.conversation_count = 0
         state.last_extraction_time = now_iso
         state.last_extraction_updated_time = now_iso
-        state.l2_pending_l1_count = (state.l2_pending_l1_count or 0) + 1
+        if extracted_memories:
+            state.l2_pending_l1_count = (state.l2_pending_l1_count or 0) + 1
 
         report_metric("pipeline_l1_trigger", {
             "agent_id": agent_id,
@@ -315,7 +316,7 @@ class PipelineScheduler:
                     session_key,
                 )
 
-        if state.l2_pending_l1_count >= L2_MIN_L1_COUNT:
+        if extracted_memories and state.l2_pending_l1_count >= L2_MIN_L1_COUNT:
             await self._l2_queue.enqueue(self._maybe_trigger_l2, agent_id)
 
     async def _maybe_trigger_l2(self, agent_id: str) -> None:
@@ -373,7 +374,7 @@ class PipelineScheduler:
     async def _trigger_l2(self, agent_id: str) -> None:
         try:
             logger.info(t("tdai_memory.pipeline.l2_scene_grouping_started"), agent_id)
-            await run_l2_scene_grouping(
+            scene_index = await run_l2_scene_grouping(
                 agent_id=agent_id,
                 postgres=self._postgres,
                 llm_client=self._llm_client,
@@ -392,6 +393,10 @@ class PipelineScheduler:
                     await self._postgres.write_pipeline_state(state)
                 except Exception:
                     pass
+
+        if not scene_index:
+            logger.info(t("tdai_memory.pipeline.skipping_l3_no_scenes"), agent_id)
+            return
 
         await self._maybe_trigger_l3(agent_id)
 

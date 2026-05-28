@@ -278,6 +278,7 @@ _MESSAGES["zh_HK"].update(
         "scripts.bootstrap_agent_memory.prompt_file_missing": "找不到 prompt 檔案：%s",
         "scripts.bootstrap_agent_memory.started": "開始 bootstrap agent memory profile：agent=%s prompt_file=%s",
         "utils.message.tool_call_content": "🔧 工具調用：%s, 📥 傳入參數: %s",
+        "utils.message.llm_usage_received": "收到 LLM usage tokens：total=%s in=%s out=%s",
         "utils.message.saved_count": "已儲存 %d 筆訊息歷史記錄",
     }
 )
@@ -326,6 +327,7 @@ _MESSAGES["en"].update(
         "scripts.bootstrap_agent_memory.prompt_file_missing": "Prompt file not found: %s",
         "scripts.bootstrap_agent_memory.started": "Starting agent memory profile bootstrap: agent=%s prompt_file=%s",
         "utils.message.tool_call_content": "🔧 Tool call: %s, 📥 Input args: %s",
+        "utils.message.llm_usage_received": "Received LLM usage tokens: total=%s in=%s out=%s",
         "utils.message.saved_count": "Saved %d message history records",
     }
 )
@@ -425,6 +427,7 @@ _MESSAGES["zh_HK"].update(
  'tdai_memory.pipeline.seed_round_not_dict': "Seed round %d in session '%s'：不是 dict，略過",
  'tdai_memory.pipeline.serial_queue_task_failed': 'SerialQueue[%s] task 失敗',
  'tdai_memory.pipeline.skipping_l2_no_active_sessions': '略過 L2：agent=%s 沒有 active sessions',
+ 'tdai_memory.pipeline.skipping_l3_no_scenes': '略過 L3：agent=%s 沒有 scene index',
  'tdai_memory.pipeline.soul_generation_complete': 'SOUL 生成完成：agent=%s',
  'tdai_memory.pipeline.soul_written': 'SOUL.md 已寫入：agent=%s chars=%d',
  'tdai_memory.pipeline.timeline_cache_invalidate_failed': 'Timeline cache invalidate 失敗：agent=%s session=%s',
@@ -578,6 +581,7 @@ _MESSAGES["en"].update(
  'tdai_memory.pipeline.serial_queue_task_failed': 'SerialQueue[%s] task failed',
  'tdai_memory.pipeline.skipping_l2_no_active_sessions': 'Skipping L2 for agent=%s (no active '
                                                         'sessions)',
+ 'tdai_memory.pipeline.skipping_l3_no_scenes': 'Skipping L3 for agent=%s (no scene index)',
  'tdai_memory.pipeline.soul_generation_complete': 'SOUL generation complete for agent %s',
  'tdai_memory.pipeline.soul_written': 'SOUL.md written for agent %s (%d chars)',
  'tdai_memory.pipeline.timeline_cache_invalidate_failed': 'Timeline cache invalidate failed for %s/%s',

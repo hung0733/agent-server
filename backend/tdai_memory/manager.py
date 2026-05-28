@@ -5,7 +5,9 @@ import logging
 from os import getenv
 import time
 from typing import Any, Callable, Optional
+from urllib.parse import quote_plus
 
+import asyncpg
 import openai
 from dotenv import load_dotenv
 
@@ -68,6 +70,60 @@ def _apply_env(
     setattr(target, attr, parsed_value)
 
 
+def _build_app_postgres_url() -> str:
+    direct_url = getenv("DATABASE_URL")
+    if direct_url:
+        return direct_url.replace("postgresql+asyncpg://", "postgresql://", 1)
+
+    host = getenv("POSTGRES_HOST", "localhost")
+    port = getenv("POSTGRES_PORT", "5432")
+    user = getenv("POSTGRES_USER", "postgres")
+    password = quote_plus(getenv("POSTGRES_PASSWORD", ""))
+    database = getenv("POSTGRES_DB", "postgres")
+    return f"postgresql://{user}:{password}@{host}:{port}/{database}"
+
+
+async def _load_endpoint_record_by_name(name: str) -> dict[str, Any] | None:
+    conn = await asyncpg.connect(_build_app_postgres_url())
+    try:
+        row = await conn.fetchrow(
+            """
+            SELECT id, endpoint, enc_key, model_name, max_token
+            FROM llm_endpoint
+            WHERE user_id IS NULL AND name = $1
+            LIMIT 1
+            """,
+            name,
+        )
+    finally:
+        await conn.close()
+
+    return dict(row) if row is not None else None
+
+
+async def _apply_endpoint_record(target: Any, env_name: str) -> bool:
+    rec_name = getenv(env_name)
+    if not rec_name:
+        return False
+
+    try:
+        record = await _load_endpoint_record_by_name(rec_name)
+    except Exception:
+        return False
+
+    if record is None:
+        return False
+
+    target.llm_ep_id = record["id"]
+    target.api_key = record["enc_key"] or ""
+    target.base_url = record["endpoint"]
+    if record["model_name"]:
+        target.model = record["model_name"]
+    if hasattr(target, "max_tokens") and record.get("max_token"):
+        target.max_tokens = record["max_token"]
+    return True
+
+
 class MemoryManager:
     _instance: Optional[MemoryManager] = None
 
@@ -78,7 +134,7 @@ class MemoryManager:
         return MemoryManager._instance
 
     @staticmethod
-    def from_env() -> MemoryConfig:
+    async def from_env() -> MemoryConfig:
         config = MemoryConfig()
 
         _apply_env(config, "postgres_url", "TDAI_MEM_POSTGRES_URL")
@@ -100,9 +156,13 @@ class MemoryManager:
             int,
         )
 
-        _apply_env(config.embedding, "api_key", "TDAI_MEM_EMBEDDING_API_KEY")
-        _apply_env(config.embedding, "base_url", "TDAI_MEM_EMBEDDING_BASE_URL")
-        _apply_env(config.embedding, "model", "TDAI_MEM_EMBEDDING_MODEL")
+        has_embedding_record = await _apply_endpoint_record(
+            config.embedding, "TDAI_MEM_EMBEDDING_REC_NAME"
+        )
+        if not has_embedding_record:
+            _apply_env(config.embedding, "api_key", "TDAI_MEM_EMBEDDING_API_KEY")
+            _apply_env(config.embedding, "base_url", "TDAI_MEM_EMBEDDING_BASE_URL")
+            _apply_env(config.embedding, "model", "TDAI_MEM_EMBEDDING_MODEL")
         _apply_env(config.embedding, "dimensions", "TDAI_MEM_EMBEDDING_DIMENSIONS", int)
         _apply_env(
             config.embedding,
@@ -234,10 +294,12 @@ class MemoryManager:
         _apply_env(config.bm25, "language", "TDAI_MEM_BM25_LANGUAGE")
 
         _apply_env(config.llm, "enabled", "TDAI_MEM_LLM_ENABLED", _env_bool)
-        _apply_env(config.llm, "model", "TDAI_MEM_LLM_MODEL")
-        _apply_env(config.llm, "base_url", "TDAI_MEM_LLM_BASE_URL")
-        _apply_env(config.llm, "api_key", "TDAI_MEM_LLM_API_KEY")
-        _apply_env(config.llm, "max_tokens", "TDAI_MEM_LLM_MAX_TOKENS", int)
+        has_llm_record = await _apply_endpoint_record(config.llm, "TDAI_MEM_LLM_REC_NAME")
+        if not has_llm_record:
+            _apply_env(config.llm, "model", "TDAI_MEM_LLM_MODEL")
+            _apply_env(config.llm, "base_url", "TDAI_MEM_LLM_BASE_URL")
+            _apply_env(config.llm, "api_key", "TDAI_MEM_LLM_API_KEY")
+            _apply_env(config.llm, "max_tokens", "TDAI_MEM_LLM_MAX_TOKENS", int)
         _apply_env(config.llm, "timeout_ms", "TDAI_MEM_LLM_TIMEOUT_MS", int)
 
         _apply_env(config.offload, "enabled", "TDAI_MEM_OFFLOAD_ENABLED", _env_bool)
@@ -571,7 +633,7 @@ class MemoryManager:
     @staticmethod
     async def bootstrap_agent(*, agent_id: str, prompt: str) -> dict[str, str]:
         load_dotenv()
-        config = MemoryManager.from_env()
+        config = await MemoryManager.from_env()
         llm_cfg = config.llm
         client = openai.AsyncOpenAI(
             api_key=resolve_openai_api_key(llm_cfg.api_key, llm_cfg.base_url),
@@ -650,14 +712,16 @@ class MemoryManager:
                 else:
                     content = self._read_full_result(agent_id, result_ref)
 
-                items.append({
-                    "type": "tool",
-                    "content": content,
-                    "timestamp": e.get("timestamp_epoch_ms", 0),
-                    "tool_call": e.get("tool_call", ""),
-                    "has_summary": has_summary,
-                    "round_index": e.get("round_index", 0),
-                })
+                items.append(
+                    {
+                        "type": "tool",
+                        "content": content,
+                        "timestamp": e.get("timestamp_epoch_ms", 0),
+                        "tool_call": e.get("tool_call", ""),
+                        "has_summary": has_summary,
+                        "round_index": e.get("round_index", 0),
+                    }
+                )
 
         items.sort(key=lambda x: x["timestamp"])
         await self._set_cached_timeline(agent_id, session_key, items)
@@ -704,11 +768,16 @@ class MemoryManager:
     ) -> None:
         key = (agent_id, session_key)
         async with self._timeline_cache_lock:
-            self._timeline_cache[key] = list(items)[-self.config.timeline_cache_max_items:]
+            self._timeline_cache[key] = list(items)[
+                -self.config.timeline_cache_max_items :
+            ]
             if key in self._timeline_cache_order:
                 self._timeline_cache_order.remove(key)
             self._timeline_cache_order.append(key)
-            while len(self._timeline_cache_order) > self.config.timeline_cache_max_sessions:
+            while (
+                len(self._timeline_cache_order)
+                > self.config.timeline_cache_max_sessions
+            ):
                 old_key = self._timeline_cache_order.pop(0)
                 self._timeline_cache.pop(old_key, None)
 
@@ -724,7 +793,7 @@ class MemoryManager:
                 return
             cached.extend(items)
             cached.sort(key=lambda x: x["timestamp"])
-            self._timeline_cache[key] = cached[-self.config.timeline_cache_max_items:]
+            self._timeline_cache[key] = cached[-self.config.timeline_cache_max_items :]
 
     async def _invalidate_timeline_cache(self, agent_id: str, session_key: str) -> None:
         key = (agent_id, session_key)
@@ -735,6 +804,7 @@ class MemoryManager:
 
     def _read_full_result(self, agent_id: str, result_ref: str) -> str:
         import os
+
         ref_path = os.path.join(self.config.data_dir, agent_id, "offload", result_ref)
         if not os.path.exists(ref_path):
             return result_ref

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime
+import inspect
 import logging
 import signal
 from collections.abc import Awaitable
@@ -50,8 +51,8 @@ async def upgrade_database_schema() -> None:
     logger.info(t("main.db_schema_upgrade_completed"))
 
 
-def create_memory_manager() -> MemoryManager:
-    return MemoryManager(MemoryManager.from_env())
+async def create_memory_manager() -> MemoryManager:
+    return MemoryManager(await MemoryManager.from_env())
 
 
 async def _close_graph_store_pool() -> None:
@@ -89,7 +90,11 @@ async def main(
     await check_database(db_engine)
     await upgrade_database_schema_func()
     await GraphStore.init_langgraph_checkpointer()
-    memory_manager: MemoryManager = memory_manager_factory()
+    maybe_memory_manager = memory_manager_factory()
+    if inspect.isawaitable(maybe_memory_manager):
+        memory_manager: MemoryManager = await maybe_memory_manager
+    else:
+        memory_manager = maybe_memory_manager
     try:
         await memory_manager.initialize()
     except Exception:

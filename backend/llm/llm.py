@@ -16,8 +16,6 @@ from backend.utils.tools import Tools
 class LLMSet(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    rte_model: OpenAIClient
-    sys_act_model: OpenAIClient
     level: Dict[int, list[LlmEndpointRead]]
     sec_level: Dict[int, list[LlmEndpointRead]]
 
@@ -27,8 +25,6 @@ class LLMSet(BaseModel):
             level, sec_level = await cls._load_levels(session, agent_db_id)
 
         return cls(
-            rte_model=await LLMSet.getRteModel(),
-            sys_act_model=await LLMSet.getSysActModel(),
             level=level,
             sec_level=sec_level,
         )
@@ -58,7 +54,9 @@ class LLMSet(BaseModel):
 
         return level, sec_level
 
-    def getModel(self, level: int, is_sec: bool = False) -> Optional[ChatOpenAI]:
+    def getModel(
+        self, level: int, is_sec: bool = False
+    ) -> tuple[int, Optional[ChatOpenAI]]:
         models: Dict[int, list[LlmEndpointRead]] = (
             self.sec_level if is_sec else self.level
         )
@@ -67,13 +65,16 @@ class LLMSet(BaseModel):
             if not model.model_name:
                 continue
 
-            return ChatOpenAI(
+            return model.id, ChatOpenAI(
                 base_url=model.endpoint,
                 api_key=SecretStr("NO_KEY" if not model.enc_key else model.enc_key),
                 model=model.model_name,
+                model_kwargs={
+                    "stream_options": {"include_usage": True},
+                },
             )
 
-        return None
+        return 0, None
 
     @staticmethod
     async def getModelByName(name: str) -> OpenAIClient:

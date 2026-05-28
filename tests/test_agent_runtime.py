@@ -45,7 +45,7 @@ class FakeModels:
         self.llm = llm
 
     def getModel(self, level, is_sec=False):
-        return self.llm
+        return 1, self.llm
 
     def getSysActModel(self):
         return self.llm

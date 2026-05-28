@@ -10,6 +10,7 @@ sys.path.insert(0, str(BACKEND_DIR))
 
 from tdai_memory.config import MemoryConfig, resolve_openai_api_key
 from tdai_memory.manager import MemoryManager
+import tdai_memory.manager as manager_module
 
 
 def test_memory_manager_instance_requires_initialize():
@@ -38,13 +39,15 @@ def clear_memory_env(monkeypatch):
         monkeypatch.delenv(name, raising=False)
 
 
-def test_from_env_returns_defaults_without_tdai_mem_env(monkeypatch):
+@pytest.mark.asyncio
+async def test_from_env_returns_defaults_without_tdai_mem_env(monkeypatch):
     clear_memory_env(monkeypatch)
 
-    assert MemoryManager.from_env() == MemoryConfig()
+    assert await MemoryManager.from_env() == MemoryConfig()
 
 
-def test_from_env_reads_tdai_mem_values(monkeypatch):
+@pytest.mark.asyncio
+async def test_from_env_reads_tdai_mem_values(monkeypatch):
     clear_memory_env(monkeypatch)
     monkeypatch.setenv("TDAI_MEM_POSTGRES_URL", "postgresql://db.example/memory")
     monkeypatch.setenv("TDAI_MEM_POSTGRES_SCHEMA", "memory_schema")
@@ -70,7 +73,7 @@ def test_from_env_reads_tdai_mem_values(monkeypatch):
     monkeypatch.setenv("TDAI_MEM_TIMELINE_CACHE_MAX_ITEMS", "1000")
     monkeypatch.setenv("TDAI_MEM_TIMELINE_CACHE_MAX_SESSIONS", "50")
 
-    config = MemoryManager.from_env()
+    config = await MemoryManager.from_env()
 
     assert config.postgres_url == "postgresql://db.example/memory"
     assert config.postgres_schema == "memory_schema"
@@ -109,7 +112,8 @@ def test_normalize_config_resets_invalid_timeline_cache_limits():
     assert normalized.timeline_cache_max_sessions == 100
 
 
-def test_from_env_empty_optional_strings_become_none(monkeypatch):
+@pytest.mark.asyncio
+async def test_from_env_empty_optional_strings_become_none(monkeypatch):
     clear_memory_env(monkeypatch)
     monkeypatch.setenv("TDAI_MEM_EXTRACTION_MODEL", "")
     monkeypatch.setenv("TDAI_MEM_PERSONA_MODEL", "")
@@ -118,7 +122,7 @@ def test_from_env_empty_optional_strings_become_none(monkeypatch):
     monkeypatch.setenv("TDAI_MEM_OFFLOAD_BACKEND_URL", "")
     monkeypatch.setenv("TDAI_MEM_OFFLOAD_USER_ID", "")
 
-    config = MemoryManager.from_env()
+    config = await MemoryManager.from_env()
 
     assert config.extraction.model is None
     assert config.persona.model is None
@@ -128,7 +132,8 @@ def test_from_env_empty_optional_strings_become_none(monkeypatch):
     assert config.offload.user_id is None
 
 
-def test_from_env_ignores_legacy_memory_env_names(monkeypatch):
+@pytest.mark.asyncio
+async def test_from_env_ignores_legacy_memory_env_names(monkeypatch):
     clear_memory_env(monkeypatch)
     monkeypatch.setenv("MEMORY_SCHEMA", "legacy_schema")
     monkeypatch.setenv("MEMORY_DATA_DIR", "/legacy/memory")
@@ -137,7 +142,7 @@ def test_from_env_ignores_legacy_memory_env_names(monkeypatch):
     monkeypatch.setenv("TDAI_LLM_MODEL", "legacy-model")
     monkeypatch.setenv("MEMORY_OFFLOAD_ENABLED", "true")
 
-    config = MemoryManager.from_env()
+    config = await MemoryManager.from_env()
 
     assert config.postgres_schema == "public"
     assert config.data_dir == "./tdai_data"
@@ -145,6 +150,151 @@ def test_from_env_ignores_legacy_memory_env_names(monkeypatch):
     assert config.llm.api_key == ""
     assert config.llm.model == "gpt-4o"
     assert config.offload.enabled is False
+
+
+@pytest.mark.asyncio
+async def test_from_env_applies_embedding_endpoint_record(monkeypatch):
+    clear_memory_env(monkeypatch)
+    monkeypatch.setenv("TDAI_MEM_EMBEDDING_REC_NAME", "memory-embedding")
+
+    async def fake_load_endpoint_record_by_name(name):
+        assert name == "memory-embedding"
+        return {
+            "id": 12,
+            "endpoint": "http://embedding-db.example",
+            "enc_key": "db-embedding-key",
+            "model_name": "db-embedding-model",
+            "max_token": 8192,
+        }
+
+    monkeypatch.setattr(
+        manager_module,
+        "_load_endpoint_record_by_name",
+        fake_load_endpoint_record_by_name,
+    )
+
+    config = await MemoryManager.from_env()
+
+    assert config.embedding.llm_ep_id == 12
+    assert config.embedding.api_key == "db-embedding-key"
+    assert config.embedding.base_url == "http://embedding-db.example/v1"
+    assert config.embedding.model == "db-embedding-model"
+    assert not hasattr(config.embedding, "max_tokens")
+
+
+@pytest.mark.asyncio
+async def test_from_env_applies_llm_endpoint_record(monkeypatch):
+    clear_memory_env(monkeypatch)
+    monkeypatch.setenv("TDAI_MEM_LLM_REC_NAME", "memory-llm")
+
+    async def fake_load_endpoint_record_by_name(name):
+        assert name == "memory-llm"
+        return {
+            "id": 34,
+            "endpoint": "http://llm-db.example",
+            "enc_key": "db-llm-key",
+            "model_name": "db-llm-model",
+            "max_token": 8192,
+        }
+
+    monkeypatch.setattr(
+        manager_module,
+        "_load_endpoint_record_by_name",
+        fake_load_endpoint_record_by_name,
+    )
+
+    config = await MemoryManager.from_env()
+
+    assert config.llm.llm_ep_id == 34
+    assert config.llm.api_key == "db-llm-key"
+    assert config.llm.base_url == "http://llm-db.example/v1"
+    assert config.llm.model == "db-llm-model"
+    assert config.llm.max_tokens == 8192
+
+
+@pytest.mark.asyncio
+async def test_from_env_endpoint_record_skips_endpoint_env_values(monkeypatch):
+    clear_memory_env(monkeypatch)
+    monkeypatch.setenv("TDAI_MEM_LLM_REC_NAME", "memory-llm")
+    monkeypatch.setenv("TDAI_MEM_LLM_API_KEY", "env-llm-key")
+    monkeypatch.setenv("TDAI_MEM_LLM_BASE_URL", "http://llm-env.example")
+    monkeypatch.setenv("TDAI_MEM_LLM_MODEL", "env-llm-model")
+    monkeypatch.setenv("TDAI_MEM_LLM_MAX_TOKENS", "1024")
+    monkeypatch.setenv("TDAI_MEM_LLM_TIMEOUT_MS", "30000")
+
+    async def fake_load_endpoint_record_by_name(name):
+        return {
+            "id": 56,
+            "endpoint": "http://llm-db.example",
+            "enc_key": "db-llm-key",
+            "model_name": "db-llm-model",
+            "max_token": 8192,
+        }
+
+    monkeypatch.setattr(
+        manager_module,
+        "_load_endpoint_record_by_name",
+        fake_load_endpoint_record_by_name,
+    )
+
+    config = await MemoryManager.from_env()
+
+    assert config.llm.llm_ep_id == 56
+    assert config.llm.api_key == "db-llm-key"
+    assert config.llm.base_url == "http://llm-db.example/v1"
+    assert config.llm.model == "db-llm-model"
+    assert config.llm.max_tokens == 8192
+    assert config.llm.timeout_ms == 30000
+
+
+@pytest.mark.asyncio
+async def test_from_env_missing_endpoint_record_keeps_defaults(monkeypatch):
+    clear_memory_env(monkeypatch)
+    monkeypatch.setenv("TDAI_MEM_LLM_REC_NAME", "missing-llm")
+
+    async def fake_load_endpoint_record_by_name(name):
+        return None
+
+    monkeypatch.setattr(
+        manager_module,
+        "_load_endpoint_record_by_name",
+        fake_load_endpoint_record_by_name,
+    )
+
+    config = await MemoryManager.from_env()
+
+    assert config.llm.llm_ep_id == 0
+    assert config.llm.api_key == ""
+    assert config.llm.base_url == "https://api.openai.com/v1"
+    assert config.llm.model == "gpt-4o"
+
+
+@pytest.mark.asyncio
+async def test_from_env_endpoint_record_without_model_keeps_default_model(monkeypatch):
+    clear_memory_env(monkeypatch)
+    monkeypatch.setenv("TDAI_MEM_EMBEDDING_REC_NAME", "memory-embedding")
+
+    async def fake_load_endpoint_record_by_name(name):
+        return {
+            "id": 78,
+            "endpoint": "http://embedding-db.example",
+            "enc_key": None,
+            "model_name": None,
+            "max_token": None,
+        }
+
+    monkeypatch.setattr(
+        manager_module,
+        "_load_endpoint_record_by_name",
+        fake_load_endpoint_record_by_name,
+    )
+
+    config = await MemoryManager.from_env()
+
+    assert config.embedding.llm_ep_id == 78
+    assert config.embedding.api_key == ""
+    assert config.embedding.base_url == "http://embedding-db.example/v1"
+    assert config.embedding.model == "text-embedding-3-small"
 
 
 def test_resolve_openai_api_key_allows_empty_key_for_custom_base_url():

@@ -11,7 +11,9 @@ from langchain_core.messages import (
 )
 
 from backend.dao.agent_msg_hist import AgentMsgHistDAO
+from backend.dao.llm_usage import LlmUsageDAO
 from backend.dto.agent_msg_hist import AgentMsgHistCreate
+from backend.dto.llm_usage import LlmUsageCreate
 from backend.i18n import t
 from backend.tdai_memory.models import ConversationMessage, ToolCallMessage
 from backend.db.session import async_session_factory
@@ -22,6 +24,7 @@ logger = logging.getLogger(__name__)
 class MsgUtil:
     @staticmethod
     async def save_agent_msg_hist(dtos: list[AgentMsgHistCreate]):
+        logger.info(t("utils.message.saved_count") % len(dtos))
         async with async_session_factory() as session:
             dao: AgentMsgHistDAO = AgentMsgHistDAO(session)
             for dto in dtos:
@@ -29,9 +32,79 @@ class MsgUtil:
             await session.commit()
 
     @staticmethod
-    async def save_msg_hist_rec(dtos: list[AgentMsgHistCreate]):
-        await MsgUtil.save_agent_msg_hist(dtos)
-        logger.info(t("utils.message.saved_count") % len(dtos))
+    async def save_llm_usage(llm_endpoint_id: int, response: AIMessage):
+        usage_metadata = response.usage_metadata or {}
+        token_usage = {}
+        if not usage_metadata:
+            token_usage = response.response_metadata.get("token_usage") or {}
+
+        in_token = MsgUtil._token_count(
+            MsgUtil._usage_value(usage_metadata, "input_tokens")
+            or MsgUtil._usage_value(token_usage, "prompt_tokens")
+        )
+
+        out_token = MsgUtil._token_count(
+            MsgUtil._usage_value(usage_metadata, "output_tokens")
+            or MsgUtil._usage_value(token_usage, "completion_tokens")
+        )
+
+        total_token = MsgUtil._token_count(
+            MsgUtil._usage_value(usage_metadata, "total_tokens")
+            or MsgUtil._usage_value(token_usage, "total_tokens")
+        )
+
+        usage_dt = response.additional_kwargs.get("datetime")
+
+        await MsgUtil.proc_save_llm_usage(
+            llm_endpoint_id, in_token, out_token, total_token, usage_dt
+        )
+
+    @staticmethod
+    async def proc_save_llm_usage(
+        llm_endpoint_id: int,
+        in_token: int,
+        out_token: int,
+        total_token: int,
+        usage_dt: datetime,
+    ):
+
+        if not any((in_token, out_token, total_token)):
+            return
+
+        logger.info(
+            t("utils.message.llm_usage_received"),
+            total_token,
+            in_token,
+            out_token,
+        )
+
+        if not isinstance(usage_dt, datetime):
+            usage_dt = datetime.now(timezone.utc)
+
+        async with async_session_factory() as session:
+            dao = LlmUsageDAO(session)
+            await dao.create(
+                LlmUsageCreate(
+                    llm_endpoint_id=llm_endpoint_id,
+                    date_time=usage_dt,
+                    total_token=total_token,
+                    in_token=in_token,
+                    out_token=out_token,
+                )
+            )
+            await session.commit()
+
+    @staticmethod
+    def _token_count(value: Any) -> int:
+        if value is None:
+            return 0
+        return int(value)
+
+    @staticmethod
+    def _usage_value(usage: Any, key: str) -> Any:
+        if isinstance(usage, dict):
+            return usage.get(key)
+        return getattr(usage, key, None)
 
     @staticmethod
     def _ts_to_dt(ts: int) -> datetime:

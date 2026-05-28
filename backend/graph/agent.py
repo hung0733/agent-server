@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional, Sequence
+from typing import Any, Dict, Sequence
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import (
@@ -10,7 +10,6 @@ from langchain_core.messages import (
     HumanMessage,
 )
 from langchain_core.runnables import RunnableConfig
-from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
 
@@ -37,7 +36,7 @@ async def chat_node(state: MessageState, config: RunnableConfig):
     think_mode: bool = GraphNode.get_configure(config, "think_mode", False)
     args: Dict[str, Any] = GraphNode.get_configure(config, "args", {})
 
-    model_to_use: Optional[ChatOpenAI] = models.getModel(2, involves_secrets)
+    llm_endpoint_id, model_to_use = models.getModel(2, involves_secrets)
     if not model_to_use:
         raise ValueError(t("graph.agent.llm_model_missing"))
 
@@ -53,13 +52,18 @@ async def chat_node(state: MessageState, config: RunnableConfig):
 
     model_to_use = GraphNode.with_runtime_model_args(config, model_to_use)
     model_with_tools = _bind_tools(model_to_use, _tools_for_config(config))
+
     response: AIMessage = await model_with_tools.ainvoke(messages)
+    logger.info(response)
+
     GraphNode.log_base_message_response(response)
     response.additional_kwargs = {
         **response.additional_kwargs,
         "datetime": datetime.now(timezone.utc),
         "text_done": True,
     }
+
+    Tools.start_async_task(MsgUtil.save_llm_usage(llm_endpoint_id, response))
 
     logger.debug(t("graph.agent.chat_node_completed"), len(str(response.content)))
     return {"messages": [response]}

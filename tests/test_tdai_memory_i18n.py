@@ -33,12 +33,13 @@ def test_tdai_memory_i18n_locale_selection(monkeypatch):
     assert t("tdai_memory.manager.initialized") == "MemoryManager 已初始化"
 
 
-def test_tdai_memory_invalid_boolean_exception_uses_i18n(monkeypatch):
+@pytest.mark.asyncio
+async def test_tdai_memory_invalid_boolean_exception_uses_i18n(monkeypatch):
     monkeypatch.setenv("LANG_LOCALE", "en")
     monkeypatch.setenv("TDAI_MEM_CAPTURE_ENABLED", "maybe")
 
     with pytest.raises(ValueError, match="TDAI_MEM_CAPTURE_ENABLED must be a boolean value"):
-        MemoryManager.from_env()
+        await MemoryManager.from_env()
 
 
 def test_tdai_memory_logger_messages_use_i18n():
