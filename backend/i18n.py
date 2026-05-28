@@ -273,6 +273,7 @@ _MESSAGES["zh_HK"].update(
         "scripts.bootstrap_agent_memory.prompt_file_help": "包含 agent prompt 的檔案路徑",
         "scripts.bootstrap_agent_memory.prompt_file_missing": "找不到 prompt 檔案：%s",
         "scripts.bootstrap_agent_memory.started": "開始 bootstrap agent memory profile：agent=%s prompt_file=%s",
+        "utils.message.tool_call_content": "🔧 工具調用：%s, 📥 傳入參數: %s",
     }
 )
 _MESSAGES["en"].update(
@@ -319,6 +320,7 @@ _MESSAGES["en"].update(
         "scripts.bootstrap_agent_memory.prompt_file_help": "Path to the file containing the agent prompt",
         "scripts.bootstrap_agent_memory.prompt_file_missing": "Prompt file not found: %s",
         "scripts.bootstrap_agent_memory.started": "Starting agent memory profile bootstrap: agent=%s prompt_file=%s",
+        "utils.message.tool_call_content": "🔧 Tool call: %s, 📥 Input args: %s",
     }
 )
 
