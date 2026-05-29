@@ -231,6 +231,38 @@ def test_base_msg_to_msg_hist_rec_mixed_sequence():
     assert result[5].content == "完成"
 
 
+def test_base_msg_to_tdai_memory_rec_allows_missing_datetime():
+    messages = [
+        HumanMessage(content="Hi"),
+        AIMessage(
+            content="Let me check",
+            additional_kwargs={"datetime": datetime(2026, 5, 29, tzinfo=timezone.utc)},
+            tool_calls=[
+                {
+                    "name": "search",
+                    "args": {"query": "test"},
+                    "id": "call-3",
+                }
+            ],
+        ),
+        ToolMessage(content="結果", tool_call_id="call-3"),
+        AIMessage(content="完成"),
+    ]
+
+    user_msg, assistant_msg, cm, tcm = MsgUtil.base_msg_to_tdai_memory_rec(
+        messages,
+        conversation_metadata={"sender_name": "Alice", "recv_name": "Bot"},
+    )
+
+    assert user_msg == "Hi"
+    assert assistant_msg == "Let me check\n\n完成\n\n"
+    assert [msg.role for msg in cm] == ["user", "assistant", "assistant"]
+    assert len(tcm) == 1
+    assert tcm[0].tool_result == "結果"
+    assert all(msg.timestamp > 0 for msg in cm)
+    assert tcm[0].timestamp > 0
+
+
 def test_base_msg_to_msg_hist_rec_empty_ai_content_no_records():
     messages = [AIMessage(content="")]
     result = MsgUtil.base_msg_to_msg_hist_rec(

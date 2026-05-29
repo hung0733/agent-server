@@ -287,7 +287,10 @@ class MsgUtil:
         tcm: list[ToolCallMessage] = []
 
         for message in messages:
-            ts: int = MsgUtil._dt_to_ts(message.additional_kwargs["datetime"])
+            msg_dt = message.additional_kwargs.get("datetime")
+            if not isinstance(msg_dt, datetime):
+                msg_dt = datetime.now(timezone.utc)
+            ts: int = MsgUtil._dt_to_ts(msg_dt)
             if isinstance(message, HumanMessage):
                 user_msg = str(message.content)
                 cm.append(
