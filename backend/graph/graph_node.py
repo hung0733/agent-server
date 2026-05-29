@@ -330,6 +330,7 @@ class GraphNode:
         user_db_id: int | None = None,
         session_db_id: int | None = None,
         agent_id: str = "",
+        sandbox: Any | None = None,
         ltm_msg: str = "",
         timelines: list[BaseMessage] = [],
     ) -> RunnableConfig:
@@ -349,6 +350,7 @@ class GraphNode:
                 "conversation_kind": conversation_kind,
                 "user_db_id": user_db_id,
                 "agent_id": agent_id,
+                "sandbox": sandbox,
                 "ltm_msg": ltm_msg,
                 "timelines": timelines,
                 "session_db_id": session_db_id,

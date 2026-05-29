@@ -243,6 +243,7 @@ def test_run_suppresses_keyboard_interrupt(monkeypatch):
 async def test_handle_agent_message_calls_agent_send(monkeypatch):
     calls = []
     chunks = []
+    sandbox = object()
 
     class FakeTask:
         agent_id = "agent-1"
@@ -254,8 +255,11 @@ async def test_handle_agent_message_calls_agent_send(monkeypatch):
             chunks.append(chunk)
 
     class FakeAgent:
-        async def send(self, message, think_mode, metadata):
-            calls.append((message, think_mode, metadata))
+        agent_id = "agent-1"
+        user_id = "user-1"
+
+        async def send(self, message, think_mode, metadata, sandbox=None):
+            calls.append((message, think_mode, metadata, sandbox))
             yield StreamChunk(chunk_type="content", content="ok")
             yield StreamChunk(chunk_type="text_end")
 
@@ -263,12 +267,22 @@ async def test_handle_agent_message_calls_agent_send(monkeypatch):
         calls.append((agent_id, session_id))
         return FakeAgent()
 
+    async def get_agent_sandbox(agent_id, user_id):
+        calls.append(("sandbox", agent_id, user_id))
+        return sandbox
+
     monkeypatch.setattr(main_module.handle_agent_message.__globals__["Agent"], "get_agent", get_agent)
+    monkeypatch.setitem(
+        main_module.handle_agent_message.__globals__,
+        "get_agent_sandbox",
+        get_agent_sandbox,
+    )
 
     await handle_agent_message(FakeTask())
 
     assert calls == [
         ("agent-1", "session-1"),
+        ("sandbox", "agent-1", "user-1"),
         (
             "hello",
             False,
@@ -276,6 +290,7 @@ async def test_handle_agent_message_calls_agent_send(monkeypatch):
                 "source": "whatsapp",
                 "files": [{"mimetype": "text/plain", "filename": "a.txt", "bytes": b"a"}],
             },
+            sandbox,
         ),
     ]
     assert chunks == [

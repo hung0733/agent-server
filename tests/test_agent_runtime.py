@@ -653,6 +653,7 @@ def test_agent_runtime_marks_agent_to_agent_conversation():
 @pytest.mark.asyncio
 async def test_agent_proc_send_streams_content_chunks(monkeypatch):
     recall_calls = []
+    sandbox = FakeSandbox()
 
     class FakeMemoryManager:
         async def recall(self, *, agent_id, session_key, user_text):
@@ -671,6 +672,7 @@ async def test_agent_proc_send_streams_content_chunks(monkeypatch):
             message="hello",
             think_mode=False,
             metadata={"source": "test"},
+            sandbox=sandbox,
             graph=graph,
         )
     ]
@@ -680,6 +682,7 @@ async def test_agent_proc_send_streams_content_chunks(monkeypatch):
     assert recall_calls == [("agent-1", "session-1", "hello")]
     assert graph.configs[0]["configurable"]["conversation_kind"] == "user_to_agent"
     assert graph.configs[0]["configurable"]["sender_type"] == "user"
+    assert graph.configs[0]["configurable"]["sandbox"] is sandbox
 
 
 @pytest.mark.asyncio

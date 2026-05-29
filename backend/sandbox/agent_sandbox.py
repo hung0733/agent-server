@@ -25,11 +25,13 @@ class AgentSandbox:
     def __init__(
         self,
         user_id: str | None = None,
+        agent_id: str | None = None,
         *,
         timeout_minutes: int | None = 30,
         sandbox: Any | None = None,
     ) -> None:
         self.user_id = user_id
+        self.agent_id = agent_id
         self.timeout_minutes = timeout_minutes
         self._sandbox = sandbox
         self.working_directory = WORKSPACE_MOUNT_PATH
@@ -68,11 +70,15 @@ class AgentSandbox:
             mountPath=WORKSPACE_MOUNT_PATH,
             readOnly=False,
         )
+        metadata = {"agent_server_user_id": valid_user_id}
+        if self.agent_id is not None:
+            metadata["agent_server_agent_id"] = self.agent_id
+
         kwargs: dict[str, Any] = {
             "image": os.getenv("SANDBOX_IMAGE", DEFAULT_SANDBOX_IMAGE),
             "connection_config": config,
             "volumes": [volume],
-            "metadata": {"agent_server_user_id": valid_user_id},
+            "metadata": metadata,
         }
         if self.timeout_minutes is not None:
             kwargs["timeout"] = timedelta(minutes=self.timeout_minutes)

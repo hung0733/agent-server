@@ -24,6 +24,7 @@ class Bulter(Agent):
         message: str,
         think_mode: bool,
         metadata: Dict[str, Any],
+        sandbox: Any | None = None,
     ) -> AsyncGenerator[StreamChunk, None]:
         logger.info(
             t("agent.send_started"),
@@ -36,6 +37,7 @@ class Bulter(Agent):
             message=message,
             think_mode=think_mode,
             metadata=metadata,
+            sandbox=sandbox,
             graph=Bulter._graph,
         ):
             yield chunk

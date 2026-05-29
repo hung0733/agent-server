@@ -124,6 +124,7 @@ class Agent:
         message: str,
         think_mode: bool,
         metadata: Dict[str, Any],
+        sandbox: Any | None = None,
     ) -> AsyncGenerator[StreamChunk, None]:
         logger.info(
             t("agent.send_started"),
@@ -136,6 +137,7 @@ class Agent:
             message=message,
             think_mode=think_mode,
             metadata=metadata,
+            sandbox=sandbox,
             graph=Agent._graph,
         ):
             yield chunk
@@ -146,6 +148,7 @@ class Agent:
         message: str,
         think_mode: bool,
         metadata: Dict[str, Any],
+        sandbox: Any | None,
         graph: Any,
     ) -> AsyncGenerator[StreamChunk, None]:
 
@@ -190,6 +193,7 @@ class Agent:
             conversation_kind=getattr(agent, "conversation_kind", "user_to_agent"),
             user_db_id=agent.user_db_id,
             agent_id=agent.agent_id,
+            sandbox=sandbox,
             ltm_msg=ltm_msg,
             timelines=timelines,
             session_db_id=agent.session_db_id,
