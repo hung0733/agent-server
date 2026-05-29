@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 import json
 import logging
-from typing import Annotated, Any, Dict, Optional, TypedDict
+from typing import Annotated, Any, Dict, Optional, Sequence, TypedDict
 
 from langchain_core.messages import (
     AIMessage,
@@ -10,12 +10,15 @@ from langchain_core.messages import (
     ToolMessage,
     HumanMessage,
 )
+from langchain_core.language_models import BaseChatModel
 from langchain_core.runnables import RunnableConfig
 from langchain_openai import ChatOpenAI
 
 from backend.i18n import t
 from backend.llm.llm import LLMSet
 from backend.llm.types import StreamChunk
+from backend.tools.memory import MemoryTools
+from backend.tools.sandbox import SandboxTools
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +76,29 @@ class GraphNode:
             "min_p": 0.0,
         },
     }
+
+    @staticmethod
+    def build_tools(config: RunnableConfig, model: ChatOpenAI) -> ChatOpenAI:
+        bind_tools = getattr(model, "bind_tools", None)
+        if not callable(bind_tools):
+            return model
+
+        tools: Sequence[Any] = [] + MemoryTools
+        if (GraphNode.get_configure(config, "sandbox")) is not None:
+            tools += SandboxTools
+
+        tool_names = [
+            str(getattr(tool, "name", None) or getattr(tool, "__name__", ""))
+            for tool in tools
+        ]
+        logger.info(t("graph.agent.tools_loaded"), ", ".join(tool_names))
+
+        try:
+            return bind_tools(tools) # type: ignore
+        except NotImplementedError:
+            return model
+
+        return model
 
     @staticmethod
     def pack_message(state: MessageState, config: RunnableConfig) -> list[BaseMessage]:

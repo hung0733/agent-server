@@ -23,6 +23,7 @@ from backend.tdai_memory.models import (
     ConversationMessage,
     ToolCallMessage,
 )
+from backend.tools.memory import MemoryTools
 from backend.tools.sandbox import SandboxTools
 from backend.utils.message import MsgUtil
 from backend.utils.tools import Tools
@@ -51,7 +52,7 @@ async def chat_node(state: MessageState, config: RunnableConfig):
     # logger.info(messages)
 
     model_to_use = GraphNode.with_runtime_model_args(config, model_to_use)
-    model_with_tools = _bind_tools(model_to_use, _tools_for_config(config))
+    model_with_tools = GraphNode.build_tools(config, model_to_use)
 
     response: AIMessage = await model_with_tools.ainvoke(messages)
 
@@ -111,30 +112,6 @@ async def end_node(state: MessageState, config: RunnableConfig):
     return
 
 
-def _tools_for_config(config: RunnableConfig) -> Sequence[Any]:
-    configurable = config.get("configurable", {})
-    configured_tools = configurable.get("tools")
-    if configured_tools is not None:
-        return configured_tools
-    if configurable.get("sandbox") is not None:
-        return SandboxTools
-    return []
-
-
-def _bind_tools(model: BaseChatModel, tools: Sequence[Any]) -> BaseChatModel:
-    if not tools:
-        return model
-
-    bind_tools = getattr(model, "bind_tools", None)
-    if not callable(bind_tools):
-        return model
-
-    try:
-        return bind_tools(tools)
-    except NotImplementedError:
-        return model
-
-
 def route_after_chat(state: MessageState) -> str:
     if not state["messages"]:
         return "end_node"
@@ -152,7 +129,7 @@ def route_after_chat(state: MessageState) -> str:
 workflow = StateGraph(MessageState)
 
 workflow.add_node("chat", chat_node)
-workflow.add_node("tools", ToolNode(SandboxTools))
+workflow.add_node("tools", ToolNode(SandboxTools + MemoryTools))
 workflow.add_node("end_node", end_node)
 
 workflow.add_edge(START, "chat")
