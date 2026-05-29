@@ -10,6 +10,7 @@ import openai
 
 from backend.i18n import t
 from ..config import MemoryConfig
+from ..llm_usage import save_tdai_llm_usage
 from ..llm_options import tdai_memory_thinking_kwargs
 from ..models import MemoryRecord
 from ..store.embedding import EmbeddingService
@@ -289,6 +290,7 @@ async def run_l1_extraction(
         timeout=config.llm.timeout_ms / 1000,
         **tdai_memory_thinking_kwargs(model),
     )
+    save_tdai_llm_usage(config, response)
 
     response_text = response.choices[0].message.content or ""
     response_text = sanitize_json_for_parse(response_text)

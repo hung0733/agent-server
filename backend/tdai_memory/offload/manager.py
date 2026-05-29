@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 import openai
 
 from backend.i18n import t
+from backend.tdai_memory.llm_usage import save_tdai_llm_usage
 from backend.tdai_memory.llm_options import tdai_memory_thinking_kwargs
 from ..config import MemoryConfig
 from .summarizer import summarize_tool_result
@@ -69,6 +70,7 @@ async def _summarize_batch(
         timeout=config.llm.timeout_ms / 1000.0,
         **tdai_memory_thinking_kwargs(config.llm.model),
     )
+    save_tdai_llm_usage(config, response)
     content = response.choices[0].message.content.strip()
     parsed = _parse_batch_summary_content(content)
     results: list[tuple[str, int]] = []
@@ -641,6 +643,7 @@ class OffloadManager:
                 timeout=self.config.llm.timeout_ms / 1000.0,
                 **tdai_memory_thinking_kwargs(self.config.llm.model),
             )
+            save_tdai_llm_usage(self.config, response)
             content = response.choices[0].message.content.strip()
             result = json.loads(content)
         except Exception:
@@ -721,6 +724,7 @@ class OffloadManager:
                 timeout=self.config.llm.timeout_ms / 1000.0,
                 **tdai_memory_thinking_kwargs(self.config.llm.model),
             )
+            save_tdai_llm_usage(self.config, response)
             skill_content = response.choices[0].message.content
         except Exception:
             logger.warning(t("tdai_memory.offload.skill_generation_failed"), mmd_name, exc_info=True)

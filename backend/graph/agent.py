@@ -54,7 +54,6 @@ async def chat_node(state: MessageState, config: RunnableConfig):
     model_with_tools = _bind_tools(model_to_use, _tools_for_config(config))
 
     response: AIMessage = await model_with_tools.ainvoke(messages)
-    logger.info(response)
 
     GraphNode.log_base_message_response(response)
     response.additional_kwargs = {

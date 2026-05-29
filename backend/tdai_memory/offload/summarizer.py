@@ -3,6 +3,7 @@ import logging
 import openai
 
 from backend.i18n import t
+from backend.tdai_memory.llm_usage import save_tdai_llm_usage
 from backend.tdai_memory.llm_options import tdai_memory_thinking_kwargs
 
 logger = logging.getLogger(__name__)
@@ -57,6 +58,7 @@ async def summarize_tool_result(
             timeout=config.llm.timeout_ms / 1000.0,
             **tdai_memory_thinking_kwargs(config.llm.model),
         )
+        save_tdai_llm_usage(config, response)
         content = response.choices[0].message.content.strip()
         parsed = json.loads(content)
         summary = parsed["summary"]

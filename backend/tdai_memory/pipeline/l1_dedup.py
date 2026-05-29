@@ -9,6 +9,7 @@ from openai import AsyncOpenAI
 
 from backend.i18n import t
 from ..config import MemoryConfig
+from ..llm_usage import save_tdai_llm_usage
 from ..llm_options import tdai_memory_thinking_kwargs
 from ..models import MemoryRecord
 from ..store.embedding import EmbeddingService
@@ -136,6 +137,7 @@ async def batch_dedup(
             timeout=config.llm.timeout_ms / 1000.0,
             **tdai_memory_thinking_kwargs(model),
         )
+        save_tdai_llm_usage(config, response)
         raw = response.choices[0].message.content or ""
         data = json.loads(raw)
     except Exception:

@@ -7,6 +7,7 @@ import os
 import openai
 
 from backend.i18n import t
+from backend.tdai_memory.llm_usage import save_tdai_llm_usage
 from backend.tdai_memory.llm_options import tdai_memory_thinking_kwargs
 
 logger = logging.getLogger(__name__)
@@ -103,6 +104,7 @@ async def generate_mmd_summary(
             timeout=config.llm.timeout_ms / 1000.0,
             **tdai_memory_thinking_kwargs(config.llm.model),
         )
+        save_tdai_llm_usage(config, response)
         return response.choices[0].message.content.strip()
     except Exception:
         logger.warning(t("tdai_memory.offload.generate_mmd_summary_failed"), exc_info=True)

@@ -119,7 +119,7 @@ async def _truncate_schema(conn, schema: str, tables: list[str]) -> None:
 
 
 async def reset_postgres(*, dry_run: bool) -> dict[str, object]:
-    memory_config = MemoryManager.from_env()
+    memory_config = await MemoryManager.from_env()
     memory_schema = memory_config.postgres_schema
     langgraph_schema = os.getenv("LANGGRAPH_SCHEMA", "")
     if not langgraph_schema:
@@ -172,8 +172,8 @@ async def reset_postgres(*, dry_run: bool) -> dict[str, object]:
         await conn.close()
 
 
-def _vector_dimensions() -> int:
-    config = MemoryManager.from_env()
+async def _vector_dimensions() -> int:
+    config = await MemoryManager.from_env()
     if config.embedding.dimensions > 0:
         return config.embedding.dimensions
     return EMBEDDING_MODEL_DIMENSIONS.get(
@@ -183,7 +183,7 @@ def _vector_dimensions() -> int:
 
 
 async def reset_qdrant(*, dry_run: bool) -> dict[str, object]:
-    config = MemoryManager.from_env()
+    config = await MemoryManager.from_env()
     collection_names = [
         config.qdrant_l0_collection,
         config.qdrant_l1_collection,
@@ -201,7 +201,7 @@ async def reset_qdrant(*, dry_run: bool) -> dict[str, object]:
         if dry_run:
             return summary
 
-        dimensions = _vector_dimensions()
+        dimensions = await _vector_dimensions()
         for collection_name in collection_names:
             if collection_name in existing:
                 await client.delete_collection(collection_name=collection_name)
@@ -237,7 +237,7 @@ def _print_table_counts(label_key: str, table_counts: dict[str, int]) -> None:
 
 async def run(*, yes: bool) -> None:
     dry_run = not yes
-    config = MemoryManager.from_env()
+    config = await MemoryManager.from_env()
 
     mode_key = (
         "scripts.reset_runtime_memory.dry_run"

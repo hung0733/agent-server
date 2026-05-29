@@ -32,11 +32,17 @@ class MsgUtil:
             await session.commit()
 
     @staticmethod
-    async def save_llm_usage(llm_endpoint_id: int, response: AIMessage):
-        usage_metadata = response.usage_metadata or {}
+    async def save_llm_usage(llm_endpoint_id: int, response: Any):
+        model_name = MsgUtil._response_model_name(response)
+        usage_metadata = getattr(response, "usage_metadata", {})
         token_usage = {}
+
         if not usage_metadata:
-            token_usage = response.response_metadata.get("token_usage") or {}
+            resp_metadata = getattr(response, "response_metadata", {})
+            if resp_metadata:
+                token_usage = getattr(resp_metadata, "token_usage", {})
+            else:
+                token_usage = getattr(response, "usage", {})
 
         in_token = MsgUtil._token_count(
             MsgUtil._usage_value(usage_metadata, "input_tokens")
@@ -61,7 +67,10 @@ class MsgUtil:
             or MsgUtil._usage_value(token_usage, "total_tokens")
         )
 
-        usage_dt = response.additional_kwargs.get("datetime")
+        usage_dt:datetime = datetime.now(timezone.utc)
+        addl_data = getattr(response, "additional_kwargs", {})
+        if addl_data:
+            usage_dt = getattr(addl_data, "datetime", datetime.now(timezone.utc))
 
         await MsgUtil.proc_save_llm_usage(
             llm_endpoint_id,
@@ -70,6 +79,7 @@ class MsgUtil:
             total_token,
             usage_dt,  # type: ignore
             cached_in_token,
+            model_name,
         )
 
     @staticmethod
@@ -80,13 +90,15 @@ class MsgUtil:
         total_token: int,
         usage_dt: datetime,
         cached_in_token: int = 0,
+        model_name: str = "",
     ):
 
-        if not any((in_token, out_token, total_token)):
+        if not any((in_token, total_token)):
             return
 
         logger.info(
             t("utils.message.llm_usage_received"),
+            model_name,
             total_token,
             in_token,
             out_token,
@@ -121,6 +133,18 @@ class MsgUtil:
         if isinstance(usage, dict):
             return usage.get(key)
         return getattr(usage, key, None)
+
+    @staticmethod
+    def _response_model_name(response: Any) -> str:
+        model_name = getattr(response, "model", "")
+        if model_name:
+            return str(model_name)
+
+        response_metadata = getattr(response, "response_metadata", {})
+        model_name = getattr(response_metadata, "model_name", "")
+        if not model_name and isinstance(response_metadata, dict):
+            model_name = response_metadata.get("model_name", "")
+        return str(model_name or "")
 
     @staticmethod
     def _ts_to_dt(ts: int) -> datetime:

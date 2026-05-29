@@ -11,6 +11,7 @@ import openai
 
 from backend.i18n import t
 from ..config import MemoryConfig
+from ..llm_usage import save_tdai_llm_usage
 from ..llm_options import tdai_memory_thinking_kwargs
 from ..store.postgres import PostgresStore
 from ..utils.sanitize import escape_xml_tags
@@ -463,6 +464,7 @@ async def _call_llm(
         timeout=config.llm.timeout_ms / 1000.0,
         **tdai_memory_thinking_kwargs(model),
     )
+    save_tdai_llm_usage(config, response)
     return response.choices[0].message.content or ""
 
 
@@ -786,6 +788,7 @@ async def bootstrap_agent_profile(
         timeout=config.llm.timeout_ms / 1000.0,
         **tdai_memory_thinking_kwargs(model),
     )
+    save_tdai_llm_usage(config, response)
     raw = response.choices[0].message.content or ""
 
     try:

@@ -46,10 +46,17 @@ _GENERATE_L4_PROMPT = (
 
 
 class BackendClient:
-    def __init__(self, url: str | None = None, api_key: str = "", timeout_ms: int = 120000) -> None:
+    def __init__(
+        self,
+        url: str | None = None,
+        api_key: str = "",
+        timeout_ms: int = 120000,
+        llm_endpoint_id: int = 0,
+    ) -> None:
         self._url = url
         self._api_key = api_key
         self._timeout = timeout_ms / 1000.0
+        self._llm_endpoint_id = llm_endpoint_id
         self._client: openai.AsyncOpenAI | None = None
 
     async def is_available(self) -> bool:
@@ -78,6 +85,15 @@ class BackendClient:
                 )
         return self._client
 
+    def _save_llm_usage(self, response) -> None:
+        if self._llm_endpoint_id > 0:
+            from backend.utils.message import MsgUtil
+            from backend.utils.tools import Tools
+
+            Tools.start_async_task(
+                MsgUtil.save_llm_usage(self._llm_endpoint_id, response)
+            )
+
     async def summarize(self, tool_pairs: list[dict], model: str) -> list[dict]:
         llm = self._get_llm_client()
         user_content = json.dumps(tool_pairs, ensure_ascii=False)
@@ -92,6 +108,7 @@ class BackendClient:
                 timeout=self._timeout,
                 **tdai_memory_thinking_kwargs(model),
             )
+            self._save_llm_usage(response)
             content = response.choices[0].message.content.strip()
             return json.loads(content)
         except Exception:
@@ -112,6 +129,7 @@ class BackendClient:
                 timeout=self._timeout,
                 **tdai_memory_thinking_kwargs(model),
             )
+            self._save_llm_usage(response)
             content = response.choices[0].message.content.strip()
             return json.loads(content)
         except Exception:
@@ -132,6 +150,7 @@ class BackendClient:
                 timeout=self._timeout,
                 **tdai_memory_thinking_kwargs(model),
             )
+            self._save_llm_usage(response)
             content = response.choices[0].message.content.strip()
             if "```mermaid" in content:
                 start = content.index("```mermaid") + len("```mermaid")
@@ -166,6 +185,7 @@ class BackendClient:
                 timeout=self._timeout,
                 **tdai_memory_thinking_kwargs(model),
             )
+            self._save_llm_usage(response)
             content = response.choices[0].message.content.strip()
             return json.loads(content)
         except Exception:
