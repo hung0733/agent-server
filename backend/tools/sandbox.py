@@ -1,8 +1,9 @@
 import logging
 from typing import Any
 
-from langchain.tools import tool, ToolRuntime
+from langchain_core.tools import tool
 from langchain_core.runnables import RunnableConfig
+from langgraph.prebuilt import ToolRuntime
 from pydantic import BaseModel, Field
 
 from backend.i18n import t

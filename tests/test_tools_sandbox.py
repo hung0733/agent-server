@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import pytest
-from langchain.tools import ToolRuntime
+from langgraph.prebuilt import ToolRuntime
 
 from backend.i18n import t
 from backend.tools import sandbox as sandbox_tools

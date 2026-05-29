@@ -6,11 +6,10 @@ from typing import Annotated, TypedDict
 
 from backend.i18n import t
 from backend.tools.system import assign_task, validate_assign_task_payload
-from langchain.tools import ToolRuntime
 from langchain_core.messages import AIMessage
 from langgraph.graph import START, StateGraph
 from langgraph.graph.message import add_messages
-from langgraph.prebuilt import ToolNode
+from langgraph.prebuilt import ToolNode, ToolRuntime
 
 
 def test_assign_task_schema_exposes_only_task_json():
