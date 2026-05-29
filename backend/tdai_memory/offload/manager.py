@@ -71,7 +71,10 @@ async def _summarize_batch(
         **tdai_memory_thinking_kwargs(config.llm.model),
     )
     save_tdai_llm_usage(config, response)
-    content = response.choices[0].message.content.strip()
+    raw_content = response.choices[0].message.content
+    content = raw_content.strip() if isinstance(raw_content, str) else ""
+    if not content:
+        return [(result_text[:200], 10) for _, _, _, result_text in pairs]
     parsed = _parse_batch_summary_content(content)
     results: list[tuple[str, int]] = []
     for item in parsed:

@@ -54,3 +54,35 @@ async def test_flush_pending_falls_back_to_result_text(tmp_path, monkeypatch):
     entry = json.loads(jsonl_path.read_text().strip())
     assert entry["summary"] == "重要工具結果"
     assert entry["score"] == 10
+
+
+@pytest.mark.asyncio
+async def test_summarize_batch_falls_back_when_llm_returns_empty_content(monkeypatch):
+    class FakeMessage:
+        content = ""
+
+    class FakeChoice:
+        message = FakeMessage()
+
+    class FakeResponse:
+        choices = [FakeChoice()]
+
+    class FakeCompletions:
+        async def create(self, **kwargs):
+            return FakeResponse()
+
+    class FakeChat:
+        completions = FakeCompletions()
+
+    class FakeClient:
+        chat = FakeChat()
+
+    monkeypatch.setattr(offload_manager, "save_tdai_llm_usage", lambda *args: None)
+
+    result = await offload_manager._summarize_batch(
+        [("tc-1", "tool", {"arg": "value"}, "重要工具結果")],
+        FakeClient(),
+        MemoryConfig(),
+    )
+
+    assert result == [("重要工具結果", 10)]
