@@ -104,24 +104,39 @@ async def search_conversations(
     if not query:
         return SearchResult(text="", total=0, strategy="fts")
 
-    fts_items = await postgres.search_l0_fts(
-        params.agent_id, params.query, params.top_k * 3
-    )
-
-    try:
-        query_vec = await embedding.embed(params.query)
-        vector_items = await qdrant.search_l0(
-            params.agent_id, query_vec, params.top_k * 3
+    strategy = params.strategy
+    if strategy == "keyword":
+        items = await postgres.search_l0_fts(
+            params.agent_id, params.query, params.top_k
         )
-    except Exception:
-        vector_items = []
-
-    if vector_items:
-        items = _rrf_fusion(fts_items, vector_items)
-        strategy = "hybrid"
+    elif strategy == "embedding":
+        try:
+            query_vec = await embedding.embed(params.query)
+            items = await qdrant.search_l0(params.agent_id, query_vec, params.top_k)
+        except Exception:
+            items = await postgres.search_l0_fts(
+                params.agent_id, params.query, params.top_k
+            )
+            strategy = "keyword"
     else:
-        items = fts_items
-        strategy = "fts"
+        fts_items = await postgres.search_l0_fts(
+            params.agent_id, params.query, params.top_k * 3
+        )
+
+        try:
+            query_vec = await embedding.embed(params.query)
+            vector_items = await qdrant.search_l0(
+                params.agent_id, query_vec, params.top_k * 3
+            )
+        except Exception:
+            vector_items = []
+
+        if vector_items:
+            items = _rrf_fusion(fts_items, vector_items)
+            strategy = "hybrid"
+        else:
+            items = fts_items
+            strategy = "keyword"
 
     items = items[: params.top_k]
 

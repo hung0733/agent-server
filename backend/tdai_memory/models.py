@@ -191,6 +191,7 @@ class ConversationSearchParams(BaseModel):
     query: str
     agent_id: str
     top_k: int = 5
+    strategy: Literal["keyword", "embedding", "hybrid"] = "hybrid"
     session_key: str | None = None
 
 

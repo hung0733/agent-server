@@ -610,12 +610,14 @@ class MemoryManager:
         agent_id: str,
         query: str,
         top_k: int = 5,
+        strategy: str = "hybrid",
         session_key: str | None = None,
     ) -> SearchResult:
         params = ConversationSearchParams(
             query=query,
             agent_id=agent_id,
             top_k=top_k,
+            strategy=strategy,
             session_key=session_key,
         )
         return await search_conversations(
