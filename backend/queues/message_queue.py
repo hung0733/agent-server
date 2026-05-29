@@ -35,12 +35,13 @@ MsgQueueHandler = Callable[[MsgQueueTask], Awaitable[None]]
 
 class MessageQueue:
     def __init__(self, handler: MsgQueueHandler, max_concurrency: int = 2) -> None:
-        if max_concurrency < 1 or max_concurrency > 2:
-            raise ValueError("max_concurrency must be between 1 and 2")
+        if max_concurrency < 1:
+            raise ValueError(t("queues.message_queue.invalid_max_concurrency"))
         self._handler = handler
         self._queue: asyncio.Queue[MsgQueueTask] = asyncio.Queue()
         self._max_concurrency = max_concurrency
         self._workers: list[asyncio.Task[None]] = []
+        self._agent_locks: dict[str, asyncio.Lock] = {}
 
     def start(self) -> None:
         if self._workers:
@@ -76,6 +77,11 @@ class MessageQueue:
                 self._queue.task_done()
 
     async def _handle_task(self, task: MsgQueueTask) -> None:
+        agent_lock = self._agent_locks.setdefault(task.agent_id, asyncio.Lock())
+        async with agent_lock:
+            await self._run_handler(task)
+
+    async def _run_handler(self, task: MsgQueueTask) -> None:
         try:
             await self._handler(task)
         except Exception as exc:

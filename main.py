@@ -4,6 +4,7 @@ import asyncio
 from datetime import datetime
 import inspect
 import logging
+import os
 import signal
 from collections.abc import Awaitable
 from contextlib import suppress
@@ -29,6 +30,23 @@ from logger_setup import setup_logging
 
 logger = logging.getLogger(__name__)
 PROJECT_ROOT = Path(__file__).resolve().parent
+DEFAULT_MESSAGE_QUEUE_MAX_CONCURRENCY = 4
+
+
+def get_message_queue_max_concurrency() -> int:
+    value = os.getenv("MESSAGE_QUEUE_MAX_CONCURRENCY")
+    if value is None or value == "":
+        return DEFAULT_MESSAGE_QUEUE_MAX_CONCURRENCY
+
+    try:
+        max_concurrency = int(value)
+    except ValueError as exc:
+        raise ValueError(t("main.message_queue_max_concurrency_invalid")) from exc
+
+    if max_concurrency < 1:
+        raise ValueError(t("main.message_queue_max_concurrency_invalid"))
+
+    return max_concurrency
 
 
 async def check_database(db_engine: Any = engine) -> None:
@@ -102,7 +120,10 @@ async def main(
         raise
 
     channel = channel_factory()
-    message_queue = MessageQueue(handle_agent_message, max_concurrency=2)
+    message_queue = MessageQueue(
+        handle_agent_message,
+        max_concurrency=get_message_queue_max_concurrency(),
+    )
     message_queue.start()
     shutdown_event = shutdown_event or asyncio.Event()
     _install_signal_handlers(shutdown_event)

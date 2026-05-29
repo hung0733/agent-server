@@ -64,6 +64,7 @@ async def test_main_starts_message_queue_listener_and_cleans_up(monkeypatch):
     queue_calls = []
     graph_calls = []
     memory_calls = []
+    monkeypatch.delenv("MESSAGE_QUEUE_MAX_CONCURRENCY", raising=False)
     monkeypatch.setattr(main_module, "_install_signal_handlers", lambda shutdown_event: None)
 
     class FakeMemoryManager:
@@ -116,7 +117,7 @@ async def test_main_starts_message_queue_listener_and_cleans_up(monkeypatch):
     assert setup_calls == [True]
     assert migration_calls == [True]
     assert queue_calls == [
-        ("init", main_module.handle_agent_message, 2),
+        ("init", main_module.handle_agent_message, 4),
         ("start", queue),
         ("stop", queue),
     ]
@@ -126,6 +127,12 @@ async def test_main_starts_message_queue_listener_and_cleans_up(monkeypatch):
     assert engine.executed == ["select 1"]
     assert channel.closed is True
     assert engine.disposed is True
+
+
+def test_message_queue_max_concurrency_reads_env(monkeypatch):
+    monkeypatch.setenv("MESSAGE_QUEUE_MAX_CONCURRENCY", "6")
+
+    assert main_module.get_message_queue_max_concurrency() == 6
 
 
 @pytest.mark.asyncio
