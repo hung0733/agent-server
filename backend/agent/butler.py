@@ -15,6 +15,7 @@ class Bulter(Agent):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.enable_system_tools = True
 
         if Bulter._graph is None:
             Bulter._graph = workflow.compile(checkpointer=GraphStore.checkpointer)

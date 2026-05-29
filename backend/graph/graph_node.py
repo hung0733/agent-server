@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 import json
 import logging
-from typing import Annotated, Any, Dict, Optional, Sequence, TypedDict
+from typing import Annotated, Any, Dict, Optional, TypedDict
 
 from langchain_core.messages import (
     AIMessage,
@@ -19,6 +19,7 @@ from backend.llm.llm import LLMSet
 from backend.llm.types import StreamChunk
 from backend.tools.memory import MemoryTools
 from backend.tools.sandbox import SandboxTools
+from backend.tools.system import SystemTools
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +88,9 @@ class GraphNode:
         if not callable(bind_tools):
             return model
 
-        tools: Sequence[Any] = [] + MemoryTools
+        tools: list[Any] = list(MemoryTools)
+        if GraphNode.get_configure(config, "enable_system_tools", False):
+            tools += SystemTools
         if (GraphNode.get_configure(config, "sandbox")) is not None:
             tools += SandboxTools
 
@@ -357,7 +360,9 @@ class GraphNode:
         conversation_kind: str = "",
         user_db_id: int | None = None,
         session_db_id: int | None = None,
+        agent_db_id: int | None = None,
         agent_id: str = "",
+        enable_system_tools: bool = False,
         sandbox: Any | None = None,
         ltm_msg: str = "",
         timelines: list[BaseMessage] = [],
@@ -377,7 +382,9 @@ class GraphNode:
                 "recv_type": recv_type,
                 "conversation_kind": conversation_kind,
                 "user_db_id": user_db_id,
+                "agent_db_id": agent_db_id,
                 "agent_id": agent_id,
+                "enable_system_tools": enable_system_tools,
                 "sandbox": sandbox,
                 "ltm_msg": ltm_msg,
                 "timelines": timelines,

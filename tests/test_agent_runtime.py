@@ -1,4 +1,6 @@
 import asyncio
+import json
+from types import SimpleNamespace
 
 import pytest
 from langchain_core.messages import (
@@ -9,6 +11,8 @@ from langchain_core.messages import (
     ToolMessage,
 )
 from langchain_openai import ChatOpenAI
+from langgraph.graph import END, START, StateGraph
+from langgraph.prebuilt import ToolNode
 
 from backend.agent.agent import Agent
 from backend.graph.agent import (
@@ -16,15 +20,13 @@ from backend.graph.agent import (
     graph as agent_graph,
     route_after_chat as agent_route_after_chat,
 )
-from backend.graph.graph_node import GraphNode
-from backend.graph.bulter import (
-    _get_allowed_agent_names,
-    assign_task_node,
-    graph as supervisor_graph,
-    route_after_assign_task,
-    route_after_chat as supervisor_route_after_chat,
-)
+from backend.graph.graph_node import GraphNode, MessageState
+from backend.i18n import t
 from backend.llm.types import StreamChunk
+from backend.tdai_memory.models import RecallResult
+from backend.tools.memory import MemoryTools
+from backend.tools.sandbox import SandboxTools
+from backend.tools.system import SystemTools
 
 
 class FakeLLM:
@@ -64,6 +66,52 @@ class FakeAsyncSessionContext:
 
     async def __aexit__(self, exc_type, exc, tb):
         return None
+
+
+class FakeAssignTaskAsyncSession:
+    def __init__(self):
+        self.committed = False
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return None
+
+    async def commit(self):
+        self.committed = True
+
+
+class FakeAssignedTaskDAO:
+    created_data = None
+
+    def __init__(self, session):
+        self.session = session
+
+    async def create(self, data):
+        type(self).created_data = data
+        return SimpleNamespace(id=99)
+
+    async def create_initial_steps(self, *, task_db_id, assign_agent_id, step_ids):
+        return [
+            SimpleNamespace(step_id=step_ids[0], title="brainstorm", status="pending"),
+            SimpleNamespace(step_id=step_ids[1], title="planning", status="blocked"),
+            SimpleNamespace(step_id=step_ids[2], title="review", status="blocked"),
+        ]
+
+
+def _patch_assign_task_persistence(monkeypatch):
+    fake_session = FakeAssignTaskAsyncSession()
+    FakeAssignedTaskDAO.created_data = None
+    monkeypatch.setattr(
+        "backend.tools.system.async_session_factory",
+        lambda: fake_session,
+    )
+    monkeypatch.setattr(
+        "backend.tools.system.AssignedTaskDAO",
+        FakeAssignedTaskDAO,
+    )
+    return fake_session
 
 
 def _chat_openai(model: str, extra_body=None) -> ChatOpenAI:
@@ -206,7 +254,10 @@ async def test_chat_node_waits_for_llm_and_returns_ai_message():
 
     assert not task.done()
     assert isinstance(llm.messages[0], SystemMessage)
-    assert isinstance(llm.messages[1], HumanMessage)
+    assert any(
+        isinstance(message, HumanMessage) and message.content == "你好"
+        for message in llm.messages
+    )
 
     llm.release.set()
     result = await asyncio.wait_for(task, timeout=1)
@@ -219,18 +270,22 @@ async def test_chat_node_waits_for_llm_and_returns_ai_message():
 async def test_chat_node_applies_runtime_model_args_before_binding_tools(monkeypatch):
     captured = {}
 
+    class ToolBindingLLM(ChatOpenAI):
+        def bind_tools(self, tools):
+            captured["model"] = self
+            captured["tools"] = tools
+            return BoundLLM()
+
     class BoundLLM:
         async def ainvoke(self, messages):
             captured["messages"] = messages
             return AIMessage(content="你好")
 
-    def fake_bind_tools(model, tools):
-        captured["model"] = model
-        captured["tools"] = tools
-        return BoundLLM()
-
-    monkeypatch.setattr("backend.graph.agent._bind_tools", fake_bind_tools)
-    llm = _chat_openai("qwen3.6-chat")
+    llm = ToolBindingLLM(
+        api_key="test-key",
+        base_url="http://example.com",
+        model="qwen3.6-chat",
+    )
     config = GraphNode.prepare_chat_node_config(
         thread_id="session-1",
         models=FakeModels(llm),
@@ -245,6 +300,8 @@ async def test_chat_node_applies_runtime_model_args_before_binding_tools(monkeyp
 
     assert isinstance(result["messages"][0], AIMessage)
     assert [tool.name for tool in captured["tools"]] == [
+        "tdai_memory_search",
+        "tdai_conversation_search",
         "run_command",
         "write_file",
         "read_file",
@@ -268,34 +325,25 @@ async def test_chat_node_applies_runtime_model_args_before_binding_tools(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_graph_routes_assign_task_tool_calls_through_assign_task_node():
+async def test_graph_binds_assign_task_through_tools_node(monkeypatch):
+    class FakeMemoryManager:
+        async def capture(self, *, agent_id, turn):
+            return None
+
+    monkeypatch.setattr(
+        "backend.graph.agent.MemoryManager.instance",
+        lambda: FakeMemoryManager(),
+    )
+
     class ToolCallingLLM:
         def __init__(self):
-            self.calls = 0
             self.bound_tools = None
-            self.messages = []
 
         def bind_tools(self, tools):
             self.bound_tools = tools
             return self
 
         async def ainvoke(self, messages):
-            self.calls += 1
-            self.messages.append(messages)
-            if self.calls == 1:
-                return AIMessage(
-                    content="",
-                    tool_calls=[
-                        {
-                            "name": "assign_task",
-                            "args": {
-                                "task_json": '{"state":"request","agent":"Hephaestus","mission":"整打卡 web"}'
-                            },
-                            "id": "call-1",
-                        }
-                    ],
-                )
-
             return AIMessage(content="done")
 
     llm = ToolCallingLLM()
@@ -307,86 +355,33 @@ async def test_graph_routes_assign_task_tool_calls_through_assign_task_node():
         think_mode=False,
         args={},
     )
-    config["configurable"]["assign_task_allowed_agent_names"] = ["Hephaestus"]
 
-    result = await supervisor_graph.ainvoke(
+    result = await agent_graph.ainvoke(
         {"messages": [HumanMessage(content="hello")]},
         config=config,
     )
 
-    assert [tool.name for tool in llm.bound_tools] == ["assign_task"]
-    assert llm.calls == 1
-    assert isinstance(result["messages"][-1], ToolMessage)
-    assert result["messages"][-1].tool_call_id == "call-1"
+    assert [tool.name for tool in llm.bound_tools] == [
+        "tdai_memory_search",
+        "tdai_conversation_search",
+    ]
+    assert result["messages"][-1].content == "done"
 
 
 @pytest.mark.asyncio
-async def test_assign_task_node_returns_tool_message():
-    message = AIMessage(
-        content="",
-        tool_calls=[
-            {
-                "name": "assign_task",
-                "args": {
-                    "task_json": '{"state":"request","agent":"Hephaestus","mission":"整打卡 web"}'
-                },
-                "id": "call-1",
-            }
-        ],
-    )
-
-    result = await assign_task_node(
-        {"messages": [message]},
-        {"configurable": {"assign_task_allowed_agent_names": ["Hephaestus"]}},
-    )
-
-    assert len(result["messages"]) == 1
-    assert result["messages"][0].tool_call_id == "call-1"
-    assert '"tool_call_id": "call-1"' in result["messages"][0].content
-    assert '"accepted": true' in result["messages"][0].content
-
-
-@pytest.mark.asyncio
-async def test_graph_retries_invalid_assign_task_payload():
-    class RetryingLLM:
+async def test_graph_binds_assign_task_when_system_tools_enabled():
+    class ToolCallingLLM:
         def __init__(self):
-            self.calls = 0
             self.bound_tools = None
-            self.messages = []
 
         def bind_tools(self, tools):
             self.bound_tools = tools
             return self
 
         async def ainvoke(self, messages):
-            self.calls += 1
-            self.messages.append(messages)
-            if self.calls == 1:
-                return AIMessage(
-                    content="",
-                    tool_calls=[
-                        {
-                            "name": "assign_task",
-                            "args": {"task_json": '{"title":"wrong shape"}'},
-                            "id": "call-1",
-                        }
-                    ],
-                )
+            return AIMessage(content="done")
 
-            return AIMessage(
-                content="",
-                tool_calls=[
-                    {
-                        "name": "assign_task",
-                        "args": {
-                            "task_json": '{"state":"request","agent":"Hephaestus","mission":"整打卡 web"}'
-                        },
-                        "id": "call-2",
-                    }
-                ],
-            )
-
-    llm = RetryingLLM()
+    llm = ToolCallingLLM()
     config = GraphNode.prepare_chat_node_config(
         thread_id="session-1",
         models=FakeModels(llm),
@@ -394,58 +389,43 @@ async def test_graph_retries_invalid_assign_task_payload():
         involves_secrets=False,
         think_mode=False,
         args={},
-    )
-    config["configurable"]["assign_task_allowed_agent_names"] = ["Hephaestus"]
-
-    result = await supervisor_graph.ainvoke(
-        {"messages": [HumanMessage(content="hello")]},
-        config=config,
+        enable_system_tools=True,
     )
 
-    assert llm.calls == 2
-    assert any(isinstance(message, ToolMessage) for message in llm.messages[1])
-    assert isinstance(result["messages"][-1], ToolMessage)
-    assert result["messages"][-1].tool_call_id == "call-2"
-    assert '"accepted": true' in result["messages"][-1].content
+    result = await chat_node({"messages": [HumanMessage(content="hello")]}, config)
 
-
-def test_route_after_assign_task_stops_after_retry_limit():
-    rejected_messages = [
-        ToolMessage(content='{"accepted": false}', tool_call_id=f"call-{i}")
-        for i in range(3)
+    assert [tool.name for tool in llm.bound_tools] == [
+        "tdai_memory_search",
+        "tdai_conversation_search",
+        "assign_task",
     ]
-
-    assert route_after_assign_task({"messages": rejected_messages[:1]}) == "chat"
-    assert route_after_assign_task({"messages": rejected_messages[:2]}) == "chat"
-    assert route_after_assign_task({"messages": rejected_messages}) == "__end__"
+    assert result["messages"][-1].content == "done"
 
 
-@pytest.mark.asyncio
-async def test_get_allowed_agent_names_loads_active_user_agent_names(monkeypatch):
-    class FakeAgentDAO:
-        def __init__(self, session):
-            self.session = session
-
-        async def list_by_user_id(self, user_id):
-            assert user_id == 123
-            return [
-                type("AgentObj", (), {"name": "Hephaestus", "is_active": True})(),
-                type("AgentObj", (), {"name": "OldAgent", "is_active": False})(),
-            ]
-
-    monkeypatch.setattr("backend.graph.supervisor.AgentDAO", FakeAgentDAO)
-    monkeypatch.setattr(
-        "backend.graph.supervisor.async_session_factory",
-        lambda: FakeAsyncSessionContext(),
+def test_prepare_chat_node_config_includes_agent_db_id_for_assign_task():
+    config = GraphNode.prepare_chat_node_config(
+        thread_id="session-1",
+        models=FakeModels(FakeLLM()),
+        sys_prompt="",
+        involves_secrets=False,
+        think_mode=False,
+        agent_db_id=2,
     )
 
-    names = await _get_allowed_agent_names({"configurable": {"user_db_id": 123}})
-
-    assert names == ["Hephaestus"]
+    assert config["configurable"]["agent_db_id"] == 2
 
 
 @pytest.mark.asyncio
-async def test_graph_routes_other_tool_calls_through_tools_node():
+async def test_graph_routes_other_tool_calls_through_tools_node(monkeypatch):
+    class FakeMemoryManager:
+        async def capture(self, *, agent_id, turn):
+            return None
+
+    monkeypatch.setattr(
+        "backend.graph.agent.MemoryManager.instance",
+        lambda: FakeMemoryManager(),
+    )
+
     class ToolCallingLLM:
         def __init__(self):
             self.calls = 0
@@ -490,6 +470,8 @@ async def test_graph_routes_other_tool_calls_through_tools_node():
     )
 
     assert [tool.name for tool in llm.bound_tools] == [
+        "tdai_memory_search",
+        "tdai_conversation_search",
         "run_command",
         "write_file",
         "read_file",
@@ -530,43 +512,61 @@ def test_agent_route_after_chat_routes_tool_calls_to_tools_node():
 
     assert agent_route_after_chat({"messages": [assign_task_message]}) == "tools"
     assert agent_route_after_chat({"messages": [other_tool_message]}) == "tools"
-    assert (
-        agent_route_after_chat({"messages": [HumanMessage(content="hello")]})
-        == "__end__"
-    )
+    assert agent_route_after_chat({"messages": [HumanMessage(content="hello")]}) == "end_node"
 
 
-def test_supervisor_route_after_chat_routes_assign_task_to_assign_task_node():
-    assign_task_message = AIMessage(
-        content="",
-        tool_calls=[
-            {
-                "name": "assign_task",
-                "args": {"task_json": "{}"},
-                "id": "call-1",
-            }
-        ],
-    )
-    other_tool_message = AIMessage(
-        content="",
-        tool_calls=[
-            {
-                "name": "run_command",
-                "args": {"command": "pwd"},
-                "id": "call-2",
-            }
-        ],
+@pytest.mark.asyncio
+async def test_system_enabled_graph_executes_assign_task_tool_call(monkeypatch):
+    fake_session = _patch_assign_task_persistence(monkeypatch)
+
+    class ToolCallingLLM:
+        def bind_tools(self, tools):
+            return self
+
+        async def ainvoke(self, messages):
+            return AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "assign_task",
+                        "args": {
+                            "task_name": "Task tracker",
+                            "goal": "Create root task tracking",
+                        },
+                        "id": "call-1",
+                    }
+                ],
+            )
+
+    graph = StateGraph(MessageState)
+    graph.add_node("chat", chat_node)
+    graph.add_node("tools", ToolNode(SystemTools + MemoryTools + SandboxTools))
+    graph.add_edge(START, "chat")
+    graph.add_conditional_edges("chat", agent_route_after_chat)
+    graph.add_edge("tools", END)
+    app = graph.compile()
+
+    result = await app.ainvoke(
+        {"messages": [HumanMessage(content="hello")]},
+        config=GraphNode.prepare_chat_node_config(
+            thread_id="session-1",
+            models=FakeModels(ToolCallingLLM()),
+            sys_prompt="",
+            involves_secrets=False,
+            think_mode=False,
+            args={},
+            user_db_id=123,
+            agent_db_id=456,
+            enable_system_tools=True,
+        ),
     )
 
-    assert (
-        supervisor_route_after_chat({"messages": [assign_task_message]})
-        == "assign_task"
-    )
-    assert supervisor_route_after_chat({"messages": [other_tool_message]}) == "tools"
-    assert (
-        supervisor_route_after_chat({"messages": [HumanMessage(content="hello")]})
-        == "__end__"
-    )
+    output = json.loads(result["messages"][-1].content)
+    assert output["accepted"] is True
+    assert output["task_name"] == "Task tracker"
+    assert fake_session.committed is True
+    assert FakeAssignedTaskDAO.created_data.user_id == 123
+    assert FakeAssignedTaskDAO.created_data.responsible_agent_id == 456
 
 
 class FakeGraph:
@@ -583,6 +583,8 @@ class FakeGraph:
 
 class FakeAgent:
     user_db_id = 1
+    agent_db_id = 2
+    session_db_id = 3
     agent_id = "agent-1"
     session_id = "session-1"
     models = object()
@@ -591,6 +593,9 @@ class FakeAgent:
     recv_agent_name = "agent"
     stm_trigger_token = 10000
     stm_summary_token = 5000
+
+    async def prepare_sys_prompt(self, mem_prompt: str):
+        self.sys_prompt = mem_prompt
 
 
 @pytest.mark.asyncio
@@ -658,6 +663,7 @@ async def test_agent_proc_send_streams_content_chunks(monkeypatch):
     class FakeMemoryManager:
         async def recall(self, *, agent_id, session_key, user_text):
             recall_calls.append((agent_id, session_key, user_text))
+            return RecallResult()
 
     monkeypatch.setattr(
         "backend.agent.agent.MemoryManager.instance",
@@ -683,6 +689,7 @@ async def test_agent_proc_send_streams_content_chunks(monkeypatch):
     assert graph.configs[0]["configurable"]["conversation_kind"] == "user_to_agent"
     assert graph.configs[0]["configurable"]["sender_type"] == "user"
     assert graph.configs[0]["configurable"]["sandbox"] is sandbox
+    assert graph.configs[0]["configurable"]["agent_db_id"] == 2
 
 
 @pytest.mark.asyncio
@@ -719,8 +726,8 @@ async def test_chat_node_logs_content_lengths_and_tool_chunks(monkeypatch):
     assert isinstance(result["messages"][0], AIMessage)
     assert result["messages"][0].content == "hello"
     assert calls == [
-        ("Agent graph chat node 收到 content chunk：content_length=%s", 5),
-        ("Agent graph chat node 收到工具調用：tool_name=%s", "search"),
+        (t("graph.agent.chat_node_content_chunk_received"), 5),
+        (t("graph.agent.chat_node_tool_chunk_received"), "search"),
     ]
 
 
