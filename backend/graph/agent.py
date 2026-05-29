@@ -23,8 +23,6 @@ from backend.tdai_memory.models import (
     ConversationMessage,
     ToolCallMessage,
 )
-from backend.tools.memory import MemoryTools
-from backend.tools.sandbox import SandboxTools
 from backend.utils.message import MsgUtil
 from backend.utils.tools import Tools
 
@@ -129,7 +127,7 @@ def route_after_chat(state: MessageState) -> str:
 workflow = StateGraph(MessageState)
 
 workflow.add_node("chat", chat_node)
-workflow.add_node("tools", ToolNode(SandboxTools + MemoryTools))
+workflow.add_node("tools", ToolNode(GraphNode.get_all_tools()))
 workflow.add_node("end_node", end_node)
 
 workflow.add_edge(START, "chat")

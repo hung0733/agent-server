@@ -78,6 +78,10 @@ class GraphNode:
     }
 
     @staticmethod
+    def get_all_tools() -> list[Any]:
+        return MemoryTools + SandboxTools
+
+    @staticmethod
     def build_tools(config: RunnableConfig, model: ChatOpenAI) -> ChatOpenAI:
         bind_tools = getattr(model, "bind_tools", None)
         if not callable(bind_tools):
@@ -94,11 +98,9 @@ class GraphNode:
         logger.info(t("graph.agent.tools_loaded"), ", ".join(tool_names))
 
         try:
-            return bind_tools(tools) # type: ignore
+            return bind_tools(tools)  # type: ignore
         except NotImplementedError:
             return model
-
-        return model
 
     @staticmethod
     def pack_message(state: MessageState, config: RunnableConfig) -> list[BaseMessage]:
