@@ -220,6 +220,80 @@ async def test_log_inbound_message_done_fallback_sends_unsent_response(monkeypat
 
 
 @pytest.mark.asyncio
+async def test_log_inbound_message_task_callback_sends_tool_summary_as_separate_reply(monkeypatch):
+    sent_messages = []
+
+    class ResponseQueue:
+        async def enqueue(self, task):
+            await task.callback(StreamChunk(chunk_type="tool", content="search"))
+            await task.callback(StreamChunk(chunk_type="tool", content="memory"))
+            await task.callback(StreamChunk(chunk_type="content", content="完成"))
+            await task.callback(StreamChunk(chunk_type="text_end"))
+            await task.callback(StreamChunk(chunk_type="done"))
+
+    class FakeChannel:
+        async def send_text(self, number, text, **options):
+            sent_messages.append((number, text, options))
+            return {"ok": True}
+
+    async def resolve_agent_session(message):
+        return "agent-123", "default-123"
+
+    monkeypatch.setattr(evolution_handler, "resolve_whatsapp_agent_session", resolve_agent_session)
+
+    await log_inbound_message(
+        inbound(
+            {
+                "key": {"id": "msg-1", "remoteJid": "85298765432@s.whatsapp.net"},
+                "message": {"conversation": "hi"},
+            }
+        ),
+        ResponseQueue(),
+        channel=FakeChannel(),
+    )
+
+    assert sent_messages == [
+        ("85298765432", "🔧 已調用工具：search\n🔧 已調用工具：memory\n", {}),
+        ("85298765432", "完成", {}),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_log_inbound_message_done_fallback_sends_tool_summary_without_response_text(monkeypatch):
+    sent_messages = []
+
+    class ResponseQueue:
+        async def enqueue(self, task):
+            await task.callback(StreamChunk(chunk_type="tool", content="search"))
+            await task.callback(StreamChunk(chunk_type="done"))
+
+    class FakeChannel:
+        async def send_text(self, number, text, **options):
+            sent_messages.append((number, text, options))
+            return {"ok": True}
+
+    async def resolve_agent_session(message):
+        return "agent-123", "default-123"
+
+    monkeypatch.setattr(evolution_handler, "resolve_whatsapp_agent_session", resolve_agent_session)
+
+    await log_inbound_message(
+        inbound(
+            {
+                "key": {"id": "msg-1", "remoteJid": "85298765432@s.whatsapp.net"},
+                "message": {"conversation": "hi"},
+            }
+        ),
+        ResponseQueue(),
+        channel=FakeChannel(),
+    )
+
+    assert sent_messages == [
+        ("85298765432", "🔧 已調用工具：search\n", {}),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_log_inbound_message_replies_with_inbound_instance(monkeypatch):
     posts = []
 
