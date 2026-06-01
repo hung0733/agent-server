@@ -1,121 +1,186 @@
 from __future__ import annotations
 
 import json
-import logging
+from types import SimpleNamespace
 from typing import Annotated, TypedDict
 
+import pytest
+
 from backend.i18n import t
-from backend.tools.system import assign_task, validate_assign_task_payload
+from backend.tools.system import assign_task
 from langchain_core.messages import AIMessage
 from langgraph.graph import START, StateGraph
 from langgraph.graph.message import add_messages
-from langgraph.prebuilt import ToolNode, ToolRuntime
+from langgraph.prebuilt import ToolNode
+from langgraph.prebuilt import ToolRuntime
 
 
-def test_assign_task_schema_exposes_only_task_json():
-    schema = assign_task.args_schema.model_json_schema()
+class FakeAsyncSession:
+    def __init__(self):
+        self.committed = False
 
-    assert assign_task.description == t("tools.system.assign_task.description")
-    assert set(schema["properties"]) == {"task_json"}
-    assert schema["required"] == ["task_json"]
-    assert "runtime" not in schema["properties"]
-    assert (
-        schema["properties"]["task_json"]["description"]
-        == t("tools.system.assign_task.task_json.description")
-    )
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return None
+
+    async def commit(self):
+        self.committed = True
 
 
-def test_assign_task_logs_json_payload(caplog):
-    task_json = '{"state":"request","agent":"Hephaestus","mission":"整打卡 web","extra":"demo"}'
-    runtime = ToolRuntime(
+class FakeAssignedTaskDAO:
+    created_data = None
+    initial_steps_args = None
+
+    def __init__(self, session):
+        self.session = session
+
+    async def create(self, data):
+        type(self).created_data = data
+        return SimpleNamespace(id=99)
+
+    async def create_initial_steps(self, *, task_db_id, assign_agent_id, step_ids):
+        type(self).initial_steps_args = (task_db_id, assign_agent_id, step_ids)
+        return [
+            SimpleNamespace(
+                step_id=step_ids[0],
+                title=t("tools.system.assign_task.step.brainstorm.title"),
+                status="pending",
+            ),
+            SimpleNamespace(
+                step_id=step_ids[1],
+                title=t("tools.system.assign_task.step.planning.title"),
+                status="blocked",
+            ),
+            SimpleNamespace(
+                step_id=step_ids[2],
+                title=t("tools.system.assign_task.step.review.title"),
+                status="blocked",
+            ),
+        ]
+
+
+def _runtime() -> ToolRuntime:
+    return ToolRuntime(
         state={},
         context=None,
-        config={"configurable": {"assign_task_allowed_agent_names": ["Hephaestus"]}},
+        config={"configurable": {"user_db_id": 1, "agent_db_id": 2}},
         stream_writer=lambda _: None,
         tool_call_id="call-1",
         store=None,
     )
 
-    with caplog.at_level(logging.INFO, logger="backend.tools.system"):
-        result = assign_task.func(task_json, runtime)
+
+def _runtime_with_db_ids() -> ToolRuntime:
+    return ToolRuntime(
+        state={},
+        context=None,
+        config={
+            "configurable": {
+                "user_db_id": 123,
+                "agent_db_id": 456,
+            }
+        },
+        stream_writer=lambda _: None,
+        tool_call_id="call-1",
+        store=None,
+    )
+
+
+def _patch_assign_task_persistence(monkeypatch):
+    fake_session = FakeAsyncSession()
+    FakeAssignedTaskDAO.created_data = None
+    FakeAssignedTaskDAO.initial_steps_args = None
+    monkeypatch.setattr(
+        "backend.tools.system.async_session_factory",
+        lambda: fake_session,
+    )
+    monkeypatch.setattr(
+        "backend.tools.system.AssignedTaskDAO",
+        FakeAssignedTaskDAO,
+    )
+    return fake_session
+
+
+def test_assign_task_schema_exposes_only_task_name_and_goal():
+    schema = assign_task.args_schema.model_json_schema()
+
+    assert assign_task.description == t("tools.system.assign_task.description")
+    assert set(schema["properties"]) == {"task_name", "goal"}
+    assert schema["required"] == ["task_name", "goal"]
+    assert "runtime" not in schema["properties"]
+    assert (
+        schema["properties"]["task_name"]["description"]
+        == t("tools.system.assign_task.task_name.description")
+    )
+    assert (
+        schema["properties"]["goal"]["description"]
+        == t("tools.system.assign_task.goal.description")
+    )
+
+
+@pytest.mark.asyncio
+async def test_assign_task_rejects_blank_task_name():
+    result = await assign_task.coroutine("   ", "建立網站", _runtime())
 
     assert result == {
-        "accepted": True,
-        "length": len(task_json),
-        "tool_call_id": "call-1",
-    }
-    assert task_json in caplog.text
-    assert "call-1" in caplog.text
-
-
-def test_assign_task_rejects_missing_required_fields():
-    error = validate_assign_task_payload(
-        '{"title":"日本百名城打卡網站開發","description":"建立 web"}',
-        ["Hephaestus"],
-    )
-
-    assert error == {
-        "error": t("tools.system.assign_task.missing_required_fields"),
-        "missing_fields": ["state", "agent", "mission"],
+        "accepted": False,
+        "error": t("tools.system.assign_task.blank_task_name"),
     }
 
 
-def test_assign_task_rejects_invalid_agent_name():
-    error = validate_assign_task_payload(
-        '{"state":"request","agent":"Unknown","mission":"整打卡 web"}',
-        ["Hephaestus"],
-    )
+@pytest.mark.asyncio
+async def test_assign_task_rejects_blank_goal():
+    result = await assign_task.coroutine("打卡網站", "   ", _runtime())
 
-    assert error == {
-        "error": t("tools.system.assign_task.invalid_agent"),
-        "invalid_agent": "Unknown",
-        "available_agents": ["Hephaestus"],
+    assert result == {
+        "accepted": False,
+        "error": t("tools.system.assign_task.blank_goal"),
     }
 
 
-def test_assign_task_rejects_empty_mission():
-    error = validate_assign_task_payload(
-        '{"state":"request","agent":"Hephaestus","mission":"   "}',
-        ["Hephaestus"],
+@pytest.mark.asyncio
+async def test_assign_task_creates_root_task_and_initial_steps(monkeypatch):
+    fake_session = _patch_assign_task_persistence(monkeypatch)
+
+    result = await assign_task.coroutine(
+        "Task tracker",
+        "Create root task tracking",
+        _runtime_with_db_ids(),
     )
 
-    assert error == {
-        "error": t("tools.system.assign_task.missing_required_fields"),
-        "missing_fields": ["mission"],
-    }
+    assert result["accepted"] is True
+    assert result["task_id"].startswith("task_")
+    assert result["task_name"] == "Task tracker"
+    assert result["status"] == "brainstorm_pending"
+    assert [step["title"] for step in result["steps"]] == [
+        t("tools.system.assign_task.step.brainstorm.title"),
+        t("tools.system.assign_task.step.planning.title"),
+        t("tools.system.assign_task.step.review.title"),
+    ]
+    assert [step["status"] for step in result["steps"]] == [
+        "pending",
+        "blocked",
+        "blocked",
+    ]
+    assert fake_session.committed is True
+
+    created_data = FakeAssignedTaskDAO.created_data
+    assert created_data.user_id == 123
+    assert created_data.responsible_agent_id == 456
+
+    task_db_id, assign_agent_id, step_ids = FakeAssignedTaskDAO.initial_steps_args
+    assert task_db_id == 99
+    assert assign_agent_id == 456
+    assert len(step_ids) == 3
+    assert all(step_id.startswith("step_") for step_id in step_ids)
 
 
-def test_assign_task_rejects_non_object_json():
-    error = validate_assign_task_payload('["state","request"]', ["Hephaestus"])
+@pytest.mark.asyncio
+async def test_tool_node_injects_runtime_config_for_assign_task(monkeypatch):
+    fake_session = _patch_assign_task_persistence(monkeypatch)
 
-    assert error == {"error": t("tools.system.assign_task.invalid_object")}
-
-
-def test_assign_task_rejects_invalid_json():
-    error = validate_assign_task_payload("{not-json", ["Hephaestus"])
-
-    assert error == {"error": t("tools.system.assign_task.invalid_json")}
-
-
-def test_assign_task_accepts_extra_fields_for_valid_payload():
-    error = validate_assign_task_payload(
-        json.dumps(
-            {
-                "state": "request",
-                "agent": "Hephaestus",
-                "mission": "整打卡 web",
-                "description": "建立一個日本百名城打卡網站",
-                "features": ["列表", "打卡"],
-            },
-            ensure_ascii=False,
-        ),
-        ["Hephaestus"],
-    )
-
-    assert error is None
-
-
-def test_assign_task_tool_node_injects_runtime():
     class State(TypedDict):
         messages: Annotated[list, add_messages]
 
@@ -124,22 +189,35 @@ def test_assign_task_tool_node_injects_runtime():
     graph.add_edge(START, "tools")
     app = graph.compile()
 
-    message = AIMessage(
-        content="",
-        tool_calls=[
-            {
-                "name": "assign_task",
-                "args": {
-                    "task_json": '{"state":"request","agent":"Hephaestus","mission":"整打卡 web"}'
-                },
-                "id": "call-1",
+    result = await app.ainvoke(
+        {
+            "messages": [
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": "assign_task",
+                            "args": {
+                                "task_name": "Task tracker",
+                                "goal": "Create root task tracking",
+                            },
+                            "id": "call-1",
+                        }
+                    ],
+                )
+            ]
+        },
+        config={
+            "configurable": {
+                "user_db_id": 123,
+                "agent_db_id": 456,
             }
-        ],
+        },
     )
 
-    result = app.invoke(
-        {"messages": [message]},
-        config={"configurable": {"assign_task_allowed_agent_names": ["Hephaestus"]}},
-    )
-
-    assert '"tool_call_id": "call-1"' in result["messages"][-1].content
+    output = json.loads(result["messages"][-1].content)
+    assert output["accepted"] is True
+    assert output["task_name"] == "Task tracker"
+    assert fake_session.committed is True
+    assert FakeAssignedTaskDAO.created_data.user_id == 123
+    assert FakeAssignedTaskDAO.created_data.responsible_agent_id == 456

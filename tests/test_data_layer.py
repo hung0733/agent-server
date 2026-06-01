@@ -12,6 +12,7 @@ from backend.client.openai import OpenAIClient
 from backend.dao import (
     AgentDAO,
     AgentSessionDAO,
+    AssignedTaskDAO,
     LlmEndpointDAO,
     LlmGroupDAO,
     LlmLevelDAO,
@@ -26,6 +27,9 @@ from backend.dto import (
     AgentRead,
     AgentSessionCreate,
     AgentUpdate,
+    AssignedTaskRead,
+    AssignedTaskCreate,
+    AssignedTaskStepRead,
     LlmEndpointCreate,
     LlmGroupCreate,
     LlmLevelCreate,
@@ -42,6 +46,8 @@ load_dotenv()
 EXPECTED_TABLES = {
     "agent",
     "agent_msg_hist",
+    "assigned_task",
+    "assigned_task_step",
     "llm_endpoint",
     "llm_group",
     "llm_level",
@@ -147,6 +153,44 @@ def test_dto_validation_and_from_attributes():
     assert AgentRead.model_validate(agent_obj).agent_id == "agent-1"
     assert AgentRead.model_validate(agent_obj).whatsapp_instance is None
 
+    assigned_task_obj = type(
+        "AssignedTaskObj",
+        (),
+        {
+            "id": 1,
+            "task_id": "task_abc123",
+            "user_id": 1,
+            "responsible_agent_id": 1,
+            "session_id": 1,
+            "task_name": "Build task tracker",
+            "goal": "Create root task tracking",
+            "status": "brainstorm_pending",
+            "approved_plan_html": None,
+        },
+    )()
+    assert AssignedTaskRead.model_validate(assigned_task_obj).task_id == "task_abc123"
+
+    assigned_task_step_obj = type(
+        "AssignedTaskStepObj",
+        (),
+        {
+            "id": 1,
+            "step_id": "step_abc123",
+            "task_id": 1,
+            "parent_step_id": None,
+            "step_type": "brainstorm",
+            "title": "Brainstorm",
+            "goal": "Collect requirements",
+            "status": "pending",
+            "seq_no": 1,
+            "assign_agent_id": 1,
+            "session_id": None,
+            "output_html": None,
+            "output_json": None,
+        },
+    )()
+    assert AssignedTaskStepRead.model_validate(assigned_task_step_obj).step_id == "step_abc123"
+
     session_create = AgentSessionCreate(
         recv_agent_id=1,
         session_id="session-1",
@@ -179,6 +223,7 @@ async def test_dao_crud_happy_path(monkeypatch):
             level_dao = LlmLevelDAO(session)
             agent_dao = AgentDAO(session)
             session_dao = AgentSessionDAO(session)
+            assigned_task_dao = AssignedTaskDAO(session)
 
             user = await user_dao.create(UserAccCreate(user_id="u-1", name="Alice"))
             group = await group_dao.create(LlmGroupCreate(user_id=user.id, name="default"))
@@ -195,6 +240,32 @@ async def test_dao_crud_happy_path(monkeypatch):
             assert await user_dao.get_by_user_id("u-1") == user
             assert await agent_dao.get_by_agent_id("agent-1") == agent
             assert await group_dao.list_by_user_id(user.id) == [group]
+
+            monkeypatch.setenv("LANG_LOCALE", "zh_HK")
+            assigned_task = await assigned_task_dao.create(
+                AssignedTaskCreate(
+                    task_id="task_abc123",
+                    user_id=user.id,
+                    responsible_agent_id=agent.id,
+                    task_name="Build task tracker",
+                    goal="Create root task tracking",
+                )
+            )
+            steps = await assigned_task_dao.create_initial_steps(
+                task_db_id=assigned_task.id,
+                assign_agent_id=agent.id,
+                step_ids=("step_brainstorm", "step_planning", "step_review"),
+            )
+            assert await assigned_task_dao.get_by_task_id("task_abc123") == assigned_task
+            assert [step.step_id for step in steps] == ["step_brainstorm", "step_planning", "step_review"]
+            assert [step.step_type for step in steps] == ["brainstorm", "planning", "review"]
+            assert [step.status for step in steps] == ["pending", "blocked", "blocked"]
+            assert [step.title for step in steps] == ["腦力激盪", "規劃", "審核"]
+            assert [step.goal for step in steps] == [
+                "向用戶收集需求、取得批准，並產生 HTML 計劃文件。",
+                "將已批准的 HTML 計劃轉換成可執行子步驟。",
+                "在開始執行前審核規劃輸出。",
+            ]
 
             sys_endpoint = await endpoint_dao.create(
                 LlmEndpointCreate(
@@ -325,6 +396,7 @@ async def test_dao_crud_happy_path(monkeypatch):
 
             await session_dao.delete(user_to_agent_session)
             await session_dao.delete(agent_to_agent_session)
+            await assigned_task_dao.delete(assigned_task)
             await agent_dao.delete(updated_agent)
             assert await agent_dao.get_by_id(agent.id) is None
     finally:

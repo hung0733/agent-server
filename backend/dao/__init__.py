@@ -1,5 +1,6 @@
 from backend.dao.agent import AgentDAO
 from backend.dao.agent_msg_hist import AgentMsgHistDAO
+from backend.dao.assigned_task import AssignedTaskDAO
 from backend.dao.llm_endpoint import LlmEndpointDAO
 from backend.dao.llm_group import LlmGroupDAO
 from backend.dao.llm_level import LlmLevelDAO
@@ -11,6 +12,7 @@ __all__ = [
     "AgentDAO",
     "AgentMsgHistDAO",
     "AgentSessionDAO",
+    "AssignedTaskDAO",
     "LlmEndpointDAO",
     "LlmGroupDAO",
     "LlmLevelDAO",
