@@ -7,7 +7,7 @@ import httpx
 
 from backend.channels import EvolutionWhatsAppChannel
 from backend.channels.evolution_media import build_evolution_files
-from backend.channels.types import ReceivedMessage, WhatsAppInboundMessage
+from backend.channels.types import InteractiveButton, ReceivedMessage, WhatsAppInboundMessage
 from backend.i18n import t
 from backend.llm.types import StreamChunk
 from backend.queues.message_queue import FilePayload, MessageQueue, MsgQueueTask
@@ -40,6 +40,10 @@ class WhatsAppMsgQueueTask(MsgQueueTask):
         self._tool_parts: list[str] = []
 
     async def callback(self, chunk: StreamChunk) -> None:
+        if chunk.chunk_type == "interactive_buttons":
+            await self._send_interactive_buttons(chunk)
+            return
+
         if chunk.chunk_type == "content" and chunk.content:
             self._response_parts.append(chunk.content)
             return
@@ -87,6 +91,26 @@ class WhatsAppMsgQueueTask(MsgQueueTask):
                 self._phone_no,
                 round((time.perf_counter() - started_at) * 1000),
             )
+
+    async def _send_interactive_buttons(self, chunk: StreamChunk) -> None:
+        if not self._channel or not self._phone_no:
+            if chunk.content:
+                await self._send_text(chunk.content)
+            return
+
+        data = chunk.data or {}
+        buttons = [
+            InteractiveButton.model_validate(button)
+            for button in data.get("buttons", [])
+            if isinstance(button, dict)
+        ]
+        if not buttons:
+            if chunk.content:
+                await self._send_text(chunk.content)
+            return
+
+        title = str(chunk.content or data.get("title") or "")
+        await self._channel.send_interactive_buttons(self._phone_no, title, buttons)
 
 
 def extract_message_metadata(

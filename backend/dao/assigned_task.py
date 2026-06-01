@@ -1,4 +1,7 @@
-from sqlalchemy import select
+from datetime import datetime
+
+from sqlalchemy import and_, or_, select
+from sqlalchemy.orm import selectinload
 
 from backend.dao.base import BaseDAO
 from backend.entities.assigned_task import AssignedTask, AssignedTaskStep
@@ -10,6 +13,49 @@ class AssignedTaskDAO(BaseDAO[AssignedTask]):
 
     async def get_by_task_id(self, task_id: str) -> AssignedTask | None:
         stmt = select(AssignedTask).where(AssignedTask.task_id == task_id)
+        return await self.session.scalar(stmt)
+
+    async def list_open_and_recent_finished(
+        self,
+        *,
+        user_id: int,
+        agent_id: int,
+        since: datetime,
+    ) -> list[AssignedTask]:
+        finished_statuses = ("completed", "failed", "cancelled")
+        stmt = (
+            select(AssignedTask)
+            .where(
+                AssignedTask.user_id == user_id,
+                AssignedTask.responsible_agent_id == agent_id,
+                or_(
+                    AssignedTask.status.not_in(finished_statuses),
+                    and_(
+                        AssignedTask.status.in_(finished_statuses),
+                        AssignedTask.update_dt >= since,
+                    ),
+                ),
+            )
+            .order_by(AssignedTask.update_dt.desc())
+        )
+        return list((await self.session.scalars(stmt)).all())
+
+    async def get_detail_by_task_id(
+        self,
+        *,
+        user_id: int,
+        agent_id: int,
+        task_id: str,
+    ) -> AssignedTask | None:
+        stmt = (
+            select(AssignedTask)
+            .options(selectinload(AssignedTask.steps))
+            .where(
+                AssignedTask.user_id == user_id,
+                AssignedTask.responsible_agent_id == agent_id,
+                AssignedTask.task_id == task_id,
+            )
+        )
         return await self.session.scalar(stmt)
 
     async def create_initial_steps(

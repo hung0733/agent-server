@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 import json
 import logging
-from typing import Annotated, Any, Dict, Optional, TypedDict
+from typing import Annotated, Any, Dict, NotRequired, Optional, TypedDict
 
 from langchain_core.messages import (
     AIMessage,
@@ -55,6 +55,7 @@ class MessageState(TypedDict):
     """Minimal state for nodes that only need messages."""
 
     messages: Annotated[list[BaseMessage], _replace_with_last]
+    pending_assign_task: NotRequired[dict[str, str] | None]
 
 
 class GraphNode:

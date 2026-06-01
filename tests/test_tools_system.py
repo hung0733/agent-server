@@ -7,7 +7,7 @@ from typing import Annotated, TypedDict
 import pytest
 
 from backend.i18n import t
-from backend.tools.system import assign_task
+from backend.tools.system import assign_task, list_assigned_tasks, read_assigned_task
 from langchain_core.messages import AIMessage
 from langgraph.graph import START, StateGraph
 from langgraph.graph.message import add_messages
@@ -60,6 +60,53 @@ class FakeAssignedTaskDAO:
             ),
         ]
 
+    async def list_open_and_recent_finished(self, *, user_id, agent_id, since):
+        type(self).list_args = (user_id, agent_id, since)
+        return [
+            SimpleNamespace(
+                task_id="task-open",
+                task_name="Open task",
+                goal="Keep working",
+                status="brainstorm_pending",
+                create_dt="2026-06-01T00:00:00+00:00",
+                update_dt="2026-06-01T00:00:00+00:00",
+            ),
+            SimpleNamespace(
+                task_id="task-cancelled",
+                task_name="Cancelled task",
+                goal="Cancelled recently",
+                status="cancelled",
+                create_dt="2026-06-01T00:00:00+00:00",
+                update_dt="2026-06-01T01:00:00+00:00",
+            ),
+        ]
+
+    async def get_detail_by_task_id(self, *, user_id, agent_id, task_id):
+        type(self).detail_args = (user_id, agent_id, task_id)
+        if task_id != "task-open":
+            return None
+        return SimpleNamespace(
+            task_id="task-open",
+            task_name="Open task",
+            goal="Keep working",
+            status="brainstorm_pending",
+            approved_plan_html=None,
+            create_dt="2026-06-01T00:00:00+00:00",
+            update_dt="2026-06-01T00:00:00+00:00",
+            steps=[
+                SimpleNamespace(
+                    step_id="step-1",
+                    step_type="brainstorm",
+                    title="Brainstorm",
+                    goal="Plan",
+                    status="pending",
+                    seq_no=1,
+                    output_html=None,
+                    output_json=None,
+                )
+            ],
+        )
+
 
 def _runtime() -> ToolRuntime:
     return ToolRuntime(
@@ -92,6 +139,8 @@ def _patch_assign_task_persistence(monkeypatch):
     fake_session = FakeAsyncSession()
     FakeAssignedTaskDAO.created_data = None
     FakeAssignedTaskDAO.initial_steps_args = None
+    FakeAssignedTaskDAO.list_args = None
+    FakeAssignedTaskDAO.detail_args = None
     monkeypatch.setattr(
         "backend.tools.system.async_session_factory",
         lambda: fake_session,
@@ -118,6 +167,14 @@ def test_assign_task_schema_exposes_only_task_name_and_goal():
         schema["properties"]["goal"]["description"]
         == t("tools.system.assign_task.goal.description")
     )
+
+
+def test_list_assigned_tasks_schema_exposes_no_model_arguments():
+    schema = list_assigned_tasks.args_schema.model_json_schema()
+
+    assert set(schema["properties"]) == set()
+    assert schema.get("required", []) == []
+    assert "runtime" not in schema["properties"]
 
 
 @pytest.mark.asyncio
@@ -223,3 +280,40 @@ async def test_tool_node_injects_runtime_config_for_assign_task(monkeypatch):
     assert fake_session.committed is True
     assert FakeAssignedTaskDAO.created_data.user_id == 123
     assert FakeAssignedTaskDAO.created_data.responsible_agent_id == 456
+
+
+@pytest.mark.asyncio
+async def test_list_assigned_tasks_returns_open_and_recent_finished(monkeypatch):
+    _patch_assign_task_persistence(monkeypatch)
+
+    result = await list_assigned_tasks.coroutine(_runtime_with_db_ids())
+
+    assert result["accepted"] is True
+    assert [task["task_id"] for task in result["tasks"]] == [
+        "task-open",
+        "task-cancelled",
+    ]
+    assert FakeAssignedTaskDAO.list_args[0] == 123
+    assert FakeAssignedTaskDAO.list_args[1] == 456
+
+
+@pytest.mark.asyncio
+async def test_read_assigned_task_returns_scoped_task_details(monkeypatch):
+    _patch_assign_task_persistence(monkeypatch)
+
+    result = await read_assigned_task.coroutine("task-open", _runtime_with_db_ids())
+
+    assert result["accepted"] is True
+    assert result["task"]["task_id"] == "task-open"
+    assert result["task"]["steps"][0]["step_id"] == "step-1"
+    assert FakeAssignedTaskDAO.detail_args == (123, 456, "task-open")
+
+
+@pytest.mark.asyncio
+async def test_read_assigned_task_returns_not_found_for_out_of_scope_task(monkeypatch):
+    _patch_assign_task_persistence(monkeypatch)
+
+    result = await read_assigned_task.coroutine("task-missing", _runtime_with_db_ids())
+
+    assert result["accepted"] is False
+    assert result["error"] == t("tools.system.read_assigned_task.not_found")

@@ -22,6 +22,7 @@ from backend.graph.agent import (
     route_after_chat as agent_route_after_chat,
 )
 from backend.graph.graph_node import GraphNode, MessageState
+from backend.graph.bulter import workflow as butler_workflow
 from backend.i18n import t
 from backend.llm.types import StreamChunk
 from backend.tdai_memory.models import RecallResult
@@ -399,6 +400,8 @@ async def test_graph_binds_assign_task_for_bulter_agent_type():
         "tdai_memory_search",
         "tdai_conversation_search",
         "assign_task",
+        "list_assigned_tasks",
+        "read_assigned_task",
     ]
     assert result["messages"][-1].content == "done"
 
@@ -568,6 +571,114 @@ async def test_bulter_graph_executes_assign_task_tool_call(monkeypatch):
     assert fake_session.committed is True
     assert FakeAssignedTaskDAO.created_data.user_id == 123
     assert FakeAssignedTaskDAO.created_data.responsible_agent_id == 456
+
+
+@pytest.mark.asyncio
+async def test_bulter_graph_intercepts_assign_task_for_approval(monkeypatch):
+    fake_session = _patch_assign_task_persistence(monkeypatch)
+
+    class FakeMemoryManager:
+        async def capture(self, *, agent_id, turn):
+            return None
+
+    monkeypatch.setattr(
+        "backend.graph.agent.MemoryManager.instance",
+        lambda: FakeMemoryManager(),
+    )
+
+    class ToolCallingLLM:
+        def bind_tools(self, tools):
+            return self
+
+        async def ainvoke(self, messages):
+            return AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "assign_task",
+                        "args": {
+                            "task_name": "Task tracker",
+                            "goal": "Create root task tracking",
+                        },
+                        "id": "call-1",
+                    }
+                ],
+            )
+
+    app = butler_workflow.compile()
+    result = await app.ainvoke(
+        {"messages": [HumanMessage(content="幫我建立 task")]},
+        config=GraphNode.prepare_chat_node_config(
+            thread_id="session-1",
+            models=FakeModels(ToolCallingLLM()),
+            sys_prompt="",
+            involves_secrets=False,
+            think_mode=False,
+            args={},
+            user_db_id=123,
+            agent_db_id=456,
+            agent_type="bulter",
+        ),
+    )
+
+    assert fake_session.committed is False
+    assert FakeAssignedTaskDAO.created_data is None
+    assert result["pending_assign_task"] == {
+        "task_name": "Task tracker",
+        "goal": "Create root task tracking",
+    }
+    assert (
+        result["messages"][-1].additional_kwargs["interactive_buttons"][0]["id"]
+        == "assign_task_approve"
+    )
+
+
+@pytest.mark.asyncio
+async def test_bulter_graph_approval_executes_assign_task_and_ends(monkeypatch):
+    fake_session = _patch_assign_task_persistence(monkeypatch)
+
+    class FakeMemoryManager:
+        async def capture(self, *, agent_id, turn):
+            return None
+
+    monkeypatch.setattr(
+        "backend.graph.agent.MemoryManager.instance",
+        lambda: FakeMemoryManager(),
+    )
+
+    class ShouldNotBeCalledLLM:
+        def bind_tools(self, tools):
+            return self
+
+        async def ainvoke(self, messages):
+            raise AssertionError("approval should not call LLM")
+
+    app = butler_workflow.compile()
+    result = await app.ainvoke(
+        {
+            "messages": [HumanMessage(content="assign_task_approve")],
+            "pending_assign_task": {
+                "task_name": "Task tracker",
+                "goal": "Create root task tracking",
+            },
+        },
+        config=GraphNode.prepare_chat_node_config(
+            thread_id="session-1",
+            models=FakeModels(ShouldNotBeCalledLLM()),
+            sys_prompt="",
+            involves_secrets=False,
+            think_mode=False,
+            args={},
+            user_db_id=123,
+            agent_db_id=456,
+            agent_type="bulter",
+        ),
+    )
+
+    assert fake_session.committed is True
+    assert FakeAssignedTaskDAO.created_data.task_name == "Task tracker"
+    assert result["pending_assign_task"] is None
+    assert "Task tracker" in result["messages"][-1].content
 
 
 class FakeGraph:

@@ -257,6 +257,23 @@ class Agent:
                         timestamp=time.time(),
                     )
 
+                interactive_buttons = msg.additional_kwargs.get("interactive_buttons")
+                if interactive_buttons:
+                    yield StreamChunk(
+                        chunk_type="interactive_buttons",
+                        content=(
+                            msg.content
+                            if isinstance(msg.content, str)
+                            else str(msg.content)
+                        ),
+                        data={
+                            "title": msg.additional_kwargs.get("interactive_title"),
+                            "buttons": interactive_buttons,
+                        },
+                        timestamp=time.time(),
+                    )
+                    continue
+
                 if hasattr(msg, "tool_call_chunks") and msg.tool_call_chunks:  # type: ignore
                     if pending_text_end:
                         pending_text_end = False
