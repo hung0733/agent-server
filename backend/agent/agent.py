@@ -259,6 +259,12 @@ class Agent:
 
                 interactive_buttons = msg.additional_kwargs.get("interactive_buttons")
                 if interactive_buttons:
+                    logger.debug(
+                        t("agent.interactive_buttons_yielded"),
+                        step_id,
+                        agent.session_id,
+                        len(interactive_buttons),
+                    )
                     if pending_text_end:
                         pending_text_end = False
                         yield StreamChunk(

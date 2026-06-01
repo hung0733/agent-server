@@ -42,14 +42,26 @@ def route_after_butler_chat(state: MessageState) -> str:
     if isinstance(last_message, AIMessage):
         for tool_call in last_message.tool_calls:
             if tool_call.get("name") == "assign_task":
+                logger.info(
+                    "butler route_after_butler_chat: routing to assign_task_approval_request (task_name=%s)",
+                    (tool_call.get("args") or {}).get("task_name", "?"),
+                )
                 return "assign_task_approval_request"
 
+    logger.info(
+        "butler route_after_butler_chat: falling back to route_after_chat (tool_calls=%s)",
+        [tc.get("name") for tc in last_message.tool_calls] if isinstance(last_message, AIMessage) and last_message.tool_calls else "none",
+    )
     return route_after_chat(state)
 
 
 async def assign_task_approval_request_node(
     state: MessageState, config: RunnableConfig
 ):
+    logger.info(
+        "butler assign_task_approval_request_node: entering with pending_assign_task=%s",
+        state.get("pending_assign_task"),
+    )
     last_message = state["messages"][-1]
     task_args: dict[str, Any] = {}
     if isinstance(last_message, AIMessage):

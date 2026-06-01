@@ -93,15 +93,22 @@ class WhatsAppMsgQueueTask(MsgQueueTask):
             )
 
     async def _send_interactive_buttons(self, chunk: StreamChunk) -> None:
+        logger.info(
+            t("channels.evolution.interactive_buttons_send_started"),
+            self._phone_no,
+            (chunk.data or {}).get("title", ""),
+        )
+
         if not self._channel or not self._phone_no:
             if chunk.content:
                 await self._send_text(chunk.content)
             return
 
         data = chunk.data or {}
+        buttons_raw = data.get("buttons", [])
         buttons = [
             InteractiveButton.model_validate(button)
-            for button in data.get("buttons", [])
+            for button in buttons_raw
             if isinstance(button, dict)
         ]
         if not buttons:
@@ -111,9 +118,23 @@ class WhatsAppMsgQueueTask(MsgQueueTask):
 
         title = str(data.get("title") or "")
         description = chunk.content or None
-        await self._channel.send_interactive_buttons(
-            self._phone_no, title, buttons, description=description
-        )
+        try:
+            await self._channel.send_interactive_buttons(
+                self._phone_no, title, buttons, description=description
+            )
+            logger.info(
+                t("channels.evolution.interactive_buttons_send_completed"),
+                self._phone_no,
+                title,
+                len(buttons),
+            )
+        except Exception:
+            logger.exception(
+                t("channels.evolution.interactive_buttons_send_failed"),
+                self._phone_no,
+            )
+            if description:
+                await self._send_text(description)
 
 
 def extract_message_metadata(
