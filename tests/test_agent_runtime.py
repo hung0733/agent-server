@@ -10,6 +10,7 @@ from langchain_core.messages import (
     SystemMessage,
     ToolMessage,
 )
+from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
@@ -369,7 +370,7 @@ async def test_graph_binds_assign_task_through_tools_node(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_graph_binds_assign_task_when_system_tools_enabled():
+async def test_graph_binds_assign_task_for_bulter_agent_type():
     class ToolCallingLLM:
         def __init__(self):
             self.bound_tools = None
@@ -389,7 +390,7 @@ async def test_graph_binds_assign_task_when_system_tools_enabled():
         involves_secrets=False,
         think_mode=False,
         args={},
-        enable_system_tools=True,
+        agent_type="bulter",
     )
 
     result = await chat_node({"messages": [HumanMessage(content="hello")]}, config)
@@ -516,7 +517,7 @@ def test_agent_route_after_chat_routes_tool_calls_to_tools_node():
 
 
 @pytest.mark.asyncio
-async def test_system_enabled_graph_executes_assign_task_tool_call(monkeypatch):
+async def test_bulter_graph_executes_assign_task_tool_call(monkeypatch):
     fake_session = _patch_assign_task_persistence(monkeypatch)
 
     class ToolCallingLLM:
@@ -557,7 +558,7 @@ async def test_system_enabled_graph_executes_assign_task_tool_call(monkeypatch):
             args={},
             user_db_id=123,
             agent_db_id=456,
-            enable_system_tools=True,
+            agent_type="bulter",
         ),
     )
 
@@ -581,11 +582,51 @@ class FakeGraph:
         yield AIMessage(content="llo", additional_kwargs={"text_done": True})
 
 
+class FakeToolCallGraph:
+    async def astream(self, payload, config, stream_mode):
+        yield AIMessage(
+            content="我先檢查檔案。",
+            tool_calls=[
+                {
+                    "name": "list_files",
+                    "args": {"path": "/workspace"},
+                    "id": "call-1",
+                }
+            ],
+        )
+
+
+class FakeChunkedToolCallGraph:
+    async def astream(self, payload, config, stream_mode):
+        yield AIMessageChunk(content="我先檢查檔案。")
+        yield AIMessageChunk(
+            content="",
+            tool_call_chunks=[
+                {
+                    "name": "list_files",
+                    "args": '{"path":"/workspace"}',
+                    "id": "call-1",
+                    "index": 0,
+                }
+            ],
+        )
+
+
+class FakeNodeTransitionGraph:
+    async def astream(self, payload, config, stream_mode):
+        yield (AIMessageChunk(content="我先準備。"), {"langgraph_node": "chat"})
+        yield (
+            ToolMessage(content="tool output", tool_call_id="call-1"),
+            {"langgraph_node": "tools"},
+        )
+
+
 class FakeAgent:
     user_db_id = 1
     agent_db_id = 2
     session_db_id = 3
     agent_id = "agent-1"
+    agent_type = "assistant"
     session_id = "session-1"
     models = object()
     sys_prompt = ""
@@ -690,6 +731,94 @@ async def test_agent_proc_send_streams_content_chunks(monkeypatch):
     assert graph.configs[0]["configurable"]["sender_type"] == "user"
     assert graph.configs[0]["configurable"]["sandbox"] is sandbox
     assert graph.configs[0]["configurable"]["agent_db_id"] == 2
+    assert graph.configs[0]["configurable"]["agent_type"] == "assistant"
+
+
+@pytest.mark.asyncio
+async def test_agent_proc_send_marks_complete_ai_message_with_tool_calls_as_text_end(monkeypatch):
+    class FakeMemoryManager:
+        async def recall(self, *, agent_id, session_key, user_text):
+            return RecallResult()
+
+    monkeypatch.setattr(
+        "backend.agent.agent.MemoryManager.instance",
+        lambda: FakeMemoryManager(),
+    )
+
+    chunks = [
+        chunk
+        async for chunk in Agent.proc_send(
+            agent=FakeAgent(),
+            message="hello",
+            think_mode=False,
+            metadata={"source": "test"},
+            sandbox=FakeSandbox(),
+            graph=FakeToolCallGraph(),
+        )
+    ]
+
+    assert [chunk.chunk_type for chunk in chunks] == ["tool", "content", "text_end"]
+    assert chunks[0].content == "list_files"
+    assert chunks[1].content == "我先檢查檔案。"
+
+
+@pytest.mark.asyncio
+async def test_agent_proc_send_flushes_text_before_chunked_tool_call(monkeypatch):
+    class FakeMemoryManager:
+        async def recall(self, *, agent_id, session_key, user_text):
+            return RecallResult()
+
+    monkeypatch.setattr(
+        "backend.agent.agent.MemoryManager.instance",
+        lambda: FakeMemoryManager(),
+    )
+
+    chunks = [
+        chunk
+        async for chunk in Agent.proc_send(
+            agent=FakeAgent(),
+            message="hello",
+            think_mode=False,
+            metadata={"source": "test"},
+            sandbox=FakeSandbox(),
+            graph=FakeChunkedToolCallGraph(),
+        )
+    ]
+
+    assert [chunk.chunk_type for chunk in chunks] == ["content", "text_end", "tool"]
+    assert chunks[0].content == "我先檢查檔案。"
+    assert chunks[2].content == "list_files"
+
+
+@pytest.mark.asyncio
+async def test_agent_proc_send_flushes_text_when_graph_node_changes(monkeypatch):
+    class FakeMemoryManager:
+        async def recall(self, *, agent_id, session_key, user_text):
+            return RecallResult()
+
+    monkeypatch.setattr(
+        "backend.agent.agent.MemoryManager.instance",
+        lambda: FakeMemoryManager(),
+    )
+
+    chunks = [
+        chunk
+        async for chunk in Agent.proc_send(
+            agent=FakeAgent(),
+            message="hello",
+            think_mode=False,
+            metadata={"source": "test"},
+            sandbox=FakeSandbox(),
+            graph=FakeNodeTransitionGraph(),
+        )
+    ]
+
+    assert [chunk.chunk_type for chunk in chunks] == [
+        "content",
+        "text_end",
+        "tool_result",
+    ]
+    assert chunks[0].content == "我先準備。"
 
 
 @pytest.mark.asyncio
@@ -838,6 +967,36 @@ def test_stream_chunks_to_message_rejects_non_object_tool_arguments():
                 )
             ]
         )
+
+
+@pytest.mark.asyncio
+async def test_tool_node_returns_tool_message_when_tool_raises():
+    @tool
+    async def failing_tool() -> str:
+        """Always fail."""
+        raise RuntimeError("boom")
+
+    graph = StateGraph(MessageState)
+    graph.add_node("tools", GraphNode.build_tool_node([failing_tool]))
+    graph.add_edge(START, "tools")
+    graph.add_edge("tools", END)
+    app = graph.compile()
+
+    result = await app.ainvoke(
+        {
+            "messages": [
+                AIMessage(
+                    content="",
+                    tool_calls=[{"name": "failing_tool", "args": {}, "id": "call-1"}],
+                )
+            ]
+        }
+    )
+
+    message = result["messages"][-1]
+    assert isinstance(message, ToolMessage)
+    assert message.tool_call_id == "call-1"
+    assert message.content == t("graph.agent.tool_error") % "boom"
 
 
 @pytest.mark.asyncio

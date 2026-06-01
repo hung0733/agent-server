@@ -194,12 +194,15 @@ class Agent:
             user_db_id=agent.user_db_id,
             agent_db_id=agent.agent_db_id,
             agent_id=agent.agent_id,
-            enable_system_tools=bool(getattr(agent, "enable_system_tools", False)),
+            agent_type=agent.agent_type,
             sandbox=sandbox,
             ltm_msg=ltm_msg,
             timelines=timelines,
             session_db_id=agent.session_db_id,
         )
+
+        pending_text_end = False
+        previous_graph_node: str | None = None
 
         async for chunk in graph.astream(
             {
@@ -219,6 +222,25 @@ class Agent:
                 msg = chunk
                 _chunk_metadata = {}
 
+            graph_node = (
+                _chunk_metadata.get("langgraph_node")
+                or _chunk_metadata.get("node")
+                or None
+            )
+            if (
+                pending_text_end
+                and graph_node
+                and previous_graph_node
+                and graph_node != previous_graph_node
+            ):
+                pending_text_end = False
+                yield StreamChunk(
+                    chunk_type="text_end",
+                    timestamp=time.time(),
+                )
+            if graph_node:
+                previous_graph_node = str(graph_node)
+
             if isinstance(msg, (AIMessage, AIMessageChunk)):
                 reasoning_content = msg.additional_kwargs.get("reasoning_content")
                 if reasoning_content:
@@ -236,6 +258,12 @@ class Agent:
                     )
 
                 if hasattr(msg, "tool_call_chunks") and msg.tool_call_chunks:  # type: ignore
+                    if pending_text_end:
+                        pending_text_end = False
+                        yield StreamChunk(
+                            chunk_type="text_end",
+                            timestamp=time.time(),
+                        )
                     for tool_chunk in msg.tool_call_chunks:  # type: ignore
                         logger.debug(
                             t("agent.tool_call_received"),
@@ -250,6 +278,12 @@ class Agent:
                             timestamp=time.time(),
                         )
                 elif hasattr(msg, "tool_calls") and msg.tool_calls:  # type: ignore
+                    if pending_text_end:
+                        pending_text_end = False
+                        yield StreamChunk(
+                            chunk_type="text_end",
+                            timestamp=time.time(),
+                        )
                     for tc in getattr(msg, "tool_calls", []):
                         logger.debug(
                             t("agent.tool_call_received"),
@@ -282,7 +316,11 @@ class Agent:
                         content=content,
                         timestamp=time.time(),
                     )
-                    if msg.additional_kwargs.get("text_done"):
+                    pending_text_end = True
+                    if msg.additional_kwargs.get("text_done") or isinstance(
+                        msg, AIMessage
+                    ) and not isinstance(msg, AIMessageChunk):
+                        pending_text_end = False
                         yield StreamChunk(
                             chunk_type="text_end",
                             timestamp=time.time(),

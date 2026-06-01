@@ -11,7 +11,6 @@ from langchain_core.messages import (
 )
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
-from langgraph.prebuilt import ToolNode
 
 from backend.dto.agent_msg_hist import AgentMsgHistCreate
 from backend.graph.graph_node import GraphNode, MessageState
@@ -127,7 +126,7 @@ def route_after_chat(state: MessageState) -> str:
 workflow = StateGraph(MessageState)
 
 workflow.add_node("chat", chat_node)
-workflow.add_node("tools", ToolNode(GraphNode.get_all_tools()))
+workflow.add_node("tools", GraphNode.build_tool_node(GraphNode.get_all_tools()))
 workflow.add_node("end_node", end_node)
 
 workflow.add_edge(START, "chat")

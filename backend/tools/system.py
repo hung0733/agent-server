@@ -22,7 +22,7 @@ class AssignTaskArgs(BaseModel):
 
 
 def _new_external_id(prefix: str) -> str:
-    return f"{prefix}{uuid.uuid4().hex[:12]}"
+    return f"{prefix}{uuid.uuid4()}"
 
 
 def _configurable(runtime: ToolRuntime) -> dict[str, Any]:
@@ -38,7 +38,6 @@ def _required_int(configurable: dict[str, Any], key: str, error_key: str) -> int
     if isinstance(value, int) and not isinstance(value, bool):
         return value
     raise ValueError(t(error_key))
-
 
 
 @tool(args_schema=AssignTaskArgs, description=t("tools.system.assign_task.description"))
@@ -66,11 +65,11 @@ async def assign_task(
         "agent_db_id",
         "tools.system.assign_task.missing_runtime_agent_id",
     )
-    task_id = _new_external_id("task_")
+    task_id = _new_external_id("task-")
     step_ids = (
-        _new_external_id("step_"),
-        _new_external_id("step_"),
-        _new_external_id("step_"),
+        _new_external_id("task_step-"),
+        _new_external_id("task_step-"),
+        _new_external_id("task_step-"),
     )
 
     logger.info(

@@ -1,10 +1,9 @@
 import logging
 
 from langgraph.graph import END, START, StateGraph
-from langgraph.prebuilt import ToolNode
 
 from backend.graph.agent import chat_node, end_node, route_after_chat
-from backend.graph.graph_node import MessageState
+from backend.graph.graph_node import GraphNode, MessageState
 from backend.tools.memory import MemoryTools
 from backend.tools.sandbox import SandboxTools
 from backend.tools.system import SystemTools
@@ -15,7 +14,9 @@ logger = logging.getLogger(__name__)
 workflow = StateGraph(MessageState)
 
 workflow.add_node("chat", chat_node)
-workflow.add_node("tools", ToolNode(SystemTools + MemoryTools + SandboxTools))
+workflow.add_node(
+    "tools", GraphNode.build_tool_node(SystemTools + MemoryTools + SandboxTools)
+)
 workflow.add_node("end_node", end_node)
 
 workflow.add_edge(START, "chat")

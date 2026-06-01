@@ -13,6 +13,7 @@ from langchain_core.messages import (
 from langchain_core.language_models import BaseChatModel
 from langchain_core.runnables import RunnableConfig
 from langchain_openai import ChatOpenAI
+from langgraph.prebuilt import ToolNode
 
 from backend.i18n import t
 from backend.llm.llm import LLMSet
@@ -83,13 +84,21 @@ class GraphNode:
         return MemoryTools + SandboxTools
 
     @staticmethod
+    def build_tool_node(tools: list[Any]) -> ToolNode:
+        return ToolNode(tools, handle_tool_errors=GraphNode.format_tool_error)
+
+    @staticmethod
+    def format_tool_error(error: Exception) -> str:
+        return t("graph.agent.tool_error") % str(error)
+
+    @staticmethod
     def build_tools(config: RunnableConfig, model: ChatOpenAI) -> ChatOpenAI:
         bind_tools = getattr(model, "bind_tools", None)
         if not callable(bind_tools):
             return model
 
         tools: list[Any] = list(MemoryTools)
-        if GraphNode.get_configure(config, "enable_system_tools", False):
+        if GraphNode.get_configure(config, "agent_type", "") == "bulter":
             tools += SystemTools
         if (GraphNode.get_configure(config, "sandbox")) is not None:
             tools += SandboxTools
@@ -362,7 +371,7 @@ class GraphNode:
         session_db_id: int | None = None,
         agent_db_id: int | None = None,
         agent_id: str = "",
-        enable_system_tools: bool = False,
+        agent_type: str = "",
         sandbox: Any | None = None,
         ltm_msg: str = "",
         timelines: list[BaseMessage] = [],
@@ -384,7 +393,7 @@ class GraphNode:
                 "user_db_id": user_db_id,
                 "agent_db_id": agent_db_id,
                 "agent_id": agent_id,
-                "enable_system_tools": enable_system_tools,
+                "agent_type": agent_type,
                 "sandbox": sandbox,
                 "ltm_msg": ltm_msg,
                 "timelines": timelines,

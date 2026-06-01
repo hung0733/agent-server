@@ -151,7 +151,8 @@ async def test_assign_task_creates_root_task_and_initial_steps(monkeypatch):
     )
 
     assert result["accepted"] is True
-    assert result["task_id"].startswith("task_")
+    assert result["task_id"].startswith("task-")
+    assert len(result["task_id"]) == len("task-") + 36
     assert result["task_name"] == "Task tracker"
     assert result["status"] == "brainstorm_pending"
     assert [step["title"] for step in result["steps"]] == [
@@ -174,7 +175,8 @@ async def test_assign_task_creates_root_task_and_initial_steps(monkeypatch):
     assert task_db_id == 99
     assert assign_agent_id == 456
     assert len(step_ids) == 3
-    assert all(step_id.startswith("step_") for step_id in step_ids)
+    assert all(step_id.startswith("task_step-") for step_id in step_ids)
+    assert all(len(step_id) == len("task_step-") + 36 for step_id in step_ids)
 
 
 @pytest.mark.asyncio

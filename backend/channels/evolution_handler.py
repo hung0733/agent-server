@@ -38,8 +38,6 @@ class WhatsAppMsgQueueTask(MsgQueueTask):
         self._phone_no = phone_no
         self._response_parts: list[str] = []
         self._tool_parts: list[str] = []
-        self._tool_reply_sent = False
-        self._response_reply_sent = False
 
     async def callback(self, chunk: StreamChunk) -> None:
         if chunk.chunk_type == "content" and chunk.content:
@@ -53,26 +51,29 @@ class WhatsAppMsgQueueTask(MsgQueueTask):
             return
 
         if chunk.chunk_type in {"text_end", "done"}:
-            await self._send_replies_once()
+            await self._flush_tool_parts()
+            await self._flush_response_parts()
 
-    async def _send_replies_once(self) -> None:
-        await self._send_text_once(
-            "".join(self._tool_parts),
-            sent_attr="_tool_reply_sent",
-        )
-        await self._send_text_once(
-            "".join(self._response_parts),
-            sent_attr="_response_reply_sent",
-        )
-
-    async def _send_text_once(self, response_text: str, *, sent_attr: str) -> None:
-        if getattr(self, sent_attr):
+    async def _flush_response_parts(self) -> None:
+        if not self._response_parts:
             return
 
+        response_text = "".join(self._response_parts)
+        self._response_parts.clear()
+        await self._send_text(response_text)
+
+    async def _flush_tool_parts(self) -> None:
+        if not self._tool_parts:
+            return
+
+        tool_text = "".join(self._tool_parts)
+        self._tool_parts.clear()
+        await self._send_text(tool_text)
+
+    async def _send_text(self, response_text: str) -> None:
         if not response_text:
             return
 
-        setattr(self, sent_attr, True)
         if self._channel and self._phone_no:
             started_at = time.perf_counter()
             logger.info(
