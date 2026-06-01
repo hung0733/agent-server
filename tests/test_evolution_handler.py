@@ -190,6 +190,7 @@ async def test_log_inbound_message_task_callback_sends_agent_response_on_text_en
 
 @pytest.mark.asyncio
 async def test_log_inbound_message_task_callback_sends_interactive_buttons(monkeypatch):
+    sent_messages = []
     sent_buttons = []
 
     class ResponseQueue:
@@ -217,6 +218,10 @@ async def test_log_inbound_message_task_callback_sends_interactive_buttons(monke
             )
 
     class FakeChannel:
+        async def send_text(self, number, text, **options):
+            sent_messages.append((number, text, options))
+            return {"ok": True}
+
         async def send_interactive_buttons(self, number, title, buttons, **options):
             sent_buttons.append((number, title, buttons, options))
             return {"ok": True}
@@ -237,8 +242,9 @@ async def test_log_inbound_message_task_callback_sends_interactive_buttons(monke
         channel=FakeChannel(),
     )
 
+    assert sent_messages == [("85298765432", "請確認", {})]
     assert sent_buttons[0][0] == "85298765432"
-    assert sent_buttons[0][1] == "請確認"
+    assert sent_buttons[0][1] == "確認建立任務"
     assert sent_buttons[0][2][0].id == "assign_task_approve"
 
 

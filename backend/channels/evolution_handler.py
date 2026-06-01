@@ -109,7 +109,10 @@ class WhatsAppMsgQueueTask(MsgQueueTask):
                 await self._send_text(chunk.content)
             return
 
-        title = str(chunk.content or data.get("title") or "")
+        if chunk.content:
+            await self._send_text(chunk.content)
+
+        title = str(data.get("title") or "")
         await self._channel.send_interactive_buttons(self._phone_no, title, buttons)
 
 

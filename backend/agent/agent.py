@@ -259,6 +259,12 @@ class Agent:
 
                 interactive_buttons = msg.additional_kwargs.get("interactive_buttons")
                 if interactive_buttons:
+                    if pending_text_end:
+                        pending_text_end = False
+                        yield StreamChunk(
+                            chunk_type="text_end",
+                            timestamp=time.time(),
+                        )
                     yield StreamChunk(
                         chunk_type="interactive_buttons",
                         content=(
@@ -270,6 +276,10 @@ class Agent:
                             "title": msg.additional_kwargs.get("interactive_title"),
                             "buttons": interactive_buttons,
                         },
+                        timestamp=time.time(),
+                    )
+                    yield StreamChunk(
+                        chunk_type="text_end",
                         timestamp=time.time(),
                     )
                     continue
