@@ -190,7 +190,6 @@ async def test_log_inbound_message_task_callback_sends_agent_response_on_text_en
 
 @pytest.mark.asyncio
 async def test_log_inbound_message_task_callback_sends_interactive_buttons(monkeypatch):
-    sent_messages = []
     sent_buttons = []
 
     class ResponseQueue:
@@ -218,18 +217,18 @@ async def test_log_inbound_message_task_callback_sends_interactive_buttons(monke
             )
 
     class FakeChannel:
-        async def send_text(self, number, text, **options):
-            sent_messages.append((number, text, options))
-            return {"ok": True}
-
-        async def send_interactive_buttons(self, number, title, buttons, **options):
-            sent_buttons.append((number, title, buttons, options))
+        async def send_interactive_buttons(
+            self, number, title, buttons, description=None, **options
+        ):
+            sent_buttons.append((number, title, description, buttons, options))
             return {"ok": True}
 
     async def resolve_agent_session(message):
         return "agent-123", "default-123"
 
-    monkeypatch.setattr(evolution_handler, "resolve_whatsapp_agent_session", resolve_agent_session)
+    monkeypatch.setattr(
+        evolution_handler, "resolve_whatsapp_agent_session", resolve_agent_session
+    )
 
     await log_inbound_message(
         inbound(
@@ -242,10 +241,10 @@ async def test_log_inbound_message_task_callback_sends_interactive_buttons(monke
         channel=FakeChannel(),
     )
 
-    assert sent_messages == [("85298765432", "請確認", {})]
     assert sent_buttons[0][0] == "85298765432"
     assert sent_buttons[0][1] == "確認建立任務"
-    assert sent_buttons[0][2][0].id == "assign_task_approve"
+    assert sent_buttons[0][2] == "請確認"
+    assert sent_buttons[0][3][0].id == "assign_task_approve"
 
 
 @pytest.mark.asyncio

@@ -109,11 +109,11 @@ class WhatsAppMsgQueueTask(MsgQueueTask):
                 await self._send_text(chunk.content)
             return
 
-        if chunk.content:
-            await self._send_text(chunk.content)
-
         title = str(data.get("title") or "")
-        await self._channel.send_interactive_buttons(self._phone_no, title, buttons)
+        description = chunk.content or None
+        await self._channel.send_interactive_buttons(
+            self._phone_no, title, buttons, description=description
+        )
 
 
 def extract_message_metadata(

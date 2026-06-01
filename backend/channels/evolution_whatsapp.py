@@ -107,14 +107,17 @@ class EvolutionWhatsAppChannel(CommunicationChannel):
         number: str,
         title: str,
         buttons: Sequence[InteractiveButton],
+        description: str | None = None,
         **options: Any,
     ) -> dict[str, Any]:
-        payload = {
+        payload: dict[str, Any] = {
             "number": number,
             "title": title,
             "buttons": [self._model_dump(button) for button in buttons],
             **self._compact_options(options),
         }
+        if description:
+            payload["description"] = description
         return await self._post_instance("message/sendButtons", payload)
 
     async def send_interactive_list(

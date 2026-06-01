@@ -28,6 +28,7 @@ class CommunicationChannel(ABC):
         number: str,
         title: str,
         buttons: Sequence[InteractiveButton],
+        description: str | None = None,
         **options: Any,
     ) -> dict[str, Any]:
         raise NotImplementedError
