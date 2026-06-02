@@ -12,6 +12,8 @@ from langchain_core.messages import (
     ToolMessage,
 )
 from langchain_core.runnables import RunnableConfig
+from langgraph.errors import GraphInterrupt
+from langgraph.types import Command
 
 from backend.dao import AgentSessionDAO
 from backend.db.session import async_session_factory
@@ -204,134 +206,144 @@ class Agent:
         pending_text_end = False
         previous_graph_node: str | None = None
 
-        async for chunk in graph.astream(
-            {
+        try:
+            messages = {
                 "messages": [
                     HumanMessage(
                         content=message,
                         additional_kwargs={"datetime": datetime.now(timezone.utc)},
                     )
                 ]
-            },
-            config=config,
-            stream_mode="messages",
-        ):
-            if isinstance(chunk, tuple):
-                msg, _chunk_metadata = chunk
-            else:
-                msg = chunk
-                _chunk_metadata = {}
+            }
 
-            graph_node = (
-                _chunk_metadata.get("langgraph_node")
-                or _chunk_metadata.get("node")
-                or None
-            )
-            if (
-                pending_text_end
-                and graph_node
-                and previous_graph_node
-                and graph_node != previous_graph_node
+            async for chunk in graph.astream(
+                messages,
+                config=config,
+                stream_mode="messages",
             ):
-                pending_text_end = False
-                yield StreamChunk(
-                    chunk_type="text_end",
-                    timestamp=time.time(),
+                if isinstance(chunk, tuple):
+                    msg, _chunk_metadata = chunk
+                else:
+                    msg = chunk
+                    _chunk_metadata = {}
+
+                graph_node = (
+                    _chunk_metadata.get("langgraph_node")
+                    or _chunk_metadata.get("node")
+                    or None
                 )
-            if graph_node:
-                previous_graph_node = str(graph_node)
-
-            if isinstance(msg, (AIMessage, AIMessageChunk)):
-                reasoning_content = msg.additional_kwargs.get("reasoning_content")
-                if reasoning_content:
-                    logger.debug(
-                        t("agent.chunk_received"),
-                        step_id,
-                        agent.session_id,
-                        "think",
-                        len(str(reasoning_content)),
-                    )
-                    yield StreamChunk(
-                        chunk_type="think",
-                        content=str(reasoning_content),
-                        timestamp=time.time(),
-                    )
-
-                interactive_buttons = msg.additional_kwargs.get("interactive_buttons")
-                if interactive_buttons:
-                    logger.debug(
-                        t("agent.interactive_buttons_yielded"),
-                        step_id,
-                        agent.session_id,
-                        len(interactive_buttons),
-                    )
-                    if pending_text_end:
-                        pending_text_end = False
-                        yield StreamChunk(
-                            chunk_type="text_end",
-                            timestamp=time.time(),
-                        )
-                    yield StreamChunk(
-                        chunk_type="interactive_buttons",
-                        content=(
-                            msg.content
-                            if isinstance(msg.content, str)
-                            else str(msg.content)
-                        ),
-                        data={
-                            "title": msg.additional_kwargs.get("interactive_title"),
-                            "buttons": interactive_buttons,
-                        },
-                        timestamp=time.time(),
-                    )
+                if (
+                    pending_text_end
+                    and graph_node
+                    and previous_graph_node
+                    and graph_node != previous_graph_node
+                ):
+                    pending_text_end = False
                     yield StreamChunk(
                         chunk_type="text_end",
                         timestamp=time.time(),
                     )
-                    continue
+                if previous_graph_node is None or graph_node != previous_graph_node:
+                    logger.debug(
+                        "Enter Node: %s (step_id=%s session_id=%s)",
+                        graph_node,
+                        step_id,
+                        agent.session_id,
+                    )
 
-                if hasattr(msg, "tool_call_chunks") and msg.tool_call_chunks:  # type: ignore
-                    if pending_text_end:
-                        pending_text_end = False
-                        yield StreamChunk(
-                            chunk_type="text_end",
-                            timestamp=time.time(),
-                        )
-                    for tool_chunk in msg.tool_call_chunks:  # type: ignore
+                if graph_node:
+                    previous_graph_node = str(graph_node)
+
+                if isinstance(msg, (AIMessage, AIMessageChunk)):
+                    reasoning_content = msg.additional_kwargs.get("reasoning_content")
+                    if reasoning_content:
                         logger.debug(
-                            t("agent.tool_call_received"),
+                            t("agent.chunk_received"),
                             step_id,
                             agent.session_id,
-                            tool_chunk.get("name"),
+                            "think",
+                            len(str(reasoning_content)),
                         )
                         yield StreamChunk(
-                            chunk_type="tool",
-                            content=tool_chunk.get("name"),
-                            data={"tool_call": tool_chunk},
-                            timestamp=time.time(),
-                        )
-                elif hasattr(msg, "tool_calls") and msg.tool_calls:  # type: ignore
-                    if pending_text_end:
-                        pending_text_end = False
-                        yield StreamChunk(
-                            chunk_type="text_end",
-                            timestamp=time.time(),
-                        )
-                    for tc in getattr(msg, "tool_calls", []):
-                        logger.debug(
-                            t("agent.tool_call_received"),
-                            step_id,
-                            agent.session_id,
-                            tc.get("name"),
-                        )
-                        yield StreamChunk(
-                            chunk_type="tool",
-                            content=tc.get("name"),
-                            data={"tool_call": tc},
+                            chunk_type="think",
+                            content=str(reasoning_content),
                             timestamp=time.time(),
                         )
 
-                if msg.content:
+                    if (
+                        hasattr(msg, "tool_call_chunks")
+                        and msg.tool_call_chunks  # type: ignore
+                    ):
+                        if pending_text_end:
+                            pending_text_end = False
+                            yield StreamChunk(
+                                chunk_type="text_end",
+                                timestamp=time.time(),
+                            )
+                        for tool_chunk in msg.tool_call_chunks:  # type: ignore
+                            logger.debug(
+                                t("agent.tool_call_received"),
+                                step_id,
+                                agent.session_id,
+                                tool_chunk.get("name"),
+                            )
+                            yield StreamChunk(
+                                chunk_type="tool",
+                                content=tool_chunk.get("name"),
+                                data={"tool_call": tool_chunk},
+                                timestamp=time.time(),
+                            )
+                    elif hasattr(msg, "tool_calls") and msg.tool_calls:  # type: ignore
+                        if pending_text_end:
+                            pending_text_end = False
+                            yield StreamChunk(
+                                chunk_type="text_end",
+                                timestamp=time.time(),
+                            )
+                        for tc in getattr(msg, "tool_calls", []):
+                            logger.debug(
+                                t("agent.tool_call_received"),
+                                step_id,
+                                agent.session_id,
+                                tc.get("name"),
+                            )
+                            yield StreamChunk(
+                                chunk_type="tool",
+                                content=tc.get("name"),
+                                data={"tool_call": tc},
+                                timestamp=time.time(),
+                            )
+
+                    if msg.content:
+                        content = (
+                            msg.content
+                            if isinstance(msg.content, str)
+                            else str(msg.content)
+                        )
+                        logger.debug(
+                            t("agent.chunk_received"),
+                            step_id,
+                            agent.session_id,
+                            "content",
+                            len(content),
+                        )
+                        yield StreamChunk(
+                            chunk_type="content",
+                            content=content,
+                            timestamp=time.time(),
+                        )
+                        pending_text_end = True
+                        if (
+                            msg.additional_kwargs.get("text_done")
+                            or isinstance(msg, AIMessage)
+                            and not isinstance(msg, AIMessageChunk)
+                        ):
+                            pending_text_end = False
+                            yield StreamChunk(
+                                chunk_type="text_end",
+                                timestamp=time.time(),
+                            )
+                elif isinstance(msg, ToolMessage):
                     content = (
                         msg.content
                         if isinstance(msg.content, str)
@@ -341,38 +353,23 @@ class Agent:
                         t("agent.chunk_received"),
                         step_id,
                         agent.session_id,
-                        "content",
+                        "tool_result",
                         len(content),
                     )
                     yield StreamChunk(
-                        chunk_type="content",
+                        chunk_type="tool_result",
                         content=content,
                         timestamp=time.time(),
                     )
-                    pending_text_end = True
-                    if msg.additional_kwargs.get("text_done") or isinstance(
-                        msg, AIMessage
-                    ) and not isinstance(msg, AIMessageChunk):
-                        pending_text_end = False
-                        yield StreamChunk(
-                            chunk_type="text_end",
-                            timestamp=time.time(),
-                        )
-            elif isinstance(msg, ToolMessage):
-                content = (
-                    msg.content if isinstance(msg.content, str) else str(msg.content)
-                )
-                logger.debug(
-                    t("agent.chunk_received"),
-                    step_id,
-                    agent.session_id,
-                    "tool_result",
-                    len(content),
-                )
-                yield StreamChunk(
-                    chunk_type="tool_result",
-                    content=content,
-                    timestamp=time.time(),
-                )
+
+        except GraphInterrupt as e:
+            interrupt_value = (
+                e.value if isinstance(e.value, dict) else {"message": str(e.value)}
+            )
+            yield StreamChunk(
+                chunk_type="interrupt",
+                data=interrupt_value,
+                timestamp=time.time(),
+            )
 
         logger.debug(t("agent.proc_send_completed"), step_id, agent.session_id)

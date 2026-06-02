@@ -15,12 +15,17 @@ from langchain_core.runnables import RunnableConfig
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import ToolNode
 
+from backend.dto.agent_msg_hist import AgentMsgHistCreate
 from backend.i18n import t
 from backend.llm.llm import LLMSet
 from backend.llm.types import StreamChunk
+from backend.tdai_memory.manager import MemoryManager
+from backend.tdai_memory.models import CompletedTurn
 from backend.tools.memory import MemoryTools
 from backend.tools.sandbox import SandboxTools
 from backend.tools.system import SystemTools
+from backend.utils.message import MsgUtil
+from backend.utils.tools import Tools
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +60,9 @@ class MessageState(TypedDict):
     """Minimal state for nodes that only need messages."""
 
     messages: Annotated[list[BaseMessage], _replace_with_last]
-    pending_assign_task: NotRequired[dict[str, str] | None]
+    human_review_node: Optional[str]
+    human_review_data: Optional[Dict[str, Any]]
+    human_review_result: Optional[str]
 
 
 class GraphNode:
@@ -81,8 +88,47 @@ class GraphNode:
     }
 
     @staticmethod
+    def store_message(config: RunnableConfig, messages: list[BaseMessage]) -> None:
+        session_id: str = GraphNode.get_configure(config, "thread_id", "")
+        session_db_id: int = GraphNode.get_configure(config, "session_db_id", 0)
+        step_id: str = GraphNode.get_configure(config, "step_id", "")
+        agent_id: str = GraphNode.get_configure(config, "agent_id", "")
+        conversation_metadata = {
+            "conversation_kind": GraphNode.get_configure(
+                config, "conversation_kind", "unknown"
+            ),
+            "sender_name": GraphNode.get_configure(config, "sender_name", ""),
+            "sender_type": GraphNode.get_configure(config, "sender_type", "unknown"),
+            "recv_name": GraphNode.get_configure(config, "recv_name", ""),
+            "recv_type": GraphNode.get_configure(config, "recv_type", "agent"),
+        }
+
+        user_msg, assistant_msg, cm, tcm = MsgUtil.base_msg_to_tdai_memory_rec(
+            messages, conversation_metadata
+        )
+
+        dtos: list[AgentMsgHistCreate] = MsgUtil.base_msg_to_msg_hist_rec(
+            messages, session_db_id, step_id, conversation_metadata
+        )
+
+        turn: CompletedTurn = CompletedTurn(
+            session_key=session_id,
+            user_text=user_msg,
+            assistant_text=assistant_msg,
+            messages=cm,
+            tool_call=tcm,
+            metadata=conversation_metadata,
+        )
+
+        Tools.start_async_task(
+            MemoryManager.instance().capture(agent_id=agent_id, turn=turn)
+        )
+
+        Tools.start_async_task(MsgUtil.save_agent_msg_hist(dtos))
+
+    @staticmethod
     def get_all_tools() -> list[Any]:
-        return MemoryTools + SandboxTools
+        return MemoryTools + SystemTools + SandboxTools
 
     @staticmethod
     def build_tool_node(tools: list[Any]) -> ToolNode:
