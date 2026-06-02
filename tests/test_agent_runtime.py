@@ -17,12 +17,19 @@ from langgraph.prebuilt import ToolNode
 
 from backend.agent.agent import Agent
 from backend.graph.agent import (
+    end_node as agent_end_node,
     chat_node,
     graph as agent_graph,
     route_after_chat as agent_route_after_chat,
 )
+
 from backend.graph.graph_node import GraphNode, MessageState
-from backend.graph.bulter import workflow as butler_workflow
+from backend.graph.bulter import assign_task_node, workflow as butler_workflow
+from backend.graph.interrupt_nodes import (
+    APPROVE_LABEL,
+    CANCEL_LABEL,
+    OTHER_LABEL,
+)
 from backend.i18n import t
 from backend.llm.types import StreamChunk
 from backend.tdai_memory.models import RecallResult
@@ -86,6 +93,7 @@ class FakeAssignTaskAsyncSession:
 
 class FakeAssignedTaskDAO:
     created_data = None
+    initial_steps_args = None
 
     def __init__(self, session):
         self.session = session
@@ -95,6 +103,7 @@ class FakeAssignedTaskDAO:
         return SimpleNamespace(id=99)
 
     async def create_initial_steps(self, *, task_db_id, assign_agent_id, step_ids):
+        type(self).initial_steps_args = (task_db_id, assign_agent_id, step_ids)
         return [
             SimpleNamespace(step_id=step_ids[0], title="brainstorm", status="pending"),
             SimpleNamespace(step_id=step_ids[1], title="planning", status="blocked"),
@@ -105,6 +114,7 @@ class FakeAssignedTaskDAO:
 def _patch_assign_task_persistence(monkeypatch):
     fake_session = FakeAssignTaskAsyncSession()
     FakeAssignedTaskDAO.created_data = None
+    FakeAssignedTaskDAO.initial_steps_args = None
     monkeypatch.setattr(
         "backend.tools.system.async_session_factory",
         lambda: fake_session,
@@ -328,14 +338,7 @@ async def test_chat_node_applies_runtime_model_args_before_binding_tools(monkeyp
 
 @pytest.mark.asyncio
 async def test_graph_binds_assign_task_through_tools_node(monkeypatch):
-    class FakeMemoryManager:
-        async def capture(self, *, agent_id, turn):
-            return None
-
-    monkeypatch.setattr(
-        "backend.graph.agent.MemoryManager.instance",
-        lambda: FakeMemoryManager(),
-    )
+    monkeypatch.setattr(GraphNode, "store_message", lambda config, messages: None)
 
     class ToolCallingLLM:
         def __init__(self):
@@ -421,14 +424,7 @@ def test_prepare_chat_node_config_includes_agent_db_id_for_assign_task():
 
 @pytest.mark.asyncio
 async def test_graph_routes_other_tool_calls_through_tools_node(monkeypatch):
-    class FakeMemoryManager:
-        async def capture(self, *, agent_id, turn):
-            return None
-
-    monkeypatch.setattr(
-        "backend.graph.agent.MemoryManager.instance",
-        lambda: FakeMemoryManager(),
-    )
+    monkeypatch.setattr(GraphNode, "store_message", lambda config, messages: None)
 
     class ToolCallingLLM:
         def __init__(self):
@@ -576,15 +572,7 @@ async def test_bulter_graph_executes_assign_task_tool_call(monkeypatch):
 @pytest.mark.asyncio
 async def test_bulter_graph_intercepts_assign_task_for_approval(monkeypatch):
     fake_session = _patch_assign_task_persistence(monkeypatch)
-
-    class FakeMemoryManager:
-        async def capture(self, *, agent_id, turn):
-            return None
-
-    monkeypatch.setattr(
-        "backend.graph.agent.MemoryManager.instance",
-        lambda: FakeMemoryManager(),
-    )
+    monkeypatch.setattr(GraphNode, "store_message", lambda config, messages: None)
 
     class ToolCallingLLM:
         def bind_tools(self, tools):
@@ -606,6 +594,7 @@ async def test_bulter_graph_intercepts_assign_task_for_approval(monkeypatch):
             )
 
     app = butler_workflow.compile()
+
     result = await app.ainvoke(
         {"messages": [HumanMessage(content="幫我建立 task")]},
         config=GraphNode.prepare_chat_node_config(
@@ -621,64 +610,73 @@ async def test_bulter_graph_intercepts_assign_task_for_approval(monkeypatch):
         ),
     )
 
-    assert fake_session.committed is False
-    assert FakeAssignedTaskDAO.created_data is None
-    assert result["pending_assign_task"] == {
+    assert result["__interrupt__"][0].value["type"] == "human_review"
+    assert result["human_review_node"] == "assign_task_node"
+    assert result["human_review_data"] == {
         "task_name": "Task tracker",
         "goal": "Create root task tracking",
     }
-    assert (
-        result["messages"][-1].additional_kwargs["interactive_buttons"][0]["id"]
-        == "assign_task_approve"
-    )
 
 
 @pytest.mark.asyncio
-async def test_bulter_graph_approval_executes_assign_task_and_ends(monkeypatch):
+async def test_bulter_assign_task_node_persists_after_approval(monkeypatch):
     fake_session = _patch_assign_task_persistence(monkeypatch)
 
-    class FakeMemoryManager:
-        async def capture(self, *, agent_id, turn):
-            return None
-
-    monkeypatch.setattr(
-        "backend.graph.agent.MemoryManager.instance",
-        lambda: FakeMemoryManager(),
-    )
-
-    class ShouldNotBeCalledLLM:
-        def bind_tools(self, tools):
-            return self
-
-        async def ainvoke(self, messages):
-            raise AssertionError("approval should not call LLM")
-
-    app = butler_workflow.compile()
-    result = await app.ainvoke(
-        {
-            "messages": [HumanMessage(content="assign_task_approve")],
-            "pending_assign_task": {
-                "task_name": "Task tracker",
-                "goal": "Create root task tracking",
-            },
+    state = {
+        "messages": [
+            HumanMessage(content="幫我建立 task"),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "assign_task",
+                        "args": {
+                            "task_name": "Task tracker",
+                            "goal": "Create root task tracking",
+                        },
+                        "id": "call-1",
+                    }
+                ],
+            ),
+            HumanMessage(content="同意"),
+        ],
+        "human_review_node": "assign_task_node",
+        "human_review_data": {
+            "task_name": "Task tracker",
+            "goal": "Create root task tracking",
         },
-        config=GraphNode.prepare_chat_node_config(
-            thread_id="session-1",
-            models=FakeModels(ShouldNotBeCalledLLM()),
-            sys_prompt="",
-            involves_secrets=False,
-            think_mode=False,
-            args={},
-            user_db_id=123,
-            agent_db_id=456,
-            agent_type="bulter",
-        ),
+        "human_review_result": APPROVE_LABEL,
+    }
+
+    config = GraphNode.prepare_chat_node_config(
+        thread_id="session-1",
+        models=None,
+        sys_prompt="",
+        involves_secrets=False,
+        think_mode=False,
+        args={},
+        user_db_id=123,
+        agent_db_id=456,
+        agent_type="bulter",
     )
+
+    result = await assign_task_node(state, config)
 
     assert fake_session.committed is True
-    assert FakeAssignedTaskDAO.created_data.task_name == "Task tracker"
-    assert result["pending_assign_task"] is None
-    assert "Task tracker" in result["messages"][-1].content
+    created_data = FakeAssignedTaskDAO.created_data
+    assert created_data.user_id == 123
+    assert created_data.responsible_agent_id == 456
+    assert created_data.task_name == "Task tracker"
+    assert created_data.goal == "Create root task tracking"
+    assert created_data.status == "brainstorm_pending"
+    task_db_id, assign_agent_id, step_ids = FakeAssignedTaskDAO.initial_steps_args
+    assert task_db_id == 99
+    assert assign_agent_id == 456
+    assert len(step_ids) == 3
+    assert result["human_review_node"] is None
+    assert result["human_review_data"] is None
+    assert result["human_review_result"] is None
+    assert "Task tracker" in result["messages"][0].content
 
 
 class FakeGraph:
