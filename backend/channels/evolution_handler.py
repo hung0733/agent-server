@@ -168,6 +168,43 @@ async def apply_quoted_message_fallback(
     return message
 
 
+async def resolve_resume_message_id(
+    message: ReceivedMessage,
+    channel: EvolutionWhatsAppChannel | None = None,
+) -> str | None:
+    if message.quoted_message_id:
+        return message.quoted_message_id
+    if not channel or not message.remote_jid:
+        return None
+    if not hasattr(channel, "find_latest_outbound_message_id"):
+        return None
+
+    reply_channel = _build_reply_channel(channel, message.instance)
+    if not reply_channel:
+        return None
+
+    try:
+        latest_message_id = await reply_channel.find_latest_outbound_message_id(
+            message.remote_jid
+        )
+        logger.info(
+            t("channels.evolution.latest_outbound_message_id_resolved"),
+            message.instance,
+            message.remote_jid,
+            message.message_id,
+            latest_message_id,
+        )
+        return latest_message_id
+    except Exception:
+        logger.warning(
+            t("channels.evolution.latest_outbound_message_lookup_failed"),
+            message.instance,
+            message.remote_jid,
+            exc_info=True,
+        )
+    return None
+
+
 def _log_quoted_message_source(message: ReceivedMessage, source: str) -> None:
     logger.info(
         t("channels.evolution.quoted_message_id_resolved"),
@@ -218,15 +255,19 @@ async def log_inbound_message(
     await apply_quoted_message_fallback(received_message, channel)
 
     if message_queue:
+        reply_channel = _build_reply_channel(channel, received_message.instance)
         task = await build_msg_queue_task(
             received_message,
-            channel=_build_reply_channel(channel, received_message.instance),
+            channel=reply_channel,
             http_client=http_client,
         )
         if task:
-            if received_message.quoted_message_id:
+            resume_message_id = await resolve_resume_message_id(
+                received_message, reply_channel
+            )
+            if resume_message_id:
                 resumed = await message_queue.resume_interrupt(
-                    task.agent_id, received_message.quoted_message_id, task
+                    task.agent_id, resume_message_id, task
                 )
                 if resumed:
                     log_received_message(received_message)

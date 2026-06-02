@@ -16,13 +16,14 @@ from backend.llm.types import StreamChunk
 
 
 class FakeQueue:
-    def __init__(self):
+    def __init__(self, resume_return=False):
         self.tasks = []
         self.resume_calls = []
+        self.resume_return = resume_return
 
     async def resume_interrupt(self, agent_id, msg_id, task=None):
         self.resume_calls.append((agent_id, msg_id, task))
-        return False
+        return self.resume_return
 
     async def enqueue(self, task):
         self.tasks.append(task)
@@ -249,6 +250,116 @@ async def test_log_inbound_message_keeps_enqueue_when_quoted_fallback_empty(monk
         None,
         "none",
     )
+    assert len(queue.tasks) == 1
+
+
+@pytest.mark.asyncio
+async def test_log_inbound_message_resumes_with_latest_outbound_message_id(monkeypatch):
+    queue = FakeQueue(resume_return=True)
+    captured_tasks = []
+
+    class FakeChannel:
+        async def find_message_quoted_message_id(self, message_id):
+            return None
+
+        async def find_latest_outbound_message_id(self, remote_jid):
+            assert remote_jid == "85298765432@s.whatsapp.net"
+            return "latest-outbound-msg"
+
+    async def resolve_agent_session(message):
+        return "agent-123", "default-123"
+
+    async def capture_task(message, **kwargs):
+        task = FakeTask()
+        captured_tasks.append(task)
+        return task
+
+    monkeypatch.setattr(
+        evolution_handler, "resolve_whatsapp_agent_session", resolve_agent_session
+    )
+    monkeypatch.setattr(evolution_handler, "build_msg_queue_task", capture_task)
+
+    await log_inbound_message(
+        inbound(
+            {
+                "key": {"id": "msg-1", "remoteJid": "85298765432@s.whatsapp.net"},
+                "message": {"conversation": "approve"},
+            }
+        ),
+        queue,
+        channel=FakeChannel(),
+    )
+
+    assert queue.resume_calls == [
+        ("agent-123", "latest-outbound-msg", captured_tasks[0])
+    ]
+    assert queue.tasks == []
+
+
+@pytest.mark.asyncio
+async def test_log_inbound_message_enqueues_when_latest_outbound_missing(monkeypatch):
+    queue = FakeQueue()
+
+    class FakeChannel:
+        async def find_message_quoted_message_id(self, message_id):
+            return None
+
+        async def find_latest_outbound_message_id(self, remote_jid):
+            return None
+
+    async def resolve_agent_session(message):
+        return "agent-123", "default-123"
+
+    monkeypatch.setattr(
+        evolution_handler, "resolve_whatsapp_agent_session", resolve_agent_session
+    )
+
+    await log_inbound_message(
+        inbound(
+            {
+                "key": {"id": "msg-1", "remoteJid": "85298765432@s.whatsapp.net"},
+                "message": {"conversation": "hello"},
+            }
+        ),
+        queue,
+        channel=FakeChannel(),
+    )
+
+    assert queue.resume_calls == []
+    assert len(queue.tasks) == 1
+
+
+@pytest.mark.asyncio
+async def test_log_inbound_message_enqueues_when_latest_outbound_resume_misses(monkeypatch):
+    queue = FakeQueue(resume_return=False)
+
+    class FakeChannel:
+        async def find_message_quoted_message_id(self, message_id):
+            return None
+
+        async def find_latest_outbound_message_id(self, remote_jid):
+            return "latest-outbound-msg"
+
+    async def resolve_agent_session(message):
+        return "agent-123", "default-123"
+
+    monkeypatch.setattr(
+        evolution_handler, "resolve_whatsapp_agent_session", resolve_agent_session
+    )
+
+    await log_inbound_message(
+        inbound(
+            {
+                "key": {"id": "msg-1", "remoteJid": "85298765432@s.whatsapp.net"},
+                "message": {"conversation": "hello"},
+            }
+        ),
+        queue,
+        channel=FakeChannel(),
+    )
+
+    assert len(queue.resume_calls) == 1
+    assert queue.resume_calls[0][1] == "latest-outbound-msg"
     assert len(queue.tasks) == 1
 
 
@@ -630,6 +741,13 @@ async def test_log_inbound_message_replies_with_inbound_instance(monkeypatch):
             "url": "http://evolution.test/chat/findMessages/Moss",
             "headers": {"apikey": "global-key"},
             "json": {"where": {"key": {"id": "msg-1"}}},
+        },
+        {
+            "url": "http://evolution.test/chat/findMessages/Moss",
+            "headers": {"apikey": "global-key"},
+            "json": {
+                "where": {"key": {"remoteJid": "85298765432@s.whatsapp.net"}}
+            },
         },
         {
             "url": "http://evolution.test/message/sendText/Moss",
