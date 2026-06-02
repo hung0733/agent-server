@@ -319,8 +319,9 @@ class Agent:
                         chunk_type="text_end",
                         timestamp=time.time(),
                     )
+
                 if previous_graph_node is None or graph_node != previous_graph_node:
-                    logger.debug(
+                    logger.info(
                         t("agent.graph_node_entered"),
                         graph_node,
                         step_id,
@@ -329,6 +330,9 @@ class Agent:
 
                 if graph_node:
                     previous_graph_node = str(graph_node)
+
+                if graph_node == "pre_assign_task_node":
+                    continue
 
                 if isinstance(msg, (AIMessage, AIMessageChunk)):
                     reasoning_content = msg.additional_kwargs.get("reasoning_content")
