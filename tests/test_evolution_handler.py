@@ -17,9 +17,18 @@ from backend.llm.types import StreamChunk
 class FakeQueue:
     def __init__(self):
         self.tasks = []
+        self.resume_calls = []
+
+    async def resume_interrupt(self, agent_id, msg_id):
+        self.resume_calls.append((agent_id, msg_id))
+        return False
 
     async def enqueue(self, task):
         self.tasks.append(task)
+
+
+class FakeTask:
+    agent_id = "agent-123"
 
 
 def inbound(data, instance="sales-agent"):
@@ -90,6 +99,156 @@ async def test_log_inbound_message_enqueues_text_task(monkeypatch):
     assert queue.tasks[0].session_id == "default-123"
     assert queue.tasks[0].message == "hello"
     assert queue.tasks[0].files is None
+
+
+@pytest.mark.asyncio
+async def test_log_inbound_message_keeps_existing_quoted_message_id(monkeypatch):
+    queue = FakeQueue()
+    captured_messages = []
+    fallback_calls = []
+    info_calls = []
+
+    class FakeChannel:
+        async def find_latest_outbound_message_id(self, remote_jid):
+            fallback_calls.append(remote_jid)
+            return "fallback-msg"
+
+    async def resolve_agent_session(message):
+        return "agent-123", "default-123"
+
+    async def capture_task(message, **kwargs):
+        captured_messages.append(message)
+        return FakeTask()
+
+    monkeypatch.setattr(
+        evolution_handler, "resolve_whatsapp_agent_session", resolve_agent_session
+    )
+    monkeypatch.setattr(evolution_handler, "build_msg_queue_task", capture_task)
+    monkeypatch.setattr(
+        evolution_handler.logger, "info", lambda *args: info_calls.append(args)
+    )
+
+    await log_inbound_message(
+        inbound(
+            {
+                "key": {"id": "msg-1", "remoteJid": "85298765432@s.whatsapp.net"},
+                "message": {
+                    "extendedTextMessage": {
+                        "text": "approve",
+                        "contextInfo": {"stanzaId": "quoted-msg-1"},
+                    }
+                },
+            }
+        ),
+        queue,
+        channel=FakeChannel(),
+    )
+
+    assert captured_messages[0].quoted_message_id == "quoted-msg-1"
+    assert fallback_calls == []
+    assert info_calls[0][1:] == (
+        "sales-agent",
+        "85298765432@s.whatsapp.net",
+        "msg-1",
+        "quoted-msg-1",
+        "payload_context_info",
+    )
+    assert len(queue.tasks) == 1
+
+
+@pytest.mark.asyncio
+async def test_log_inbound_message_falls_back_to_latest_outbound_message_id(monkeypatch):
+    queue = FakeQueue()
+    captured_messages = []
+    info_calls = []
+
+    class FakeChannel:
+        async def find_latest_outbound_message_id(self, remote_jid):
+            assert remote_jid == "85298765432@s.whatsapp.net"
+            return "bot-msg-2"
+
+    async def resolve_agent_session(message):
+        return "agent-123", "default-123"
+
+    async def capture_task(message, **kwargs):
+        captured_messages.append(message)
+        return FakeTask()
+
+    monkeypatch.setattr(
+        evolution_handler, "resolve_whatsapp_agent_session", resolve_agent_session
+    )
+    monkeypatch.setattr(evolution_handler, "build_msg_queue_task", capture_task)
+    monkeypatch.setattr(
+        evolution_handler.logger, "info", lambda *args: info_calls.append(args)
+    )
+
+    await log_inbound_message(
+        inbound(
+            {
+                "key": {"id": "msg-1", "remoteJid": "85298765432@s.whatsapp.net"},
+                "message": {"conversation": "hello"},
+            }
+        ),
+        queue,
+        channel=FakeChannel(),
+    )
+
+    assert captured_messages[0].quoted_message_id == "bot-msg-2"
+    assert info_calls[0][1:] == (
+        "sales-agent",
+        "85298765432@s.whatsapp.net",
+        "msg-1",
+        "bot-msg-2",
+        "evolution_find_messages",
+    )
+    assert len(queue.tasks) == 1
+
+
+@pytest.mark.asyncio
+async def test_log_inbound_message_keeps_enqueue_when_quoted_fallback_empty(monkeypatch):
+    queue = FakeQueue()
+    captured_messages = []
+    info_calls = []
+
+    class FakeChannel:
+        async def find_latest_outbound_message_id(self, remote_jid):
+            return None
+
+    async def resolve_agent_session(message):
+        return "agent-123", "default-123"
+
+    async def capture_task(message, **kwargs):
+        captured_messages.append(message)
+        return FakeTask()
+
+    monkeypatch.setattr(
+        evolution_handler, "resolve_whatsapp_agent_session", resolve_agent_session
+    )
+    monkeypatch.setattr(evolution_handler, "build_msg_queue_task", capture_task)
+    monkeypatch.setattr(
+        evolution_handler.logger, "info", lambda *args: info_calls.append(args)
+    )
+
+    await log_inbound_message(
+        inbound(
+            {
+                "key": {"id": "msg-1", "remoteJid": "85298765432@s.whatsapp.net"},
+                "message": {"conversation": "hello"},
+            }
+        ),
+        queue,
+        channel=FakeChannel(),
+    )
+
+    assert captured_messages[0].quoted_message_id is None
+    assert info_calls[0][1:] == (
+        "sales-agent",
+        "85298765432@s.whatsapp.net",
+        "msg-1",
+        None,
+        "none",
+    )
+    assert len(queue.tasks) == 1
 
 
 @pytest.mark.asyncio
@@ -189,39 +348,27 @@ async def test_log_inbound_message_task_callback_sends_agent_response_on_text_en
 
 
 @pytest.mark.asyncio
-async def test_log_inbound_message_task_callback_sends_interactive_buttons(monkeypatch):
-    sent_buttons = []
+async def test_log_inbound_message_task_callback_handles_interrupt_chunk(monkeypatch):
+    sent_texts = []
 
     class ResponseQueue:
         async def enqueue(self, task):
             await task.callback(
                 StreamChunk(
-                    chunk_type="interactive_buttons",
-                    content="請確認",
+                    chunk_type="interrupt",
                     data={
-                        "title": "確認建立任務",
-                        "buttons": [
-                            {
-                                "id": "assign_task_approve",
-                                "type": "reply",
-                                "displayText": "確認建立",
-                            },
-                            {
-                                "id": "assign_task_cancel",
-                                "type": "reply",
-                                "displayText": "取消",
-                            },
-                        ],
+                        "type": "human_review",
+                        "task_name": "Task tracker",
+                        "goal": "Create root task tracking",
+                        "message": "請確認是否執行任務",
                     },
                 )
             )
 
     class FakeChannel:
-        async def send_interactive_buttons(
-            self, number, title, buttons, description=None, **options
-        ):
-            sent_buttons.append((number, title, description, buttons, options))
-            return {"ok": True}
+        async def send_text(self, number, text, **options):
+            sent_texts.append((number, text, options))
+            return {"key": {"id": "sent-msg-1", "remoteJid": number}}
 
     async def resolve_agent_session(message):
         return "agent-123", "default-123"
@@ -241,10 +388,9 @@ async def test_log_inbound_message_task_callback_sends_interactive_buttons(monke
         channel=FakeChannel(),
     )
 
-    assert sent_buttons[0][0] == "85298765432"
-    assert sent_buttons[0][1] == "確認建立任務"
-    assert sent_buttons[0][2] == "請確認"
-    assert sent_buttons[0][3][0].id == "assign_task_approve"
+    assert len(sent_texts) == 1
+    assert sent_texts[0][0] == "85298765432"
+    assert sent_texts[0][1] == "請確認是否執行任務"
 
 
 @pytest.mark.asyncio
@@ -440,6 +586,13 @@ async def test_log_inbound_message_replies_with_inbound_instance(monkeypatch):
     )
 
     assert posts == [
+        {
+            "url": "http://evolution.test/chat/findMessages/Moss",
+            "headers": {"apikey": "global-key"},
+            "json": {
+                "where": {"key": {"remoteJid": "85298765432@s.whatsapp.net"}}
+            },
+        },
         {
             "url": "http://evolution.test/message/sendText/Moss",
             "headers": {"apikey": "global-key"},

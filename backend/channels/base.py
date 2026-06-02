@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator
 from typing import Any
 
-from backend.channels.types import InteractiveButton, InteractiveListSection, MediaType, WhatsAppInboundMessage
+from backend.channels.types import MediaType, WhatsAppInboundMessage
 
 
 class CommunicationChannel(ABC):
@@ -18,29 +18,6 @@ class CommunicationChannel(ABC):
         number: str,
         mediatype: MediaType,
         media: str,
-        **options: Any,
-    ) -> dict[str, Any]:
-        raise NotImplementedError
-
-    @abstractmethod
-    async def send_interactive_buttons(
-        self,
-        number: str,
-        title: str,
-        buttons: Sequence[InteractiveButton],
-        description: str | None = None,
-        **options: Any,
-    ) -> dict[str, Any]:
-        raise NotImplementedError
-
-    @abstractmethod
-    async def send_interactive_list(
-        self,
-        number: str,
-        title: str,
-        button_text: str,
-        footer_text: str,
-        sections: Sequence[InteractiveListSection],
         **options: Any,
     ) -> dict[str, Any]:
         raise NotImplementedError

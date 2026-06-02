@@ -6,9 +6,6 @@ import pytest
 from backend.channels import (
     CommunicationChannel,
     EvolutionWhatsAppChannel,
-    InteractiveButton,
-    InteractiveListRow,
-    InteractiveListSection,
 )
 from backend.channels.evolution_whatsapp import MessageDeduper
 
@@ -25,13 +22,14 @@ class FakeResponse:
 
 
 class FakeHttpClient:
-    def __init__(self):
+    def __init__(self, payload=None):
+        self.payload = payload
         self.posts = []
         self.closed = False
 
     async def post(self, url, headers=None, json=None):
         self.posts.append({"url": url, "headers": headers, "json": json})
-        return FakeResponse({"url": url, "json": json})
+        return FakeResponse(self.payload or {"url": url, "json": json})
 
     async def aclose(self):
         self.closed = True
@@ -87,34 +85,11 @@ async def test_send_methods_use_instance_key_and_instance_endpoints():
 
     await channel.send_text("85298765432", "hello", delay=1000, link_preview=False)
     await channel.send_media("85298765432", "image", "base64", caption="cap", file_name="pic.jpg")
-    await channel.send_interactive_buttons(
-        "85298765432",
-        "Approve?",
-        [
-            InteractiveButton(id="approve", display_text="Approve"),
-            InteractiveButton(id="reject", display_text="Reject"),
-        ],
-        description="Choose one",
-    )
-    await channel.send_interactive_list(
-        "85298765432",
-        "Choose item",
-        "Open",
-        "Footer",
-        [
-            InteractiveListSection(
-                title="Actions",
-                rows=[InteractiveListRow(title="Approve", row_id="approve", description="Approve request")],
-            )
-        ],
-    )
     await channel.mark_message_as_read("85298765432", "msg-1")
 
     assert [post["url"] for post in http_client.posts] == [
         "http://evolution.test/message/sendText/agent-instance",
         "http://evolution.test/message/sendMedia/agent-instance",
-        "http://evolution.test/message/sendButtons/agent-instance",
-        "http://evolution.test/message/sendList/agent-instance",
         "http://evolution.test/chat/markMessageAsRead/agent-instance",
     ]
     assert all(post["headers"] == {"apikey": "instance-key"} for post in http_client.posts)
@@ -125,13 +100,7 @@ async def test_send_methods_use_instance_key_and_instance_endpoints():
         "linkPreview": False,
     }
     assert http_client.posts[1]["json"]["fileName"] == "pic.jpg"
-    assert http_client.posts[2]["json"]["buttons"][0] == {
-        "type": "reply",
-        "displayText": "Approve",
-        "id": "approve",
-    }
-    assert http_client.posts[3]["json"]["sections"][0]["rows"][0]["rowId"] == "approve"
-    assert http_client.posts[4]["json"] == {"number": "85298765432", "messageId": "msg-1"}
+    assert http_client.posts[2]["json"] == {"number": "85298765432", "messageId": "msg-1"}
 
 
 @pytest.mark.asyncio
@@ -154,6 +123,46 @@ async def test_websocket_setup_only_enables_messages_upsert():
             "url": "http://evolution.test/websocket/set/agent-instance",
             "headers": {"apikey": "instance-key"},
             "json": {"websocket": {"enabled": True, "events": ["MESSAGES_UPSERT"]}},
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_find_latest_outbound_message_id_uses_latest_from_me_message():
+    http_client = FakeHttpClient(
+        payload={
+            "messages": {
+                "records": [
+                    {
+                        "key": {"id": "user-msg", "fromMe": False},
+                        "messageTimestamp": 300,
+                    },
+                    {
+                        "key": {"id": "bot-msg-1", "fromMe": True},
+                        "messageTimestamp": 100,
+                    },
+                    {
+                        "key": {"id": "bot-msg-2", "fromMe": True},
+                        "messageTimestamp": 200,
+                    },
+                ]
+            }
+        }
+    )
+    channel = make_channel(http_client=http_client)
+
+    message_id = await channel.find_latest_outbound_message_id(
+        "85297548257@s.whatsapp.net"
+    )
+
+    assert message_id == "bot-msg-2"
+    assert http_client.posts == [
+        {
+            "url": "http://evolution.test/chat/findMessages/agent-instance",
+            "headers": {"apikey": "instance-key"},
+            "json": {
+                "where": {"key": {"remoteJid": "85297548257@s.whatsapp.net"}}
+            },
         }
     ]
 
@@ -230,7 +239,7 @@ def test_to_received_message_extracts_extended_text():
     assert message.content == "extended hello"
 
 
-def test_to_received_message_extracts_interactive_buttons_and_list():
+def test_to_received_message_extracts_interactive_responses():
     channel = make_channel()
     button_raw = inbound(
         {

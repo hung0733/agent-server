@@ -2,17 +2,17 @@ from __future__ import annotations
 
 import logging
 import time
+from typing import Any
 
 import httpx
 
 from backend.channels import EvolutionWhatsAppChannel
 from backend.channels.evolution_media import build_evolution_files
-from backend.channels.types import InteractiveButton, ReceivedMessage, WhatsAppInboundMessage
+from backend.channels.types import ReceivedMessage, WhatsAppInboundMessage
 from backend.i18n import t
 from backend.llm.types import StreamChunk
 from backend.queues.message_queue import FilePayload, MessageQueue, MsgQueueTask
 from backend.services.whatsapp_session import resolve_whatsapp_agent_session
-
 
 logger = logging.getLogger(__name__)
 
@@ -38,29 +38,37 @@ class WhatsAppMsgQueueTask(MsgQueueTask):
         self._phone_no = phone_no
         self._response_parts: list[str] = []
         self._tool_parts: list[str] = []
+        self._last_sent_message_id: str | None = None
 
-    async def callback(self, chunk: StreamChunk) -> None:
-        if chunk.chunk_type == "interactive_buttons":
-            await self._send_interactive_buttons(chunk)
-            return
+    async def callback(self, chunk: StreamChunk) -> str | None:
+        if chunk.chunk_type == "interrupt":
+            return await self._handle_interrupt(chunk)
 
         if chunk.chunk_type == "content" and chunk.content:
             self._response_parts.append(chunk.content)
-            return
+            return None
 
         if chunk.chunk_type == "tool" and chunk.content:
             self._tool_parts.append(
                 t("channels.evolution.tool_called_reply") % chunk.content
             )
-            return
+            return None
 
         if chunk.chunk_type in {"text_end", "done"}:
             await self._flush_tool_parts()
-            await self._flush_response_parts()
+            return await self._flush_response_parts()
 
-    async def _flush_response_parts(self) -> None:
+    async def _handle_interrupt(self, chunk: StreamChunk) -> str | None:
+        interrupt_data = chunk.data or {}
+        interrupt_msg = str(interrupt_data.get("message") or chunk.content or "")
+
+        if interrupt_msg and self._channel and self._phone_no:
+            resp = await self._channel.send_text(self._phone_no, interrupt_msg)
+            return self._extract_message_id(resp)
+
+    async def _flush_response_parts(self) -> str | None:
         if not self._response_parts:
-            return
+            return None
 
         response_text = "".join(self._response_parts)
         self._response_parts.clear()
@@ -85,56 +93,22 @@ class WhatsAppMsgQueueTask(MsgQueueTask):
                 self._phone_no,
                 len(response_text),
             )
-            await self._channel.send_text(self._phone_no, response_text)
+            resp = await self._channel.send_text(self._phone_no, response_text)
+            self._last_sent_message_id = self._extract_message_id(resp)
             logger.info(
                 t("channels.evolution.reply_send_completed"),
                 self._phone_no,
                 round((time.perf_counter() - started_at) * 1000),
             )
 
-    async def _send_interactive_buttons(self, chunk: StreamChunk) -> None:
-        logger.info(
-            t("channels.evolution.interactive_buttons_send_started"),
-            self._phone_no,
-            (chunk.data or {}).get("title", ""),
-        )
-
-        if not self._channel or not self._phone_no:
-            if chunk.content:
-                await self._send_text(chunk.content)
-            return
-
-        data = chunk.data or {}
-        buttons_raw = data.get("buttons", [])
-        buttons = [
-            InteractiveButton.model_validate(button)
-            for button in buttons_raw
-            if isinstance(button, dict)
-        ]
-        if not buttons:
-            if chunk.content:
-                await self._send_text(chunk.content)
-            return
-
-        title = str(data.get("title") or "")
-        description = chunk.content or None
-        try:
-            await self._channel.send_interactive_buttons(
-                self._phone_no, title, buttons, description=description
-            )
-            logger.info(
-                t("channels.evolution.interactive_buttons_send_completed"),
-                self._phone_no,
-                title,
-                len(buttons),
-            )
-        except Exception:
-            logger.exception(
-                t("channels.evolution.interactive_buttons_send_failed"),
-                self._phone_no,
-            )
-            if description:
-                await self._send_text(description)
+    @staticmethod
+    def _extract_message_id(evolution_response: dict[str, Any]) -> str | None:
+        if not isinstance(evolution_response, dict):
+            return None
+        key = evolution_response.get("key")
+        if isinstance(key, dict):
+            return key.get("id")
+        return None
 
 
 def extract_message_metadata(
@@ -143,7 +117,9 @@ def extract_message_metadata(
     data = message.data if isinstance(message.data, dict) else {}
     key = data.get("key") if isinstance(data.get("key"), dict) else {}
     message_id = key.get("id") or data.get("messageId")
-    remote_jid = key.get("remoteJid") or data.get("remoteJid") or message.raw.get("sender")
+    remote_jid = (
+        key.get("remoteJid") or data.get("remoteJid") or message.raw.get("sender")
+    )
     return message_id, remote_jid
 
 
@@ -152,11 +128,63 @@ async def enrich_received_message(message: ReceivedMessage) -> ReceivedMessage:
     return message
 
 
+async def apply_quoted_message_fallback(
+    message: ReceivedMessage,
+    channel: EvolutionWhatsAppChannel | None = None,
+) -> ReceivedMessage:
+    if message.quoted_message_id:
+        _log_quoted_message_source(message, "payload_context_info")
+        return message
+    if not channel:
+        _log_quoted_message_source(message, "none")
+        return message
+    if not message.instance or not message.remote_jid:
+        _log_quoted_message_source(message, "none")
+        return message
+    if not hasattr(channel, "find_latest_outbound_message_id"):
+        _log_quoted_message_source(message, "none")
+        return message
+
+    reply_channel = _build_reply_channel(channel, message.instance)
+    if not reply_channel:
+        _log_quoted_message_source(message, "none")
+        return message
+
+    try:
+        message.quoted_message_id = await reply_channel.find_latest_outbound_message_id(
+            message.remote_jid
+        )
+        _log_quoted_message_source(
+            message,
+            "evolution_find_messages" if message.quoted_message_id else "none",
+        )
+    except Exception:
+        logger.warning(
+            t("channels.evolution.quoted_message_fallback_failed"),
+            message.instance,
+            message.remote_jid,
+            exc_info=True,
+        )
+    return message
+
+
+def _log_quoted_message_source(message: ReceivedMessage, source: str) -> None:
+    logger.info(
+        t("channels.evolution.quoted_message_id_resolved"),
+        message.instance,
+        message.remote_jid,
+        message.message_id,
+        message.quoted_message_id,
+        source,
+    )
+
+
 async def build_msg_queue_task(
     message: ReceivedMessage,
     *,
     channel: EvolutionWhatsAppChannel | None = None,
     http_client: httpx.AsyncClient | None = None,
+    resume_value: Any = None,
 ) -> MsgQueueTask | None:
     if not message.agent_id or not message.session_id:
         logger.warning(
@@ -187,6 +215,8 @@ async def log_inbound_message(
 ) -> None:
     received_message = EvolutionWhatsAppChannel().to_received_message(message)
     await enrich_received_message(received_message)
+    await apply_quoted_message_fallback(received_message, channel)
+
     if message_queue:
         task = await build_msg_queue_task(
             received_message,
@@ -194,6 +224,13 @@ async def log_inbound_message(
             http_client=http_client,
         )
         if task:
+            if received_message.quoted_message_id:
+                resumed = await message_queue.resume_interrupt(
+                    task.agent_id, received_message.quoted_message_id
+                )
+                if resumed:
+                    log_received_message(received_message)
+                    return
             await message_queue.enqueue(task)
     log_received_message(received_message)
 

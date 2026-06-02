@@ -4,7 +4,7 @@ import asyncio
 import inspect
 import logging
 import re
-from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable
 from os import getenv
 from time import monotonic
 from typing import Any
@@ -15,20 +15,19 @@ from dotenv import load_dotenv
 
 from backend.channels.base import CommunicationChannel
 from backend.channels.types import (
-    InteractiveButton,
-    InteractiveListSection,
     MediaType,
     ReceivedMessage,
     WhatsAppInboundMessage,
 )
 from backend.i18n import t
 
-
 load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-ReceiveMessageHandler = Callable[[str | None, str | None, str | None], Awaitable[None] | None]
+ReceiveMessageHandler = Callable[
+    [str | None, str | None, str | None], Awaitable[None] | None
+]
 
 
 class MessageDeduper:
@@ -87,66 +86,71 @@ class EvolutionWhatsAppChannel(CommunicationChannel):
     ) -> dict[str, Any]:
         if mediatype not in {"image", "video", "audio", "document"}:
             raise ValueError(t("channels.evolution.invalid_media_type"))
-        payload = {"number": number, "mediatype": mediatype, "media": media, **self._compact_options(options)}
-        return await self._post_instance("message/sendMedia", payload)
-
-    async def send_image(self, number: str, media: str, **options: Any) -> dict[str, Any]:
-        return await self.send_media(number, "image", media, **options)
-
-    async def send_video(self, number: str, media: str, **options: Any) -> dict[str, Any]:
-        return await self.send_media(number, "video", media, **options)
-
-    async def send_audio(self, number: str, media: str, **options: Any) -> dict[str, Any]:
-        return await self.send_media(number, "audio", media, **options)
-
-    async def send_document(self, number: str, media: str, **options: Any) -> dict[str, Any]:
-        return await self.send_media(number, "document", media, **options)
-
-    async def send_interactive_buttons(
-        self,
-        number: str,
-        title: str,
-        buttons: Sequence[InteractiveButton],
-        description: str | None = None,
-        **options: Any,
-    ) -> dict[str, Any]:
-        payload: dict[str, Any] = {
-            "number": number,
-            "title": title,
-            "buttons": [self._model_dump(button) for button in buttons],
-            **self._compact_options(options),
-        }
-        if description:
-            payload["description"] = description
-        return await self._post_instance("message/sendButtons", payload)
-
-    async def send_interactive_list(
-        self,
-        number: str,
-        title: str,
-        button_text: str,
-        footer_text: str,
-        sections: Sequence[InteractiveListSection],
-        **options: Any,
-    ) -> dict[str, Any]:
         payload = {
             "number": number,
-            "title": title,
-            "buttonText": button_text,
-            "footerText": footer_text,
-            "sections": [self._model_dump(section) for section in sections],
+            "mediatype": mediatype,
+            "media": media,
             **self._compact_options(options),
         }
-        return await self._post_instance("message/sendList", payload)
+        return await self._post_instance("message/sendMedia", payload)
 
-    async def mark_message_as_read(self, number: str, message_id: str) -> dict[str, Any]:
-        return await self._post_instance("chat/markMessageAsRead", {"number": number, "messageId": message_id})
+    async def send_image(
+        self, number: str, media: str, **options: Any
+    ) -> dict[str, Any]:
+        return await self.send_media(number, "image", media, **options)
+
+    async def send_video(
+        self, number: str, media: str, **options: Any
+    ) -> dict[str, Any]:
+        return await self.send_media(number, "video", media, **options)
+
+    async def send_audio(
+        self, number: str, media: str, **options: Any
+    ) -> dict[str, Any]:
+        return await self.send_media(number, "audio", media, **options)
+
+    async def send_document(
+        self, number: str, media: str, **options: Any
+    ) -> dict[str, Any]:
+        return await self.send_media(number, "document", media, **options)
+
+    async def mark_message_as_read(
+        self, number: str, message_id: str
+    ) -> dict[str, Any]:
+        return await self._post_instance(
+            "chat/markMessageAsRead", {"number": number, "messageId": message_id}
+        )
+
+    async def find_latest_outbound_message_id(self, remote_jid: str) -> str | None:
+        response = await self._post_instance(
+            "chat/findMessages",
+            {"where": {"key": {"remoteJid": remote_jid}}},
+        )
+        messages = self._extract_messages_from_response(response)
+        outbound_messages = [
+            item
+            for item in messages
+            if isinstance(item.get("key"), dict) and item["key"].get("fromMe") is True
+        ]
+        latest_message = max(
+            outbound_messages,
+            key=self._message_timestamp,
+            default=None,
+        )
+        if not latest_message:
+            return None
+
+        key = latest_message.get("key") if isinstance(latest_message.get("key"), dict) else {}
+        message_id = key.get("id") or latest_message.get("messageId") or latest_message.get("id")
+        return message_id if isinstance(message_id, str) else None
 
     async def ensure_message_listener_enabled(self) -> dict[str, Any]:
         payload = {"websocket": {"enabled": True, "events": ["MESSAGES_UPSERT"]}}
         return await self._post_instance("websocket/set", payload)
 
-    async def _post_instance(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+    async def _post_instance(
+        self, path: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
         if not self.whatsapp_instance:
             raise ValueError(t("channels.evolution.missing_whatsapp_instance"))
         if not self.whatsapp_key:
@@ -209,7 +213,9 @@ class EvolutionWhatsAppChannel(CommunicationChannel):
             raw=payload,
         )
 
-    async def handle_received_message(self, message: WhatsAppInboundMessage) -> ReceivedMessage:
+    async def handle_received_message(
+        self, message: WhatsAppInboundMessage
+    ) -> ReceivedMessage:
         received_message = self.to_received_message(message)
         if self._receive_message_handler:
             try:
@@ -230,7 +236,7 @@ class EvolutionWhatsAppChannel(CommunicationChannel):
         key = data.get("key") if isinstance(data.get("key"), dict) else {}
         remote_jid = self._extract_remote_jid(message)
         message_id = key.get("id") or data.get("messageId")
-        text_content = self._extract_text_content(data)
+        text_content, quoted_message_id = self._extract_text_content(data)
         interactive_content = self._extract_interactive_content(data)
         media_content = self._extract_media_content(data)
 
@@ -277,16 +283,21 @@ class EvolutionWhatsAppChannel(CommunicationChannel):
             has_text=has_text,
             has_media=has_media,
             media_url=media_url,
-            media_mimetype=media_content.get("media_mimetype") if media_content else None,
+            media_mimetype=(
+                media_content.get("media_mimetype") if media_content else None
+            ),
             media_caption=media_caption,
             file_name=file_name,
+            quoted_message_id=quoted_message_id,
             raw=message.raw,
         )
 
     def _extract_remote_jid(self, message: WhatsAppInboundMessage) -> str | None:
         data = message.data if isinstance(message.data, dict) else {}
         key = data.get("key") if isinstance(data.get("key"), dict) else {}
-        return key.get("remoteJid") or data.get("remoteJid") or message.raw.get("sender")
+        return (
+            key.get("remoteJid") or data.get("remoteJid") or message.raw.get("sender")
+        )
 
     def _extract_phone_no(self, remote_jid: str | None) -> str | None:
         if not remote_jid:
@@ -295,14 +306,21 @@ class EvolutionWhatsAppChannel(CommunicationChannel):
         phone_no = re.sub(r"\D", "", phone_part)
         return phone_no or None
 
-    def _extract_text_content(self, data: dict[str, Any]) -> str | None:
+    def _extract_text_content(
+        self, data: dict[str, Any]
+    ) -> tuple[str | None, str | None]:
         message = data.get("message") if isinstance(data.get("message"), dict) else {}
         extended_text = message.get("extendedTextMessage")
-        if isinstance(extended_text, dict) and extended_text.get("text"):
-            return extended_text["text"]
+        quoted_message_id: str | None = None
+        if isinstance(extended_text, dict):
+            context_info = extended_text.get("contextInfo")
+            if isinstance(context_info, dict):
+                quoted_message_id = context_info.get("stanzaId")
+            if extended_text.get("text"):
+                return extended_text["text"], quoted_message_id
         if message.get("conversation"):
-            return message["conversation"]
-        return data.get("text") or data.get("body")
+            return message["conversation"], quoted_message_id
+        return data.get("text") or data.get("body"), quoted_message_id
 
     def _extract_interactive_content(self, data: dict[str, Any]) -> str | None:
         message = data.get("message") if isinstance(data.get("message"), dict) else {}
@@ -327,7 +345,9 @@ class EvolutionWhatsAppChannel(CommunicationChannel):
 
         return None
 
-    def _extract_media_content(self, data: dict[str, Any]) -> dict[str, str | None] | None:
+    def _extract_media_content(
+        self, data: dict[str, Any]
+    ) -> dict[str, str | None] | None:
         message = data.get("message") if isinstance(data.get("message"), dict) else {}
         for content_type, key in (
             ("image", "imageMessage"),
@@ -338,7 +358,12 @@ class EvolutionWhatsAppChannel(CommunicationChannel):
             media = message.get(key)
             if not isinstance(media, dict):
                 continue
-            media_url = media.get("url") or media.get("mediaUrl") or media.get("media") or media.get("base64")
+            media_url = (
+                media.get("url")
+                or media.get("mediaUrl")
+                or media.get("media")
+                or media.get("base64")
+            )
             return {
                 "content_type": content_type,
                 "media_url": media_url,
@@ -352,7 +377,9 @@ class EvolutionWhatsAppChannel(CommunicationChannel):
         data = message.data if isinstance(message.data, dict) else {}
         key = data.get("key") if isinstance(data.get("key"), dict) else {}
         message_id = key.get("id")
-        remote_jid = key.get("remoteJid") or data.get("remoteJid") or message.raw.get("sender")
+        remote_jid = (
+            key.get("remoteJid") or data.get("remoteJid") or message.raw.get("sender")
+        )
 
         if message_id:
             return f"{message.instance}:{remote_jid}:{message_id}"
@@ -372,7 +399,43 @@ class EvolutionWhatsAppChannel(CommunicationChannel):
             "footer_text": "footerText",
             "button_text": "buttonText",
         }
-        return {aliases.get(key, key): value for key, value in options.items() if value is not None}
+        return {
+            aliases.get(key, key): value
+            for key, value in options.items()
+            if value is not None
+        }
+
+    def _extract_messages_from_response(self, response: Any) -> list[dict[str, Any]]:
+        if isinstance(response, list):
+            return [item for item in response if isinstance(item, dict)]
+        if not isinstance(response, dict):
+            return []
+
+        for key in ("messages", "data", "records"):
+            items = response.get(key)
+            if isinstance(items, list):
+                return [item for item in items if isinstance(item, dict)]
+            if isinstance(items, dict):
+                nested = self._extract_messages_from_response(items)
+                if nested:
+                    return nested
+        return []
+
+    def _message_timestamp(self, message: dict[str, Any]) -> float:
+        timestamp = (
+            message.get("messageTimestamp")
+            or message.get("messageTimestampMs")
+            or message.get("timestamp")
+            or message.get("createdAt")
+        )
+        if isinstance(timestamp, int | float):
+            return float(timestamp)
+        if isinstance(timestamp, str):
+            try:
+                return float(timestamp)
+            except ValueError:
+                return 0
+        return 0
 
     def _model_dump(self, model: Any) -> dict[str, Any]:
         if hasattr(model, "model_dump"):
