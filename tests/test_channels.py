@@ -168,6 +168,34 @@ async def test_find_latest_outbound_message_id_uses_latest_from_me_message():
 
 
 @pytest.mark.asyncio
+async def test_find_message_quoted_message_id_reads_stored_inbound_context():
+    http_client = FakeHttpClient(
+        payload={
+            "messages": {
+                "records": [
+                    {
+                        "key": {"id": "reply-msg", "fromMe": False},
+                        "contextInfo": {"stanzaId": "quoted-msg"},
+                    }
+                ]
+            }
+        }
+    )
+    channel = make_channel(http_client=http_client)
+
+    message_id = await channel.find_message_quoted_message_id("reply-msg")
+
+    assert message_id == "quoted-msg"
+    assert http_client.posts == [
+        {
+            "url": "http://evolution.test/chat/findMessages/agent-instance",
+            "headers": {"apikey": "instance-key"},
+            "json": {"where": {"key": {"id": "reply-msg"}}},
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_listen_messages_uses_global_root_namespace_and_keeps_instance():
     socket = FakeSocketClient()
     channel = make_channel(socket_factory=lambda: socket)
@@ -237,6 +265,21 @@ def test_to_received_message_extracts_extended_text():
 
     assert message.content_type == "text"
     assert message.content == "extended hello"
+
+
+def test_to_received_message_extracts_top_level_quoted_message_id():
+    channel = make_channel()
+    raw = inbound(
+        {
+            "key": {"remoteJid": "85297548257@s.whatsapp.net", "id": "msg-1"},
+            "message": {"conversation": "ok"},
+            "contextInfo": {"stanzaId": "quoted-msg"},
+        }
+    )
+
+    message = channel.to_received_message(channel._inbound_message(raw))
+
+    assert message.quoted_message_id == "quoted-msg"
 
 
 def test_to_received_message_extracts_interactive_responses():

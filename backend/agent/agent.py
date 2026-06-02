@@ -331,12 +331,11 @@ class Agent:
                 if graph_node:
                     previous_graph_node = str(graph_node)
 
-                if graph_node == "pre_assign_task_node":
-                    continue
+                suppress_node_content = graph_node == "pre_assign_task_node"
 
                 if isinstance(msg, (AIMessage, AIMessageChunk)):
                     reasoning_content = msg.additional_kwargs.get("reasoning_content")
-                    if reasoning_content:
+                    if reasoning_content and not suppress_node_content:
                         logger.debug(
                             t("agent.chunk_received"),
                             step_id,
@@ -394,6 +393,11 @@ class Agent:
                                 timestamp=time.time(),
                             )
 
+                    message_text_done = (
+                        msg.additional_kwargs.get("text_done")
+                        or isinstance(msg, AIMessage)
+                        and not isinstance(msg, AIMessageChunk)
+                    )
                     if msg.content:
                         content = (
                             msg.content
@@ -407,22 +411,31 @@ class Agent:
                             "content",
                             len(content),
                         )
+                        if suppress_node_content:
+                            if message_text_done:
+                                yield StreamChunk(
+                                    chunk_type="text_end",
+                                    timestamp=time.time(),
+                                )
+                            continue
+
                         yield StreamChunk(
                             chunk_type="content",
                             content=content,
                             timestamp=time.time(),
                         )
                         pending_text_end = True
-                        if (
-                            msg.additional_kwargs.get("text_done")
-                            or isinstance(msg, AIMessage)
-                            and not isinstance(msg, AIMessageChunk)
-                        ):
+                        if message_text_done:
                             pending_text_end = False
                             yield StreamChunk(
                                 chunk_type="text_end",
                                 timestamp=time.time(),
                             )
+                    elif suppress_node_content and message_text_done:
+                        yield StreamChunk(
+                            chunk_type="text_end",
+                            timestamp=time.time(),
+                        )
                 elif isinstance(msg, ToolMessage):
                     content = (
                         msg.content

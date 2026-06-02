@@ -144,6 +144,18 @@ class EvolutionWhatsAppChannel(CommunicationChannel):
         message_id = key.get("id") or latest_message.get("messageId") or latest_message.get("id")
         return message_id if isinstance(message_id, str) else None
 
+    async def find_message_quoted_message_id(self, message_id: str) -> str | None:
+        response = await self._post_instance(
+            "chat/findMessages",
+            {"where": {"key": {"id": message_id}}},
+        )
+        messages = self._extract_messages_from_response(response)
+        for item in messages:
+            quoted_message_id = self._extract_quoted_message_id(item)
+            if quoted_message_id:
+                return quoted_message_id
+        return None
+
     async def ensure_message_listener_enabled(self) -> dict[str, Any]:
         payload = {"websocket": {"enabled": True, "events": ["MESSAGES_UPSERT"]}}
         return await self._post_instance("websocket/set", payload)
@@ -311,16 +323,29 @@ class EvolutionWhatsAppChannel(CommunicationChannel):
     ) -> tuple[str | None, str | None]:
         message = data.get("message") if isinstance(data.get("message"), dict) else {}
         extended_text = message.get("extendedTextMessage")
-        quoted_message_id: str | None = None
+        quoted_message_id = self._extract_quoted_message_id(data)
         if isinstance(extended_text, dict):
-            context_info = extended_text.get("contextInfo")
-            if isinstance(context_info, dict):
-                quoted_message_id = context_info.get("stanzaId")
             if extended_text.get("text"):
                 return extended_text["text"], quoted_message_id
         if message.get("conversation"):
             return message["conversation"], quoted_message_id
         return data.get("text") or data.get("body"), quoted_message_id
+
+    def _extract_quoted_message_id(self, data: dict[str, Any]) -> str | None:
+        context_candidates: list[Any] = [data.get("contextInfo")]
+        message = data.get("message") if isinstance(data.get("message"), dict) else {}
+        context_candidates.append(message.get("contextInfo"))
+        extended_text = message.get("extendedTextMessage")
+        if isinstance(extended_text, dict):
+            context_candidates.append(extended_text.get("contextInfo"))
+
+        for context_info in context_candidates:
+            if not isinstance(context_info, dict):
+                continue
+            stanza_id = context_info.get("stanzaId")
+            if isinstance(stanza_id, str) and stanza_id:
+                return stanza_id
+        return None
 
     def _extract_interactive_content(self, data: dict[str, Any]) -> str | None:
         message = data.get("message") if isinstance(data.get("message"), dict) else {}

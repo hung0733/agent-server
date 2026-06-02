@@ -5,6 +5,7 @@ import pytest
 from backend.channels import EvolutionWhatsAppChannel
 from backend.channels import evolution_handler
 from backend.channels.evolution_handler import (
+    WhatsAppMsgQueueTask,
     build_msg_queue_task,
     extract_message_metadata,
     log_inbound_message,
@@ -109,8 +110,8 @@ async def test_log_inbound_message_keeps_existing_quoted_message_id(monkeypatch)
     info_calls = []
 
     class FakeChannel:
-        async def find_latest_outbound_message_id(self, remote_jid):
-            fallback_calls.append(remote_jid)
+        async def find_message_quoted_message_id(self, message_id):
+            fallback_calls.append(message_id)
             return "fallback-msg"
 
     async def resolve_agent_session(message):
@@ -157,15 +158,15 @@ async def test_log_inbound_message_keeps_existing_quoted_message_id(monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_log_inbound_message_falls_back_to_latest_outbound_message_id(monkeypatch):
+async def test_log_inbound_message_falls_back_to_stored_inbound_quoted_message_id(monkeypatch):
     queue = FakeQueue()
     captured_messages = []
     info_calls = []
 
     class FakeChannel:
-        async def find_latest_outbound_message_id(self, remote_jid):
-            assert remote_jid == "85298765432@s.whatsapp.net"
-            return "bot-msg-2"
+        async def find_message_quoted_message_id(self, message_id):
+            assert message_id == "msg-1"
+            return "quoted-msg-1"
 
     async def resolve_agent_session(message):
         return "agent-123", "default-123"
@@ -193,13 +194,13 @@ async def test_log_inbound_message_falls_back_to_latest_outbound_message_id(monk
         channel=FakeChannel(),
     )
 
-    assert captured_messages[0].quoted_message_id == "bot-msg-2"
+    assert captured_messages[0].quoted_message_id == "quoted-msg-1"
     assert info_calls[0][1:] == (
         "sales-agent",
         "85298765432@s.whatsapp.net",
         "msg-1",
-        "bot-msg-2",
-        "evolution_find_messages",
+        "quoted-msg-1",
+        "evolution_find_message",
     )
     assert len(queue.tasks) == 1
 
@@ -211,7 +212,7 @@ async def test_log_inbound_message_keeps_enqueue_when_quoted_fallback_empty(monk
     info_calls = []
 
     class FakeChannel:
-        async def find_latest_outbound_message_id(self, remote_jid):
+        async def find_message_quoted_message_id(self, message_id):
             return None
 
     async def resolve_agent_session(message):
@@ -506,6 +507,45 @@ async def test_log_inbound_message_task_callback_sends_tool_summary_as_separate_
 
 
 @pytest.mark.asyncio
+async def test_whatsapp_task_callback_sends_assign_task_tool_before_interrupt_message():
+    sent_messages = []
+
+    class FakeChannel:
+        async def send_text(self, number, text, **options):
+            sent_messages.append((number, text, options))
+            return {"key": {"id": f"sent-{len(sent_messages)}"}}
+
+    task = WhatsAppMsgQueueTask(
+        message="建立 task",
+        agent_id="agent-123",
+        session_id="default-123",
+        channel=FakeChannel(),
+        phone_no="85298765432",
+    )
+
+    await task.callback(StreamChunk(chunk_type="tool", content="assign_task"))
+    await task.callback(StreamChunk(chunk_type="text_end"))
+    await task.callback(
+        StreamChunk(
+            chunk_type="interrupt",
+            data={
+                "type": "human_review",
+                "message": "我準備建立以下任務，請確認：\n\n任務名稱：Task tracker\n目標：Create root task tracking",
+            },
+        )
+    )
+
+    assert sent_messages == [
+        ("85298765432", "🔧 已調用工具：assign_task\n", {}),
+        (
+            "85298765432",
+            "我準備建立以下任務，請確認：\n\n任務名稱：Task tracker\n目標：Create root task tracking",
+            {},
+        ),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_log_inbound_message_done_fallback_sends_tool_summary_without_response_text(monkeypatch):
     sent_messages = []
 
@@ -589,9 +629,7 @@ async def test_log_inbound_message_replies_with_inbound_instance(monkeypatch):
         {
             "url": "http://evolution.test/chat/findMessages/Moss",
             "headers": {"apikey": "global-key"},
-            "json": {
-                "where": {"key": {"remoteJid": "85298765432@s.whatsapp.net"}}
-            },
+            "json": {"where": {"key": {"id": "msg-1"}}},
         },
         {
             "url": "http://evolution.test/message/sendText/Moss",

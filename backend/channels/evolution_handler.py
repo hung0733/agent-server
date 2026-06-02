@@ -138,10 +138,10 @@ async def apply_quoted_message_fallback(
     if not channel:
         _log_quoted_message_source(message, "none")
         return message
-    if not message.instance or not message.remote_jid:
+    if not message.instance or not message.message_id:
         _log_quoted_message_source(message, "none")
         return message
-    if not hasattr(channel, "find_latest_outbound_message_id"):
+    if not hasattr(channel, "find_message_quoted_message_id"):
         _log_quoted_message_source(message, "none")
         return message
 
@@ -151,12 +151,12 @@ async def apply_quoted_message_fallback(
         return message
 
     try:
-        message.quoted_message_id = await reply_channel.find_latest_outbound_message_id(
-            message.remote_jid
+        message.quoted_message_id = await reply_channel.find_message_quoted_message_id(
+            message.message_id
         )
         _log_quoted_message_source(
             message,
-            "evolution_find_messages" if message.quoted_message_id else "none",
+            "evolution_find_message" if message.quoted_message_id else "none",
         )
     except Exception:
         logger.warning(

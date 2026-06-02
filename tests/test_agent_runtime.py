@@ -963,6 +963,25 @@ class FakeInterruptGraph:
         yield (
             "messages",
             (
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": "assign_task",
+                            "args": {
+                                "task_name": "Task tracker",
+                                "goal": "Create root task tracking",
+                            },
+                            "id": "call-1",
+                        }
+                    ],
+                ),
+                {"langgraph_node": "chat"},
+            ),
+        )
+        yield (
+            "messages",
+            (
                 approval_message,
                 {"langgraph_node": "pre_assign_task_node"},
             ),
@@ -1203,11 +1222,12 @@ async def test_agent_proc_send_streams_langgraph_interrupt_update(monkeypatch):
     ]
 
     assert [chunk.chunk_type for chunk in chunks] == [
-        "content",
+        "tool",
         "text_end",
         "interrupt",
     ]
-    assert chunks[0].content == "請確認任務。"
+    assert chunks[0].content == "assign_task"
+    assert chunks[1].content is None
     assert chunks[2].data == {"type": "human_review", "message": "請確認任務。"}
 
 
