@@ -1,6 +1,14 @@
 from backend.dto.agent import AgentCreate, AgentRead, AgentUpdate
 from backend.dto.agent_msg_hist import AgentMsgHistCreate, AgentMsgHistRead, AgentMsgHistUpdate
-from backend.dto.assigned_task import AssignedTaskCreate, AssignedTaskRead, AssignedTaskStepCreate, AssignedTaskStepRead
+from backend.dto.agent_type import AgentTypeCreate, AgentTypeRead, AgentTypeUpdate
+from backend.dto.assigned_task import (
+    AssignedTaskCreate,
+    AssignedTaskRead,
+    AssignedTaskStepCreate,
+    AssignedTaskStepProcessLogCreate,
+    AssignedTaskStepProcessLogRead,
+    AssignedTaskStepRead,
+)
 from backend.dto.llm_endpoint import LlmEndpointCreate, LlmEndpointRead, LlmEndpointUpdate
 from backend.dto.llm_group import LlmGroupCreate, LlmGroupRead, LlmGroupUpdate
 from backend.dto.llm_level import LlmLevelCreate, LlmLevelRead, LlmLevelUpdate
@@ -17,10 +25,15 @@ __all__ = [
     "AgentSessionCreate",
     "AgentSessionRead",
     "AgentSessionUpdate",
+    "AgentTypeCreate",
+    "AgentTypeRead",
+    "AgentTypeUpdate",
     "AgentUpdate",
     "AssignedTaskCreate",
     "AssignedTaskRead",
     "AssignedTaskStepCreate",
+    "AssignedTaskStepProcessLogCreate",
+    "AssignedTaskStepProcessLogRead",
     "AssignedTaskStepRead",
     "LlmEndpointCreate",
     "LlmEndpointRead",

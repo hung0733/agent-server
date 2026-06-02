@@ -23,6 +23,8 @@ from backend.graph.graph_store import GraphStore
 from backend.i18n import t
 from backend.queues.message_queue import MessageQueue
 from backend.queues.msg_queue_handle import handle_agent_message
+from backend.queues.task_queue import TaskQueue
+from backend.queues.task_queue_handle import handle_assigned_task_step
 from backend.tdai_memory import MemoryManager
 from backend.tdai_memory.models import CompletedTurn, ConversationMessage
 from backend.utils.tools import Tools
@@ -31,6 +33,8 @@ from logger_setup import setup_logging
 logger = logging.getLogger(__name__)
 PROJECT_ROOT = Path(__file__).resolve().parent
 DEFAULT_MESSAGE_QUEUE_MAX_CONCURRENCY = 4
+DEFAULT_TASK_QUEUE_MAX_CONCURRENCY = 4
+DEFAULT_TASK_QUEUE_POLL_INTERVAL_SECONDS = 5
 
 
 def get_message_queue_max_concurrency() -> int:
@@ -47,6 +51,38 @@ def get_message_queue_max_concurrency() -> int:
         raise ValueError(t("main.message_queue_max_concurrency_invalid"))
 
     return max_concurrency
+
+
+def get_task_queue_max_concurrency() -> int:
+    value = os.getenv("TASK_QUEUE_MAX_CONCURRENCY")
+    if value is None or value == "":
+        return DEFAULT_TASK_QUEUE_MAX_CONCURRENCY
+
+    try:
+        max_concurrency = int(value)
+    except ValueError as exc:
+        raise ValueError(t("main.task_queue_max_concurrency_invalid")) from exc
+
+    if max_concurrency < 1:
+        raise ValueError(t("main.task_queue_max_concurrency_invalid"))
+
+    return max_concurrency
+
+
+def get_task_queue_poll_interval_seconds() -> float:
+    value = os.getenv("TASK_QUEUE_POLL_INTERVAL_SECONDS")
+    if value is None or value == "":
+        return DEFAULT_TASK_QUEUE_POLL_INTERVAL_SECONDS
+
+    try:
+        poll_interval = float(value)
+    except ValueError as exc:
+        raise ValueError(t("main.task_queue_poll_interval_invalid")) from exc
+
+    if poll_interval <= 0:
+        raise ValueError(t("main.task_queue_poll_interval_invalid"))
+
+    return poll_interval
 
 
 async def check_database(db_engine: Any = engine) -> None:
@@ -124,7 +160,13 @@ async def main(
         handle_agent_message,
         max_concurrency=get_message_queue_max_concurrency(),
     )
+    task_queue = TaskQueue(
+        handle_assigned_task_step,
+        max_concurrency=get_task_queue_max_concurrency(),
+        poll_interval_seconds=get_task_queue_poll_interval_seconds(),
+    )
     message_queue.start()
+    task_queue.start()
     shutdown_event = shutdown_event or asyncio.Event()
     _install_signal_handlers(shutdown_event)
 
@@ -151,6 +193,7 @@ async def main(
         with suppress(asyncio.CancelledError):
             await shutdown_task
         await message_queue.stop()
+        await task_queue.stop()
         await channel.close()
         await memory_manager.destroy()
         await db_engine.dispose()

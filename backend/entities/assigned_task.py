@@ -44,15 +44,17 @@ class AssignedTaskStep(Base):
     step_id: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     task_id: Mapped[int] = mapped_column(ForeignKey("assigned_task.id"), nullable=False, index=True)
     parent_step_id: Mapped[int | None] = mapped_column(ForeignKey("assigned_task_step.id"), nullable=True, index=True)
-    step_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    agent_type_id: Mapped[int] = mapped_column(ForeignKey("agent_type.id"), nullable=False, index=True)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     goal: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(100), nullable=False)
     seq_no: Mapped[int] = mapped_column(Integer, nullable=False)
-    assign_agent_id: Mapped[int] = mapped_column(ForeignKey("agent.id"), nullable=False, index=True)
+    assign_agent_id: Mapped[int | None] = mapped_column(ForeignKey("agent.id"), nullable=True, index=True)
     session_id: Mapped[int | None] = mapped_column(ForeignKey("session.id"), nullable=True, index=True)
     output_html: Mapped[str | None] = mapped_column(Text)
     output_json: Mapped[str | None] = mapped_column(Text)
+    next_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    processing_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     create_dt: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     update_dt: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -63,5 +65,25 @@ class AssignedTaskStep(Base):
 
     task = relationship("AssignedTask", back_populates="steps")
     parent_step = relationship("AssignedTaskStep", remote_side=[id])
+    agent_type_ref = relationship("AgentType", back_populates="task_steps")
     assign_agent = relationship("Agent", foreign_keys=[assign_agent_id])
     session = relationship("AgentSession")
+
+    @property
+    def agent_type(self) -> str:
+        return self.agent_type_ref.code if self.agent_type_ref else ""
+
+
+class AssignedTaskStepProcessLog(Base):
+    __tablename__ = "assigned_task_step_process_log"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    step_id: Mapped[int] = mapped_column(ForeignKey("assigned_task_step.id"), nullable=False, index=True)
+    attempt_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    finished_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    log: Mapped[str | None] = mapped_column(Text)
+    create_dt: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    step = relationship("AssignedTaskStep")

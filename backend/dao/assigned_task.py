@@ -1,10 +1,11 @@
 from datetime import datetime
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.orm import selectinload
 
+from backend.dao.agent_type import AgentTypeDAO
 from backend.dao.base import BaseDAO
-from backend.entities.assigned_task import AssignedTask, AssignedTaskStep
+from backend.entities.assigned_task import AssignedTask, AssignedTaskStep, AssignedTaskStepProcessLog
 from backend.i18n import t
 
 
@@ -49,7 +50,11 @@ class AssignedTaskDAO(BaseDAO[AssignedTask]):
     ) -> AssignedTask | None:
         stmt = (
             select(AssignedTask)
-            .options(selectinload(AssignedTask.steps))
+            .options(
+                selectinload(AssignedTask.steps).selectinload(
+                    AssignedTaskStep.agent_type_ref
+                )
+            )
             .where(
                 AssignedTask.user_id == user_id,
                 AssignedTask.responsible_agent_id == agent_id,
@@ -62,43 +67,149 @@ class AssignedTaskDAO(BaseDAO[AssignedTask]):
         self,
         *,
         task_db_id: int,
-        assign_agent_id: int,
         step_ids: tuple[str, str, str],
     ) -> list[AssignedTaskStep]:
+        agent_type_dao = AgentTypeDAO(self.session)
+        brainstormer = await agent_type_dao.get_or_create_by_code("brainstormer")
+        planner = await agent_type_dao.get_or_create_by_code("planner")
+        reviewer = await agent_type_dao.get_or_create_by_code("reviewer")
         steps = [
             AssignedTaskStep(
                 step_id=step_ids[0],
                 task_id=task_db_id,
-                step_type="brainstorm",
+                agent_type_id=brainstormer.id,
+                agent_type_ref=brainstormer,
                 title=t("tools.system.assign_task.step.brainstorm.title"),
                 goal=t("tools.system.assign_task.step.brainstorm.goal"),
                 status="pending",
                 seq_no=1,
-                assign_agent_id=assign_agent_id,
             ),
             AssignedTaskStep(
                 step_id=step_ids[1],
                 task_id=task_db_id,
-                step_type="planning",
+                agent_type_id=planner.id,
+                agent_type_ref=planner,
                 title=t("tools.system.assign_task.step.planning.title"),
                 goal=t("tools.system.assign_task.step.planning.goal"),
                 status="blocked",
                 seq_no=2,
-                assign_agent_id=assign_agent_id,
             ),
             AssignedTaskStep(
                 step_id=step_ids[2],
                 task_id=task_db_id,
-                step_type="review",
+                agent_type_id=reviewer.id,
+                agent_type_ref=reviewer,
                 title=t("tools.system.assign_task.step.review.title"),
                 goal=t("tools.system.assign_task.step.review.goal"),
                 status="blocked",
                 seq_no=3,
-                assign_agent_id=assign_agent_id,
             ),
         ]
         self.session.add_all(steps)
         await self.session.flush()
         for step in steps:
             await self.session.refresh(step)
+        steps[0].agent_type_ref = brainstormer
+        steps[1].agent_type_ref = planner
+        steps[2].agent_type_ref = reviewer
         return steps
+
+    async def list_due_pending_steps(
+        self,
+        *,
+        now: datetime,
+        limit: int,
+        excluded_responsible_agent_ids: set[int] | None = None,
+    ) -> list[tuple[AssignedTaskStep, int]]:
+        stmt = (
+            select(AssignedTaskStep, AssignedTask.responsible_agent_id)
+            .join(AssignedTask, AssignedTaskStep.task_id == AssignedTask.id)
+            .options(
+                selectinload(AssignedTaskStep.task),
+                selectinload(AssignedTaskStep.agent_type_ref),
+            )
+            .where(
+                AssignedTaskStep.status == "pending",
+                AssignedTaskStep.processing_started_at.is_(None),
+                or_(
+                    AssignedTaskStep.next_run_at.is_(None),
+                    AssignedTaskStep.next_run_at <= now,
+                ),
+            )
+            .order_by(AssignedTaskStep.create_dt.asc(), AssignedTaskStep.seq_no.asc())
+            .limit(limit)
+        )
+        if excluded_responsible_agent_ids:
+            stmt = stmt.where(
+                AssignedTask.responsible_agent_id.not_in(excluded_responsible_agent_ids)
+            )
+
+        rows = (await self.session.execute(stmt)).all()
+        return [(row[0], row[1]) for row in rows]
+
+    async def mark_step_processing(self, *, step_db_id: int, now: datetime) -> bool:
+        stmt = (
+            update(AssignedTaskStep)
+            .where(
+                AssignedTaskStep.id == step_db_id,
+                AssignedTaskStep.status == "pending",
+                AssignedTaskStep.processing_started_at.is_(None),
+                or_(
+                    AssignedTaskStep.next_run_at.is_(None),
+                    AssignedTaskStep.next_run_at <= now,
+                ),
+            )
+            .values(processing_started_at=now)
+            .returning(AssignedTaskStep.id)
+        )
+        return (await self.session.scalar(stmt)) is not None
+
+    async def clear_step_processing(
+        self,
+        *,
+        step_db_id: int,
+        next_run_at: datetime | None = None,
+    ) -> None:
+        stmt = (
+            update(AssignedTaskStep)
+            .where(AssignedTaskStep.id == step_db_id)
+            .values(processing_started_at=None, next_run_at=next_run_at)
+        )
+        await self.session.execute(stmt)
+        await self.session.flush()
+
+    async def count_failed_process_logs(self, *, step_db_id: int) -> int:
+        stmt = select(func.count()).select_from(AssignedTaskStepProcessLog).where(
+            AssignedTaskStepProcessLog.step_id == step_db_id,
+            AssignedTaskStepProcessLog.status == "failed",
+        )
+        return int(await self.session.scalar(stmt) or 0)
+
+    async def count_process_logs(self, *, step_db_id: int) -> int:
+        stmt = select(func.count()).select_from(AssignedTaskStepProcessLog).where(
+            AssignedTaskStepProcessLog.step_id == step_db_id,
+        )
+        return int(await self.session.scalar(stmt) or 0)
+
+    async def create_process_log(
+        self,
+        *,
+        step_db_id: int,
+        attempt_no: int,
+        status: str,
+        started_at: datetime,
+        finished_at: datetime,
+        log: str | None,
+    ) -> AssignedTaskStepProcessLog:
+        item = AssignedTaskStepProcessLog(
+            step_id=step_db_id,
+            attempt_no=attempt_no,
+            status=status,
+            started_at=started_at,
+            finished_at=finished_at,
+            log=log,
+        )
+        self.session.add(item)
+        await self.session.flush()
+        await self.session.refresh(item)
+        return item

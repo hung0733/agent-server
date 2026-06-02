@@ -40,8 +40,8 @@ class FakeAssignedTaskDAO:
         type(self).created_data = data
         return SimpleNamespace(id=99)
 
-    async def create_initial_steps(self, *, task_db_id, assign_agent_id, step_ids):
-        type(self).initial_steps_args = (task_db_id, assign_agent_id, step_ids)
+    async def create_initial_steps(self, *, task_db_id, step_ids):
+        type(self).initial_steps_args = (task_db_id, step_ids)
         return [
             SimpleNamespace(
                 step_id=step_ids[0],
@@ -96,7 +96,7 @@ class FakeAssignedTaskDAO:
             steps=[
                 SimpleNamespace(
                     step_id="step-1",
-                    step_type="brainstorm",
+                    agent_type="brainstormer",
                     title="Brainstorm",
                     goal="Plan",
                     status="pending",
@@ -228,9 +228,8 @@ async def test_assign_task_creates_root_task_and_initial_steps(monkeypatch):
     assert created_data.user_id == 123
     assert created_data.responsible_agent_id == 456
 
-    task_db_id, assign_agent_id, step_ids = FakeAssignedTaskDAO.initial_steps_args
+    task_db_id, step_ids = FakeAssignedTaskDAO.initial_steps_args
     assert task_db_id == 99
-    assert assign_agent_id == 456
     assert len(step_ids) == 3
     assert all(step_id.startswith("task_step-") for step_id in step_ids)
     assert all(len(step_id) == len("task_step-") + 36 for step_id in step_ids)

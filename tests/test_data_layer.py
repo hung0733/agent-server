@@ -46,8 +46,10 @@ load_dotenv()
 EXPECTED_TABLES = {
     "agent",
     "agent_msg_hist",
+    "agent_type",
     "assigned_task",
     "assigned_task_step",
+    "assigned_task_step_process_log",
     "llm_endpoint",
     "llm_group",
     "llm_level",
@@ -178,7 +180,7 @@ def test_dto_validation_and_from_attributes():
             "step_id": "step_abc123",
             "task_id": 1,
             "parent_step_id": None,
-            "step_type": "brainstorm",
+            "agent_type": "brainstormer",
             "title": "Brainstorm",
             "goal": "Collect requirements",
             "status": "pending",
@@ -253,12 +255,12 @@ async def test_dao_crud_happy_path(monkeypatch):
             )
             steps = await assigned_task_dao.create_initial_steps(
                 task_db_id=assigned_task.id,
-                assign_agent_id=agent.id,
                 step_ids=("step_brainstorm", "step_planning", "step_review"),
             )
             assert await assigned_task_dao.get_by_task_id("task_abc123") == assigned_task
             assert [step.step_id for step in steps] == ["step_brainstorm", "step_planning", "step_review"]
-            assert [step.step_type for step in steps] == ["brainstorm", "planning", "review"]
+            assert [step.agent_type for step in steps] == ["brainstormer", "planner", "reviewer"]
+            assert [step.assign_agent_id for step in steps] == [None, None, None]
             assert [step.status for step in steps] == ["pending", "blocked", "blocked"]
             assert [step.title for step in steps] == ["腦力激盪", "規劃", "審核"]
             assert [step.goal for step in steps] == [

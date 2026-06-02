@@ -3,6 +3,7 @@ from sqlalchemy.orm import aliased
 
 from backend.dao.base import BaseDAO
 from backend.entities.agent import Agent
+from backend.entities.agent_type import AgentType
 from backend.entities.session import AgentSession
 from backend.entities.user_acc import UserAcc
 
@@ -26,6 +27,7 @@ class AgentSessionDAO(BaseDAO[AgentSession]):
     ) -> tuple[int, int, int, str, str, str, str, str, int | None, str] | None:
         recv_agent = aliased(Agent)
         sender_agent = aliased(Agent)
+        recv_agent_type = aliased(AgentType)
         stmt = (
             select(
                 UserAcc.id,
@@ -34,12 +36,13 @@ class AgentSessionDAO(BaseDAO[AgentSession]):
                 UserAcc.user_id,
                 recv_agent.agent_id,
                 AgentSession.session_id,
-                recv_agent.agent_type,
+                recv_agent_type.code,
                 recv_agent.name,
                 AgentSession.sender_agent_id,
                 func.coalesce(sender_agent.name, UserAcc.name),
             )
             .join(recv_agent, AgentSession.recv_agent_id == recv_agent.id)
+            .join(recv_agent_type, recv_agent.agent_type_id == recv_agent_type.id)
             .outerjoin(sender_agent, AgentSession.sender_agent_id == sender_agent.id)
             .join(UserAcc, recv_agent.user_id == UserAcc.id)
             .where(

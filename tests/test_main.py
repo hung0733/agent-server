@@ -66,6 +66,8 @@ async def test_main_starts_message_queue_listener_and_cleans_up(monkeypatch):
     graph_calls = []
     memory_calls = []
     monkeypatch.delenv("MESSAGE_QUEUE_MAX_CONCURRENCY", raising=False)
+    monkeypatch.delenv("TASK_QUEUE_MAX_CONCURRENCY", raising=False)
+    monkeypatch.delenv("TASK_QUEUE_POLL_INTERVAL_SECONDS", raising=False)
     monkeypatch.setattr(main_module, "_install_signal_handlers", lambda shutdown_event: None)
 
     class FakeMemoryManager:
@@ -87,6 +89,21 @@ async def test_main_starts_message_queue_listener_and_cleans_up(monkeypatch):
         async def stop(self):
             queue_calls.append(("stop", self))
 
+    class FakeTaskQueue:
+        def __init__(self, handler, max_concurrency, poll_interval_seconds):
+            self.handler = handler
+            self.max_concurrency = max_concurrency
+            self.poll_interval_seconds = poll_interval_seconds
+            queue_calls.append(
+                ("task_init", handler, max_concurrency, poll_interval_seconds)
+            )
+
+        def start(self):
+            queue_calls.append(("task_start", self))
+
+        async def stop(self):
+            queue_calls.append(("task_stop", self))
+
     async def run_listener(received_channel, message_queue=None):
         listener_calls.append((received_channel, message_queue))
 
@@ -101,6 +118,7 @@ async def test_main_starts_message_queue_listener_and_cleans_up(monkeypatch):
             graph_calls.append("close")
 
     monkeypatch.setattr(main_module, "MessageQueue", FakeQueue)
+    monkeypatch.setattr(main_module, "TaskQueue", FakeTaskQueue)
     monkeypatch.setattr(main_module, "run_whatsapp_listener", run_listener)
     monkeypatch.setattr(main_module.GraphStore, "init_langgraph_checkpointer", init_checkpointer)
     monkeypatch.setattr(main_module.GraphStore, "pool", FakePool())
@@ -115,12 +133,16 @@ async def test_main_starts_message_queue_listener_and_cleans_up(monkeypatch):
     )
 
     queue = listener_calls[0][1]
+    task_queue = queue_calls[3][1]
     assert setup_calls == [True]
     assert migration_calls == [True]
     assert queue_calls == [
         ("init", main_module.handle_agent_message, 4),
+        ("task_init", main_module.handle_assigned_task_step, 4, 5),
         ("start", queue),
+        ("task_start", task_queue),
         ("stop", queue),
+        ("task_stop", task_queue),
     ]
     assert listener_calls == [(channel, queue)]
     assert graph_calls == ["init", "close"]
@@ -134,6 +156,14 @@ def test_message_queue_max_concurrency_reads_env(monkeypatch):
     monkeypatch.setenv("MESSAGE_QUEUE_MAX_CONCURRENCY", "6")
 
     assert main_module.get_message_queue_max_concurrency() == 6
+
+
+def test_task_queue_config_reads_env(monkeypatch):
+    monkeypatch.setenv("TASK_QUEUE_MAX_CONCURRENCY", "7")
+    monkeypatch.setenv("TASK_QUEUE_POLL_INTERVAL_SECONDS", "2.5")
+
+    assert main_module.get_task_queue_max_concurrency() == 7
+    assert main_module.get_task_queue_poll_interval_seconds() == 2.5
 
 
 @pytest.mark.asyncio

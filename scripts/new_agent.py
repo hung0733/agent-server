@@ -24,6 +24,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from backend.db.session import async_session_factory, engine
+from backend.dao.agent_type import AgentTypeDAO
 from backend.entities import Agent, AgentSession, LlmGroup, UserAcc
 from backend.i18n import t
 
@@ -92,13 +93,14 @@ async def create_agent_in_db(
 ) -> int:
     """在資料庫中創建 Agent 記錄。回傳 agent.id（資料庫主鍵）。"""
     async with async_session_factory() as session:
+        agent_type_row = await AgentTypeDAO(session).get_or_create_by_code(agent_type)
         agent = Agent(
             user_id=user_db_id,
             agent_id=agent_id,
             name=name,
             is_active=True,
             llm_group_id=llm_group_id,
-            agent_type=agent_type,
+            agent_type_id=agent_type_row.id,
         )
         session.add(agent)
         await session.flush()

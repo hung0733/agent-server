@@ -108,8 +108,8 @@ class FakeAssignedTaskDAO:
         type(self).created_data = data
         return SimpleNamespace(id=99)
 
-    async def create_initial_steps(self, *, task_db_id, assign_agent_id, step_ids):
-        type(self).initial_steps_args = (task_db_id, assign_agent_id, step_ids)
+    async def create_initial_steps(self, *, task_db_id, step_ids):
+        type(self).initial_steps_args = (task_db_id, step_ids)
         return [
             SimpleNamespace(step_id=step_ids[0], title="brainstorm", status="pending"),
             SimpleNamespace(step_id=step_ids[1], title="planning", status="blocked"),
@@ -675,9 +675,8 @@ async def test_bulter_assign_task_node_persists_after_approval(monkeypatch):
     assert created_data.task_name == "Task tracker"
     assert created_data.goal == "Create root task tracking"
     assert created_data.status == "brainstorm_pending"
-    task_db_id, assign_agent_id, step_ids = FakeAssignedTaskDAO.initial_steps_args
+    task_db_id, step_ids = FakeAssignedTaskDAO.initial_steps_args
     assert task_db_id == 99
-    assert assign_agent_id == 456
     assert len(step_ids) == 3
     assert result["human_review_node"] is None
     assert result["human_review_data"] is None

@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel, ConfigDict
 
 
@@ -22,18 +24,34 @@ class AssignedTaskStepCreate(BaseModel):
     step_id: str
     task_id: int
     parent_step_id: int | None = None
-    step_type: str
+    agent_type_id: int | None = None
+    agent_type: str | None = None
     title: str
     goal: str
     status: str
     seq_no: int
-    assign_agent_id: int
+    assign_agent_id: int | None = None
     session_id: int | None = None
     output_html: str | None = None
     output_json: str | None = None
 
 
 class AssignedTaskStepRead(AssignedTaskStepCreate):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+
+
+class AssignedTaskStepProcessLogCreate(BaseModel):
+    step_id: int
+    attempt_no: int
+    status: str
+    started_at: datetime
+    finished_at: datetime
+    log: str | None = None
+
+
+class AssignedTaskStepProcessLogRead(AssignedTaskStepProcessLogCreate):
     model_config = ConfigDict(from_attributes=True)
 
     id: int

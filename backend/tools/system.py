@@ -71,7 +71,7 @@ def _task_dict(task: Any, *, include_steps: bool = False) -> dict[str, Any]:
 def _step_dict(step: Any) -> dict[str, Any]:
     return {
         "step_id": step.step_id,
-        "step_type": step.step_type,
+        "agent_type": step.agent_type,
         "title": step.title,
         "goal": step.goal,
         "status": step.status,
@@ -141,7 +141,6 @@ async def assign_task(
         )
         step_rows = await dao.create_initial_steps(
             task_db_id=task_row.id,
-            assign_agent_id=agent_db_id,
             step_ids=step_ids,
         )
         await session.commit()

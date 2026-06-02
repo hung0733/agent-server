@@ -13,7 +13,7 @@ class Agent(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     llm_group_id: Mapped[int] = mapped_column(ForeignKey("llm_group.id"), nullable=False, index=True)
-    agent_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    agent_type_id: Mapped[int] = mapped_column(ForeignKey("agent_type.id"), nullable=False, index=True)
     is_sub_agent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     phone_no: Mapped[str | None] = mapped_column(String(50))
     whatsapp_key: Mapped[str | None] = mapped_column(String(1024))
@@ -21,6 +21,7 @@ class Agent(Base):
 
     user = relationship("UserAcc", back_populates="agents")
     llm_group = relationship("LlmGroup", back_populates="agents")
+    agent_type_ref = relationship("AgentType", back_populates="agents")
     recv_sessions = relationship(
         "AgentSession",
         back_populates="recv_agent",
@@ -31,3 +32,7 @@ class Agent(Base):
         back_populates="sender_agent",
         foreign_keys="AgentSession.sender_agent_id",
     )
+
+    @property
+    def agent_type(self) -> str:
+        return self.agent_type_ref.code if self.agent_type_ref else ""
