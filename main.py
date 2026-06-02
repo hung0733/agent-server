@@ -23,8 +23,12 @@ from backend.graph.graph_store import GraphStore
 from backend.i18n import t
 from backend.queues.message_queue import MessageQueue
 from backend.queues.msg_queue_handle import handle_agent_message
-from backend.queues.task_queue import TaskQueue
-from backend.queues.task_queue_handle import handle_assigned_task_step
+from backend.queues.task_queue import TaskQueue, TaskQueueStepStatus
+from backend.queues.task_queue_handle import (
+    handle_assigned_task_init_step,
+    handle_assigned_task_resume_step,
+    handle_assigned_task_send_step,
+)
 from backend.tdai_memory import MemoryManager
 from backend.tdai_memory.models import CompletedTurn, ConversationMessage
 from backend.utils.tools import Tools
@@ -161,7 +165,11 @@ async def main(
         max_concurrency=get_message_queue_max_concurrency(),
     )
     task_queue = TaskQueue(
-        handle_assigned_task_step,
+        {
+            TaskQueueStepStatus.INIT: handle_assigned_task_init_step,
+            TaskQueueStepStatus.SEND: handle_assigned_task_send_step,
+            TaskQueueStepStatus.RESUME: handle_assigned_task_resume_step,
+        },
         max_concurrency=get_task_queue_max_concurrency(),
         poll_interval_seconds=get_task_queue_poll_interval_seconds(),
     )

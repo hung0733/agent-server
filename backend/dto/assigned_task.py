@@ -47,7 +47,7 @@ class AssignedTaskStepProcessLogCreate(BaseModel):
     attempt_no: int
     status: str
     started_at: datetime
-    finished_at: datetime
+    finished_at: datetime | None = None
     log: str | None = None
 
 

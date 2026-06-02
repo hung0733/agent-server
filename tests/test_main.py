@@ -90,12 +90,12 @@ async def test_main_starts_message_queue_listener_and_cleans_up(monkeypatch):
             queue_calls.append(("stop", self))
 
     class FakeTaskQueue:
-        def __init__(self, handler, max_concurrency, poll_interval_seconds):
-            self.handler = handler
+        def __init__(self, handlers, max_concurrency, poll_interval_seconds):
+            self.handlers = handlers
             self.max_concurrency = max_concurrency
             self.poll_interval_seconds = poll_interval_seconds
             queue_calls.append(
-                ("task_init", handler, max_concurrency, poll_interval_seconds)
+                ("task_init", handlers, max_concurrency, poll_interval_seconds)
             )
 
         def start(self):
@@ -134,11 +134,16 @@ async def test_main_starts_message_queue_listener_and_cleans_up(monkeypatch):
 
     queue = listener_calls[0][1]
     task_queue = queue_calls[3][1]
+    task_handlers = {
+        main_module.TaskQueueStepStatus.INIT: main_module.handle_assigned_task_init_step,
+        main_module.TaskQueueStepStatus.SEND: main_module.handle_assigned_task_send_step,
+        main_module.TaskQueueStepStatus.RESUME: main_module.handle_assigned_task_resume_step,
+    }
     assert setup_calls == [True]
     assert migration_calls == [True]
     assert queue_calls == [
         ("init", main_module.handle_agent_message, 4),
-        ("task_init", main_module.handle_assigned_task_step, 4, 5),
+        ("task_init", task_handlers, 4, 5),
         ("start", queue),
         ("task_start", task_queue),
         ("stop", queue),

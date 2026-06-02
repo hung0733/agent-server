@@ -268,6 +268,29 @@ async def test_dao_crud_happy_path(monkeypatch):
                 "將已批准的 HTML 計劃轉換成可執行子步驟。",
                 "在開始執行前審核規劃輸出。",
             ]
+            started_at = datetime.now(timezone.utc)
+            process_log = await assigned_task_dao.create_process_log(
+                step_db_id=steps[0].id,
+                attempt_no=1,
+                status="processing",
+                started_at=started_at,
+                finished_at=None,
+                log=None,
+            )
+            assert process_log.finished_at is None
+            assert await assigned_task_dao.count_process_logs(step_db_id=steps[0].id) == 1
+
+            finished_at = datetime.now(timezone.utc)
+            await assigned_task_dao.finish_process_log(
+                process_log_db_id=process_log.id,
+                status="success",
+                finished_at=finished_at,
+                log="done",
+            )
+            await session.refresh(process_log)
+            assert process_log.status == "success"
+            assert process_log.finished_at == finished_at
+            assert process_log.log == "done"
 
             sys_endpoint = await endpoint_dao.create(
                 LlmEndpointCreate(
@@ -398,6 +421,7 @@ async def test_dao_crud_happy_path(monkeypatch):
 
             await session_dao.delete(user_to_agent_session)
             await session_dao.delete(agent_to_agent_session)
+            await session.delete(process_log)
             await assigned_task_dao.delete(assigned_task)
             await agent_dao.delete(updated_agent)
             assert await agent_dao.get_by_id(agent.id) is None

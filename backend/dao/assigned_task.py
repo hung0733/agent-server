@@ -119,18 +119,21 @@ class AssignedTaskDAO(BaseDAO[AssignedTask]):
         *,
         now: datetime,
         limit: int,
-        excluded_responsible_agent_ids: set[int] | None = None,
     ) -> list[tuple[AssignedTaskStep, int]]:
         stmt = (
             select(AssignedTaskStep, AssignedTask.responsible_agent_id)
             .join(AssignedTask, AssignedTaskStep.task_id == AssignedTask.id)
             .options(
-                selectinload(AssignedTaskStep.task),
+                selectinload(AssignedTaskStep.task).selectinload(
+                    AssignedTask.responsible_agent
+                ),
+                selectinload(AssignedTaskStep.task).selectinload(AssignedTask.session),
                 selectinload(AssignedTaskStep.agent_type_ref),
+                selectinload(AssignedTaskStep.assign_agent),
+                selectinload(AssignedTaskStep.session),
             )
             .where(
                 AssignedTaskStep.status == "pending",
-                AssignedTaskStep.processing_started_at.is_(None),
                 or_(
                     AssignedTaskStep.next_run_at.is_(None),
                     AssignedTaskStep.next_run_at <= now,
@@ -139,10 +142,6 @@ class AssignedTaskDAO(BaseDAO[AssignedTask]):
             .order_by(AssignedTaskStep.create_dt.asc(), AssignedTaskStep.seq_no.asc())
             .limit(limit)
         )
-        if excluded_responsible_agent_ids:
-            stmt = stmt.where(
-                AssignedTask.responsible_agent_id.not_in(excluded_responsible_agent_ids)
-            )
 
         rows = (await self.session.execute(stmt)).all()
         return [(row[0], row[1]) for row in rows]
@@ -198,7 +197,7 @@ class AssignedTaskDAO(BaseDAO[AssignedTask]):
         attempt_no: int,
         status: str,
         started_at: datetime,
-        finished_at: datetime,
+        finished_at: datetime | None,
         log: str | None,
     ) -> AssignedTaskStepProcessLog:
         item = AssignedTaskStepProcessLog(
@@ -213,3 +212,22 @@ class AssignedTaskDAO(BaseDAO[AssignedTask]):
         await self.session.flush()
         await self.session.refresh(item)
         return item
+
+    async def finish_process_log(
+        self,
+        *,
+        process_log_db_id: int | None,
+        status: str,
+        finished_at: datetime,
+        log: str | None,
+    ) -> None:
+        if process_log_db_id is None:
+            return
+
+        stmt = (
+            update(AssignedTaskStepProcessLog)
+            .where(AssignedTaskStepProcessLog.id == process_log_db_id)
+            .values(status=status, finished_at=finished_at, log=log)
+        )
+        await self.session.execute(stmt)
+        await self.session.flush()
