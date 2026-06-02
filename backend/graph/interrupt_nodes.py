@@ -16,7 +16,7 @@ OTHER_LABEL = "other"
 
 
 async def human_review_node(state: MessageState, config: RunnableConfig) -> dict:
-    messages: list[BaseMessage] = state["messages"]
+    messages: list[BaseMessage] = list(state["messages"])
     GraphNode.store_message(config, messages)
 
     last_message: BaseMessage = messages[-1]
