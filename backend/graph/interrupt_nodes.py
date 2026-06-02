@@ -1,6 +1,6 @@
 import logging
 
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.types import interrupt
 
@@ -66,7 +66,7 @@ async def _classify_approval_reply(
 
     try:
         client = await LLMSet.getRteModel()
-        messages = [SystemMessage(content=classification_prompt)]
+        messages = [HumanMessage(content=classification_prompt)]
         response = await client.ainvoke(messages)
         content = client.get_resp_content(response).strip().lower()
     except Exception:

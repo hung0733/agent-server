@@ -40,7 +40,7 @@ class MsgUtil:
         if not usage_metadata:
             resp_metadata = getattr(response, "response_metadata", {})
             if resp_metadata:
-                token_usage = getattr(resp_metadata, "token_usage", {})
+                token_usage = MsgUtil._usage_value(resp_metadata, "token_usage") or {}
             else:
                 token_usage = getattr(response, "usage", {})
 
@@ -67,10 +67,12 @@ class MsgUtil:
             or MsgUtil._usage_value(token_usage, "total_tokens")
         )
 
-        usage_dt:datetime = datetime.now(timezone.utc)
+        usage_dt: datetime = datetime.now(timezone.utc)
         addl_data = getattr(response, "additional_kwargs", {})
         if addl_data:
-            usage_dt = getattr(addl_data, "datetime", datetime.now(timezone.utc))
+            usage_dt = MsgUtil._usage_value(
+                addl_data, "datetime"
+            ) or datetime.now(timezone.utc)
 
         await MsgUtil.proc_save_llm_usage(
             llm_endpoint_id,

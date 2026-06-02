@@ -134,7 +134,7 @@ class Agent:
             len(message),
             think_mode,
         )
-        async for chunk in Agent.proc_send(
+        async for chunk in Agent.proc_send_and_resume(
             agent=self,
             message=message,
             think_mode=think_mode,
@@ -144,14 +144,60 @@ class Agent:
         ):
             yield chunk
 
+    async def resume(
+        self,
+        message: str,
+        think_mode: bool,
+        metadata: Dict[str, Any],
+        sandbox: Any | None = None,
+    ) -> AsyncGenerator[StreamChunk, None]:
+        logger.info(
+            t("agent.resume_started"),
+            self.session_id,
+            len(message),
+            think_mode,
+        )
+        async for chunk in Agent.proc_send_and_resume(
+            agent=self,
+            message=message,
+            think_mode=think_mode,
+            metadata=metadata,
+            sandbox=sandbox,
+            graph=Agent._graph,
+            is_resume=True,
+        ):
+            yield chunk
+
     @staticmethod
-    async def proc_send(
+    def _stream_interrupt_chunk(chunk: Any) -> StreamChunk | None:
+        if not isinstance(chunk, dict) or "__interrupt__" not in chunk:
+            return None
+
+        interrupts = chunk.get("__interrupt__") or ()
+        interrupt = interrupts[0] if interrupts else None
+        interrupt_value = getattr(interrupt, "value", interrupt)
+        if not isinstance(interrupt_value, dict):
+            interrupt_value = {"message": str(interrupt_value)}
+
+        message = interrupt_value.get("message")
+        if isinstance(message, BaseMessage):
+            interrupt_value = {**interrupt_value, "message": str(message.content)}
+
+        return StreamChunk(
+            chunk_type="interrupt",
+            data=interrupt_value,
+            timestamp=time.time(),
+        )
+
+    @staticmethod
+    async def proc_send_and_resume(
         agent: "Agent",
         message: str,
         think_mode: bool,
         metadata: Dict[str, Any],
         sandbox: Any | None,
         graph: Any,
+        is_resume: bool = False,
     ) -> AsyncGenerator[StreamChunk, None]:
 
         step_id: str = f"step-{uuid.uuid4()}"
@@ -176,8 +222,9 @@ class Agent:
             t("agent.proc_send_started"),
             step_id,
             agent.session_id,
-            -len(message),
+            len(message),
             think_mode,
+            is_resume,
         )
 
         config: RunnableConfig = GraphNode.prepare_chat_node_config(
@@ -207,20 +254,49 @@ class Agent:
         previous_graph_node: str | None = None
 
         try:
-            messages = {
-                "messages": [
-                    HumanMessage(
-                        content=message,
-                        additional_kwargs={"datetime": datetime.now(timezone.utc)},
-                    )
-                ]
-            }
+            human_message = HumanMessage(
+                content=message,
+                additional_kwargs={"datetime": datetime.now(timezone.utc)},
+            )
 
-            async for chunk in graph.astream(
-                messages,
-                config=config,
-                stream_mode="messages",
-            ):
+            messages = {"messages": [human_message]}
+
+            gen = None
+
+            if is_resume:
+                gen = graph.astream(
+                    Command(resume=human_message),
+                    config=config,
+                    stream_mode=["messages", "updates"],
+                )
+            else:
+                gen = graph.astream(
+                    messages,
+                    config=config,
+                    stream_mode=["messages", "updates"],
+                )
+
+            async for chunk in gen:
+                if (
+                    isinstance(chunk, tuple)
+                    and len(chunk) == 2
+                    and isinstance(chunk[0], str)
+                    and chunk[0] in {"messages", "updates"}
+                ):
+                    stream_mode, stream_chunk = chunk
+                    if stream_mode == "updates":
+                        interrupt_chunk = Agent._stream_interrupt_chunk(stream_chunk)
+                        if interrupt_chunk:
+                            yield interrupt_chunk
+                        continue
+                    chunk = stream_chunk
+
+                if isinstance(chunk, dict):
+                    interrupt_chunk = Agent._stream_interrupt_chunk(chunk)
+                    if interrupt_chunk:
+                        yield interrupt_chunk
+                    continue
+
                 if isinstance(chunk, tuple):
                     msg, _chunk_metadata = chunk
                 else:
@@ -245,7 +321,7 @@ class Agent:
                     )
                 if previous_graph_node is None or graph_node != previous_graph_node:
                     logger.debug(
-                        "Enter Node: %s (step_id=%s session_id=%s)",
+                        t("agent.graph_node_entered"),
                         graph_node,
                         step_id,
                         agent.session_id,
@@ -363,6 +439,7 @@ class Agent:
                     )
 
         except GraphInterrupt as e:
+            logger.debug(t("agent.interrupt_received"), step_id, agent.session_id)
             interrupt_value = (
                 e.value if isinstance(e.value, dict) else {"message": str(e.value)}
             )
@@ -371,5 +448,31 @@ class Agent:
                 data=interrupt_value,
                 timestamp=time.time(),
             )
+        except Exception:
+            logger.exception(
+                t("agent.proc_send_failed"), step_id, agent.session_id, is_resume
+            )
+            raise
 
-        logger.debug(t("agent.proc_send_completed"), step_id, agent.session_id)
+        logger.debug(
+            t("agent.proc_send_completed"), step_id, agent.session_id, is_resume
+        )
+
+    @staticmethod
+    async def proc_send(
+        agent: "Agent",
+        message: str,
+        think_mode: bool,
+        metadata: Dict[str, Any],
+        sandbox: Any | None,
+        graph: Any,
+    ) -> AsyncGenerator[StreamChunk, None]:
+        async for chunk in Agent.proc_send_and_resume(
+            agent=agent,
+            message=message,
+            think_mode=think_mode,
+            metadata=metadata,
+            sandbox=sandbox,
+            graph=graph,
+        ):
+            yield chunk

@@ -19,8 +19,8 @@ class FakeQueue:
         self.tasks = []
         self.resume_calls = []
 
-    async def resume_interrupt(self, agent_id, msg_id):
-        self.resume_calls.append((agent_id, msg_id))
+    async def resume_interrupt(self, agent_id, msg_id, task=None):
+        self.resume_calls.append((agent_id, msg_id, task))
         return False
 
     async def enqueue(self, task):

@@ -226,7 +226,7 @@ async def log_inbound_message(
         if task:
             if received_message.quoted_message_id:
                 resumed = await message_queue.resume_interrupt(
-                    task.agent_id, received_message.quoted_message_id
+                    task.agent_id, received_message.quoted_message_id, task
                 )
                 if resumed:
                     log_received_message(received_message)

@@ -5,6 +5,7 @@ import pytest
 import main as main_module
 from backend.llm.types import StreamChunk
 from backend.queues.msg_queue_handle import handle_agent_message
+from backend.queues.message_queue import TaskState
 
 
 class FakeConnection:
@@ -257,6 +258,8 @@ async def test_handle_agent_message_calls_agent_send(monkeypatch):
         session_id = "session-1"
         message = "hello"
         files = [{"mimetype": "text/plain", "filename": "a.txt", "bytes": b"a"}]
+        task_state = TaskState.PENDING
+        wait_msg_id = None
 
         async def callback(self, chunk):
             chunks.append(chunk)
@@ -305,3 +308,60 @@ async def test_handle_agent_message_calls_agent_send(monkeypatch):
         StreamChunk(chunk_type="text_end"),
         StreamChunk(chunk_type="done"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_handle_agent_message_calls_agent_resume_for_resume_task(monkeypatch):
+    calls = []
+    chunks = []
+    sandbox = object()
+
+    class FakeTask:
+        agent_id = "agent-1"
+        session_id = "session-1"
+        message = "approved"
+        files = None
+        task_state = TaskState.RESUME
+        wait_msg_id = None
+
+        async def callback(self, chunk):
+            chunks.append(chunk)
+
+    class FakeAgent:
+        agent_id = "agent-1"
+        user_id = "user-1"
+
+        async def resume(self, message, think_mode, metadata, sandbox=None):
+            calls.append((message, think_mode, metadata, sandbox))
+            yield StreamChunk(chunk_type="done")
+
+    async def get_agent(agent_id, session_id):
+        calls.append((agent_id, session_id))
+        return FakeAgent()
+
+    async def get_agent_sandbox(agent_id, user_id):
+        calls.append(("sandbox", agent_id, user_id))
+        return sandbox
+
+    monkeypatch.setattr(
+        main_module.handle_agent_message.__globals__["Agent"], "get_agent", get_agent
+    )
+    monkeypatch.setitem(
+        main_module.handle_agent_message.__globals__,
+        "get_agent_sandbox",
+        get_agent_sandbox,
+    )
+
+    assert await handle_agent_message(FakeTask()) is True
+
+    assert calls == [
+        ("agent-1", "session-1"),
+        ("sandbox", "agent-1", "user-1"),
+        (
+            "approved",
+            False,
+            {"source": "whatsapp", "files": None},
+            sandbox,
+        ),
+    ]
+    assert chunks == [StreamChunk(chunk_type="done")]

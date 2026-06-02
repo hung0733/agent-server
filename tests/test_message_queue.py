@@ -294,6 +294,39 @@ async def test_resume_interrupt():
 
 
 @pytest.mark.asyncio
+async def test_resume_interrupt_uses_resume_task_payload():
+    interrupt_done = asyncio.Event()
+    handled = []
+
+    async def handler(task):
+        handled.append((task.message, task.files))
+        if task.message == "interrupt_task":
+            task.wait_msg_id = "msg-123"
+            interrupt_done.set()
+            return False
+        return True
+
+    queue = MessageQueue(handler, max_concurrency=1)
+
+    t1 = RecordingTask("interrupt_task", agent_id="agent-1")
+    await queue.enqueue(t1)
+    await asyncio.wait_for(interrupt_done.wait(), timeout=1)
+
+    resume_task = RecordingTask("approved", agent_id="agent-1")
+    resume_task.files = [{"mimetype": "text/plain", "filename": "ok.txt", "bytes": b"ok"}]
+
+    assert await queue.resume_interrupt("agent-1", "msg-123", resume_task) is True
+
+    await queue._queue.join()
+    await queue.stop()
+
+    assert handled == [
+        ("interrupt_task", None),
+        ("approved", resume_task.files),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_resume_interrupt_requires_matching_msg_id_and_agent_id():
     interrupt_done = asyncio.Event()
     pending_handler_ran = asyncio.Event()

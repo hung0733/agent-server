@@ -76,12 +76,18 @@ class MessageQueue:
                 pass
         self._workers = []
 
-    async def resume_interrupt(self, agent_id: str, msg_id: str) -> bool:
+    async def resume_interrupt(
+        self, agent_id: str, msg_id: str, resume_task: MsgQueueTask | None = None
+    ) -> bool:
         task = self._interrupt_tasks.pop((agent_id, msg_id), None)
         if not task:
             return False
 
         task.wait_msg_id = None
+        if resume_task is not None:
+            task.message = resume_task.message
+            task.files = resume_task.files
+            task.callback = resume_task.callback
         task.change_task_state(TaskState.RESUME)
         if self._agent_state.get(agent_id) == TaskState.INTERRUPT:
             self._agent_state.pop(agent_id, None)

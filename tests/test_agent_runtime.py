@@ -12,10 +12,13 @@ from langchain_core.messages import (
 )
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
+from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
+from langgraph.types import Command, Interrupt
 
 from backend.agent.agent import Agent
+from backend.agent.butler import Bulter
 from backend.graph.agent import (
     end_node as agent_end_node,
     chat_node,
@@ -29,9 +32,12 @@ from backend.graph.interrupt_nodes import (
     APPROVE_LABEL,
     CANCEL_LABEL,
     OTHER_LABEL,
+    _classify_approval_reply,
 )
 from backend.i18n import t
 from backend.llm.types import StreamChunk
+from backend.queues.message_queue import MsgQueueTask, TaskState
+from backend.queues.msg_queue_handle import handle_agent_message
 from backend.tdai_memory.models import RecallResult
 from backend.tools.memory import MemoryTools
 from backend.tools.sandbox import SandboxTools
@@ -679,6 +685,227 @@ async def test_bulter_assign_task_node_persists_after_approval(monkeypatch):
     assert "Task tracker" in result["messages"][0].content
 
 
+@pytest.mark.asyncio
+async def test_human_review_classifier_sends_user_message_to_llm(monkeypatch):
+    calls = []
+
+    class ApprovalClassifier:
+        async def ainvoke(self, messages):
+            calls.append(messages)
+            return AIMessage(content="approve")
+
+        def get_resp_content(self, response):
+            return response.content
+
+    async def get_approval_classifier():
+        return ApprovalClassifier()
+
+    monkeypatch.setattr(
+        "backend.graph.interrupt_nodes.LLMSet.getRteModel",
+        get_approval_classifier,
+    )
+
+    result = await _classify_approval_reply(
+        [
+            AIMessage(content="請確認任務。"),
+            HumanMessage(content="同意"),
+        ],
+        {},
+    )
+
+    assert result == APPROVE_LABEL
+    assert len(calls) == 1
+    assert isinstance(calls[0][0], HumanMessage)
+    assert "同意" in calls[0][0].content
+
+
+@pytest.mark.asyncio
+async def test_bulter_graph_resumes_assign_task_after_human_approval(monkeypatch):
+    fake_session = _patch_assign_task_persistence(monkeypatch)
+    monkeypatch.setattr(GraphNode, "store_message", lambda config, messages: None)
+
+    class ToolCallingLLM:
+        def bind_tools(self, tools):
+            return self
+
+        async def ainvoke(self, messages):
+            return AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "assign_task",
+                        "args": {
+                            "task_name": "Task tracker",
+                            "goal": "Create root task tracking",
+                        },
+                        "id": "call-1",
+                    }
+                ],
+            )
+
+    class ApprovalClassifier:
+        async def ainvoke(self, messages):
+            return AIMessage(content="approve")
+
+        def get_resp_content(self, response):
+            return response.content
+
+    async def get_approval_classifier():
+        return ApprovalClassifier()
+
+    monkeypatch.setattr(
+        "backend.graph.interrupt_nodes.LLMSet.getRteModel",
+        get_approval_classifier,
+    )
+
+    app = butler_workflow.compile(checkpointer=InMemorySaver())
+    config = GraphNode.prepare_chat_node_config(
+        thread_id="session-approve",
+        models=FakeModels(ToolCallingLLM()),
+        sys_prompt="",
+        involves_secrets=False,
+        think_mode=False,
+        args={},
+        user_db_id=123,
+        agent_db_id=456,
+        agent_type="bulter",
+    )
+
+    interrupted = await app.ainvoke(
+        {"messages": [HumanMessage(content="幫我建立 task")]},
+        config=config,
+    )
+
+    assert interrupted["__interrupt__"][0].value["type"] == "human_review"
+    assert fake_session.committed is False
+
+    result = await app.ainvoke(
+        Command(resume=HumanMessage(content="同意")),
+        config=config,
+    )
+
+    assert fake_session.committed is True
+    assert FakeAssignedTaskDAO.created_data.task_name == "Task tracker"
+    assert FakeAssignedTaskDAO.created_data.goal == "Create root task tracking"
+    assert result["human_review_result"] is None
+    assert "Task tracker" in result["messages"][-1].content
+
+
+@pytest.mark.asyncio
+async def test_message_task_resumes_assign_task_after_human_approval(monkeypatch):
+    fake_session = _patch_assign_task_persistence(monkeypatch)
+    monkeypatch.setattr(GraphNode, "store_message", lambda config, messages: None)
+
+    class ToolCallingLLM:
+        def bind_tools(self, tools):
+            return self
+
+        async def ainvoke(self, messages):
+            return AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "assign_task",
+                        "args": {
+                            "task_name": "Task tracker",
+                            "goal": "Create root task tracking",
+                        },
+                        "id": "call-1",
+                    }
+                ],
+            )
+
+    class ApprovalClassifier:
+        async def ainvoke(self, messages):
+            return AIMessage(content="approve")
+
+        def get_resp_content(self, response):
+            return response.content
+
+    class FakeMemoryManager:
+        async def recall(self, *, agent_id, session_key, user_text):
+            return RecallResult()
+
+    class ApprovalTask(MsgQueueTask):
+        def __init__(self):
+            super().__init__(
+                message="幫我建立 task",
+                agent_id="agent-1",
+                session_id="session-message-approve",
+            )
+            self.chunks = []
+
+        async def callback(self, chunk):
+            self.chunks.append(chunk)
+            if chunk.chunk_type == "interrupt":
+                return "approval-msg-1"
+            return None
+
+    async def get_approval_classifier():
+        return ApprovalClassifier()
+
+    async def get_agent(agent_id, session_id):
+        return agent
+
+    async def get_agent_sandbox(agent_id, user_id):
+        return object()
+
+    monkeypatch.setattr(
+        "backend.graph.interrupt_nodes.LLMSet.getRteModel",
+        get_approval_classifier,
+    )
+    monkeypatch.setattr(
+        "backend.agent.agent.MemoryManager.instance",
+        lambda: FakeMemoryManager(),
+    )
+    monkeypatch.setattr(
+        "backend.queues.msg_queue_handle.Agent.get_agent",
+        get_agent,
+    )
+    monkeypatch.setattr(
+        "backend.queues.msg_queue_handle.get_agent_sandbox",
+        get_agent_sandbox,
+    )
+
+    agent = Bulter(
+        123,
+        456,
+        789,
+        "user-1",
+        "agent-1",
+        "session-message-approve",
+        "bulter",
+        "Bulter",
+    )
+    monkeypatch.setattr(
+        Bulter,
+        "_graph",
+        butler_workflow.compile(checkpointer=InMemorySaver()),
+    )
+    agent.models = FakeModels(ToolCallingLLM())
+
+    task = ApprovalTask()
+
+    assert await handle_agent_message(task) is False
+    assert task.wait_msg_id == "approval-msg-1"
+    assert fake_session.committed is False
+    assert any(chunk.chunk_type == "interrupt" for chunk in task.chunks)
+
+    task.message = "同意"
+    task.wait_msg_id = None
+    task.change_task_state(TaskState.RESUME)
+
+    assert await handle_agent_message(task) is True
+
+    assert fake_session.committed is True
+    assert FakeAssignedTaskDAO.created_data.task_name == "Task tracker"
+    assert FakeAssignedTaskDAO.created_data.goal == "Create root task tracking"
+    assert any(
+        chunk.chunk_type == "content" and "Task tracker" in str(chunk.content)
+        for chunk in task.chunks
+    )
+
+
 class FakeGraph:
     configs = []
 
@@ -686,7 +913,7 @@ class FakeGraph:
         assert payload["messages"][0].content == "hello"
         assert config["configurable"]["thread_id"] == "session-1"
         self.configs.append(config)
-        assert stream_mode == "messages"
+        assert stream_mode == ["messages", "updates"]
         yield (AIMessageChunk(content="he"), {"node": "chat"})
         yield AIMessage(content="llo", additional_kwargs={"text_done": True})
 
@@ -727,6 +954,28 @@ class FakeNodeTransitionGraph:
         yield (
             ToolMessage(content="tool output", tool_call_id="call-1"),
             {"langgraph_node": "tools"},
+        )
+
+
+class FakeInterruptGraph:
+    async def astream(self, payload, config, stream_mode):
+        approval_message = AIMessage(content="請確認任務。")
+        yield (
+            "messages",
+            (
+                approval_message,
+                {"langgraph_node": "pre_assign_task_node"},
+            ),
+        )
+        yield (
+            "updates",
+            {
+                "__interrupt__": (
+                    Interrupt(
+                        value={"type": "human_review", "message": approval_message}
+                    ),
+                )
+            },
         )
 
 
@@ -928,6 +1177,38 @@ async def test_agent_proc_send_flushes_text_when_graph_node_changes(monkeypatch)
         "tool_result",
     ]
     assert chunks[0].content == "我先準備。"
+
+
+@pytest.mark.asyncio
+async def test_agent_proc_send_streams_langgraph_interrupt_update(monkeypatch):
+    class FakeMemoryManager:
+        async def recall(self, *, agent_id, session_key, user_text):
+            return RecallResult()
+
+    monkeypatch.setattr(
+        "backend.agent.agent.MemoryManager.instance",
+        lambda: FakeMemoryManager(),
+    )
+
+    chunks = [
+        chunk
+        async for chunk in Agent.proc_send(
+            agent=FakeAgent(),
+            message="hello",
+            think_mode=False,
+            metadata={"source": "test"},
+            sandbox=FakeSandbox(),
+            graph=FakeInterruptGraph(),
+        )
+    ]
+
+    assert [chunk.chunk_type for chunk in chunks] == [
+        "content",
+        "text_end",
+        "interrupt",
+    ]
+    assert chunks[0].content == "請確認任務。"
+    assert chunks[2].data == {"type": "human_review", "message": "請確認任務。"}
 
 
 @pytest.mark.asyncio

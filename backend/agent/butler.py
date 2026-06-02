@@ -32,12 +32,36 @@ class Bulter(Agent):
             len(message),
             think_mode,
         )
-        async for chunk in Agent.proc_send(
+        async for chunk in Agent.proc_send_and_resume(
             agent=self,
             message=message,
             think_mode=think_mode,
             metadata=metadata,
             sandbox=sandbox,
             graph=Bulter._graph,
+        ):
+            yield chunk
+
+    async def resume(
+        self,
+        message: str,
+        think_mode: bool,
+        metadata: Dict[str, Any],
+        sandbox: Any | None = None,
+    ) -> AsyncGenerator[StreamChunk, None]:
+        logger.info(
+            t("agent.resume_started"),
+            self.session_id,
+            len(message),
+            think_mode,
+        )
+        async for chunk in Agent.proc_send_and_resume(
+            agent=self,
+            message=message,
+            think_mode=think_mode,
+            metadata=metadata,
+            sandbox=sandbox,
+            graph=Bulter._graph,
+            is_resume=True,
         ):
             yield chunk

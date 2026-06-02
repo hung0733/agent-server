@@ -336,7 +336,7 @@ async def test_save_llm_usage_uses_response_metadata_token_usage(monkeypatch):
     assert created[0].cached_in_token == 0
     assert created[0].total_token == 15
     assert session.committed is True
-    assert log_calls == [("utils.message.llm_usage_received", (15, 10, 5, 0))]
+    assert log_calls == [("utils.message.llm_usage_received", ("", 15, 10, 5, 0))]
 
 
 @pytest.mark.asyncio
