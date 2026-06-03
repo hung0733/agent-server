@@ -84,6 +84,12 @@ class FakeAssignedTaskDAO:
 
 class FakeAgentDAO:
     agent = SimpleNamespace(id=456, agent_id="agent-assigned")
+    responsible_agent = SimpleNamespace(
+        id=123,
+        agent_id="agent-main",
+        whatsapp_instance="main-instance",
+        whatsapp_key="main-key",
+    )
     by_agent_id = {"agent-assigned": agent}
     find_calls = []
 
@@ -96,6 +102,78 @@ class FakeAgentDAO:
 
     async def get_by_agent_id(self, agent_id):
         return type(self).by_agent_id.get(agent_id)
+
+    async def get_by_id(self, id_):
+        if id_ == type(self).responsible_agent.id:
+            return type(self).responsible_agent
+        if id_ == type(self).agent.id:
+            return type(self).agent
+        return None
+
+
+class FakeUserAccDAO:
+    user = SimpleNamespace(id=999, phoneno="85298765432")
+
+    def __init__(self, session):
+        self.session = session
+
+    async def get_by_id(self, id_):
+        if id_ == type(self).user.id:
+            return type(self).user
+        return None
+
+
+class FakeEvolutionWhatsAppChannel:
+    sent = []
+
+    def __init__(self, whatsapp_instance=None, whatsapp_key=None, **kwargs):
+        self.whatsapp_instance = whatsapp_instance
+        self.whatsapp_key = whatsapp_key
+
+    async def send_text(self, number, text):
+        type(self).sent.append(
+            {
+                "instance": self.whatsapp_instance,
+                "key": self.whatsapp_key,
+                "number": number,
+                "text": text,
+            }
+        )
+        return {"key": {"id": "interrupt-msg-1"}}
+
+    async def close(self):
+        return None
+
+
+class FakeMsgTask:
+    def __init__(self, chunks):
+        self.chunks = chunks
+        self.acks = []
+
+    def stream_gen(self):
+        async def gen():
+            for chunk in self.chunks:
+                yield chunk
+
+        return gen()
+
+    def ack_stream_callback(self, result):
+        self.acks.append(result)
+
+
+class FakeMessageQueue:
+    chunks = []
+    created = []
+    task = None
+
+    @classmethod
+    def instance(cls):
+        return cls()
+
+    async def create(self, **kwargs):
+        type(self).created.append(kwargs)
+        type(self).task = FakeMsgTask(type(self).chunks)
+        return type(self).task
 
 
 class FakeAgentSessionDAO:
@@ -219,8 +297,19 @@ def _reset_fakes():
     FakeAssignedTaskDAO.process_count = 0
     FakeAssignedTaskDAO.next_log_id = 100
     FakeAgentDAO.agent = SimpleNamespace(id=456, agent_id="agent-assigned")
+    FakeAgentDAO.responsible_agent = SimpleNamespace(
+        id=123,
+        agent_id="agent-main",
+        whatsapp_instance="main-instance",
+        whatsapp_key="main-key",
+    )
     FakeAgentDAO.by_agent_id = {"agent-assigned": FakeAgentDAO.agent}
     FakeAgentDAO.find_calls = []
+    FakeUserAccDAO.user = SimpleNamespace(id=999, phoneno="85298765432")
+    FakeEvolutionWhatsAppChannel.sent = []
+    FakeMessageQueue.chunks = []
+    FakeMessageQueue.created = []
+    FakeMessageQueue.task = None
     FakeAgentSessionDAO.default_session = SimpleNamespace(
         id=321, session_id="default-main"
     )
@@ -600,15 +689,31 @@ async def test_assigned_task_init_message_step_prepares_continue_message(monkeyp
 
 @pytest.mark.asyncio
 async def test_assigned_task_send_response_and_resume_handlers_are_split_by_status(
-    caplog,
+    monkeypatch, caplog
 ):
+    _reset_fakes()
+    monkeypatch.setattr("backend.queues.task_queue_handle.MessageQueue", FakeMessageQueue)
+    FakeMessageQueue.chunks = [
+        SimpleNamespace(chunk_type="content", content="done", data=None)
+    ]
+
     caplog.set_level(logging.INFO, logger="backend.queues.task_queue_handle")
     send_task = _task(status=TaskQueueStepStatus.SEND)
+    send_task.assign_agent_id = "agent-assigned"
+    send_task.step_session_id = "step-session-abc"
 
     caplog.clear()
     send_result = await handle_assigned_task_send_step(send_task)
     assert send_result is None
     assert send_task.status == TaskQueueStepStatus.RESPONSE
+    assert send_task.message == "done"
+    assert FakeMessageQueue.created == [
+        {
+            "agent_id": "agent-assigned",
+            "session_id": "step-session-abc",
+            "message": "",
+        }
+    ]
     assert "status=send" in caplog.text
 
     caplog.clear()
@@ -626,6 +731,90 @@ async def test_assigned_task_send_response_and_resume_handlers_are_split_by_stat
     assert resume_result.success is True
     assert resume_task.status == TaskQueueStepStatus.COMPLETED
     assert "status=resume" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_assigned_task_send_interrupt_sends_whatsapp_and_marks_interrupt(
+    monkeypatch,
+):
+    _reset_fakes()
+    monkeypatch.setattr("backend.queues.task_queue_handle.MessageQueue", FakeMessageQueue)
+    monkeypatch.setattr(
+        "backend.queues.task_queue_handle.async_session_factory", _session_factory
+    )
+    monkeypatch.setattr("backend.queues.task_queue_handle.AgentDAO", FakeAgentDAO)
+    monkeypatch.setattr("backend.queues.task_queue_handle.UserAccDAO", FakeUserAccDAO)
+    monkeypatch.setattr(
+        "backend.queues.task_queue_handle.EvolutionWhatsAppChannel",
+        FakeEvolutionWhatsAppChannel,
+    )
+    FakeMessageQueue.chunks = [
+        SimpleNamespace(
+            chunk_type="interrupt",
+            content=None,
+            data={"message": "請確認任務"},
+        )
+    ]
+
+    send_task = _task(status=TaskQueueStepStatus.SEND)
+    send_task.assign_agent_id = "agent-assigned"
+    send_task.step_session_id = "step-session-abc"
+
+    send_result = await handle_assigned_task_send_step(send_task)
+
+    assert send_result is None
+    assert send_task.status == TaskQueueStepStatus.INTERRUPT
+    assert FakeEvolutionWhatsAppChannel.sent == [
+        {
+            "instance": "main-instance",
+            "key": "main-key",
+            "number": "85298765432",
+            "text": "請確認任務",
+        }
+    ]
+    assert FakeMessageQueue.task.acks == ["interrupt-msg-1"]
+
+
+@pytest.mark.asyncio
+async def test_assigned_task_send_interrupt_missing_whatsapp_data_falls_back_response(
+    monkeypatch,
+):
+    _reset_fakes()
+    monkeypatch.setattr("backend.queues.task_queue_handle.MessageQueue", FakeMessageQueue)
+    monkeypatch.setattr(
+        "backend.queues.task_queue_handle.async_session_factory", _session_factory
+    )
+    monkeypatch.setattr("backend.queues.task_queue_handle.AgentDAO", FakeAgentDAO)
+    monkeypatch.setattr("backend.queues.task_queue_handle.UserAccDAO", FakeUserAccDAO)
+    monkeypatch.setattr(
+        "backend.queues.task_queue_handle.EvolutionWhatsAppChannel",
+        FakeEvolutionWhatsAppChannel,
+    )
+    FakeAgentDAO.responsible_agent = SimpleNamespace(
+        id=123,
+        agent_id="agent-main",
+        whatsapp_instance=None,
+        whatsapp_key="main-key",
+    )
+    FakeMessageQueue.chunks = [
+        SimpleNamespace(
+            chunk_type="interrupt",
+            content="fallback approval",
+            data={},
+        )
+    ]
+
+    send_task = _task(status=TaskQueueStepStatus.SEND)
+    send_task.assign_agent_id = "agent-assigned"
+    send_task.step_session_id = "step-session-abc"
+
+    send_result = await handle_assigned_task_send_step(send_task)
+
+    assert send_result is None
+    assert send_task.status == TaskQueueStepStatus.RESPONSE
+    assert send_task.message == "fallback approval"
+    assert FakeEvolutionWhatsAppChannel.sent == []
+    assert FakeMessageQueue.task.acks == []
 
 
 def test_task_queue_step_change_status():

@@ -6,7 +6,7 @@ from typing import AsyncGenerator
 from backend.agent.agent import Agent
 from backend.i18n import t
 from backend.llm.types import StreamChunk
-from backend.queues.message_queue import MsgQueueTask, TaskState
+from backend.queues.message_queue import MessageQueue, MsgQueueTask, TaskState
 from backend.sandbox.manager import get_agent_sandbox
 
 logger = logging.getLogger(__name__)
@@ -21,6 +21,7 @@ async def handle_agent_message(task: MsgQueueTask) -> bool:
         len(task.message),
         bool(task.files),
     )
+
     agent = await Agent.get_agent(task.agent_id, task.session_id)
     sandbox = await get_agent_sandbox(agent.agent_id, agent.user_id)
     done_sent = False

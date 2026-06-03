@@ -1,23 +1,24 @@
 from __future__ import annotations
 
 import logging
-from typing import AsyncGenerator
+from typing import Any
 import uuid
 
-from backend.agent.agent import Agent
+from backend.channels import EvolutionWhatsAppChannel
 from backend.dao.agent import AgentDAO
 from backend.dao.agent_msg_hist import AgentMsgHistDAO
 from backend.dao.assigned_task import AssignedTaskDAO
 from backend.dao.session import AgentSessionDAO
+from backend.dao.user_acc import UserAccDAO
 from backend.db.session import async_session_factory
 from backend.dto.session import AgentSessionCreate
 from backend.i18n import t
+from backend.queues.message_queue import CmnMsgQueueTask, MessageQueue
 from backend.queues.task_queue import (
     TaskQueueHandlerResult,
     TaskQueueStep,
     TaskQueueStepStatus,
 )
-from backend.sandbox.manager import get_agent_sandbox
 
 logger = logging.getLogger(__name__)
 
@@ -156,26 +157,38 @@ async def handle_assigned_task_send_step(
 ) -> TaskQueueHandlerResult | None:
     _log_started(task)
 
-    agent = await Agent.get_agent(str(task.assign_agent_id), str(task.step_session_id))
-    sandbox = await get_agent_sandbox(agent.agent_id, agent.user_id)
-
-    gen: AsyncGenerator = agent.send(
-        task.message,
-        think_mode=False,
-        metadata={},
-        sandbox=sandbox,
+    msg_task: CmnMsgQueueTask = await MessageQueue.instance().create(
+        agent_id=str(task.assign_agent_id),
+        session_id=str(task.step_session_id),
+        message=task.message,
     )
 
     resp_message: str = ""
-    is_interrupt: bool = False
-    async for chunk in gen:
+    interrupt_message: str = ""
+    interrupt_sent: bool = False
+    async for chunk in msg_task.stream_gen():
         if chunk.chunk_type == "content":
             resp_message += chunk.content or ""
         elif chunk.chunk_type == "interrupt":
-            is_interrupt = True
+            interrupt_message = _interrupt_message_from_chunk(chunk)
+            msg_id = await _send_interrupt_to_user(task, interrupt_message)
+            if msg_id:
+                msg_task.ack_stream_callback(msg_id)
+                interrupt_sent = True
 
-    if is_interrupt:
+    if interrupt_sent:
+        logger.info(
+            t("queues.task_queue_handle.interrupted"),
+            task.step_id,
+        )
         task.change_status(TaskQueueStepStatus.INTERRUPT)
+    elif interrupt_message:
+        logger.info(
+            t("queues.task_queue_handle.interrupt_fallback_response"),
+            task.step_id,
+        )
+        task.message = interrupt_message
+        task.change_status(TaskQueueStepStatus.RESPONSE)
     elif resp_message:
         task.message = resp_message
         task.change_status(TaskQueueStepStatus.RESPONSE)
@@ -219,3 +232,70 @@ def _complete_scaffold_task(task: TaskQueueStep) -> TaskQueueHandlerResult:
     task.change_status(TaskQueueStepStatus.COMPLETED)
     logger.info(t("queues.task_queue_handle.completed"), task.step_id, task.task_id)
     return TaskQueueHandlerResult(success=True, log=log)
+
+
+def _interrupt_message_from_chunk(chunk: Any) -> str:
+    chunk_data = getattr(chunk, "data", None)
+    data = chunk_data if isinstance(chunk_data, dict) else {}
+    message = data.get("message") or getattr(chunk, "content", None) or ""
+    return str(message)
+
+
+async def _send_interrupt_to_user(
+    task: TaskQueueStep, interrupt_message: str
+) -> str | None:
+    if not interrupt_message or task.responsible_agent_db_id is None:
+        return None
+    if task.user_db_id is None:
+        return None
+
+    async with async_session_factory() as session:
+        responsible_agent = await AgentDAO(session).get_by_id(
+            task.responsible_agent_db_id
+        )
+        user = await UserAccDAO(session).get_by_id(task.user_db_id)
+
+    whatsapp_instance = getattr(responsible_agent, "whatsapp_instance", None)
+    whatsapp_key = getattr(responsible_agent, "whatsapp_key", None)
+    phoneno = getattr(user, "phoneno", None)
+
+    if (
+        responsible_agent is None
+        or user is None
+        or not whatsapp_instance
+        or not whatsapp_key
+        or not phoneno
+    ):
+        logger.info(
+            t("queues.task_queue_handle.interrupt_whatsapp_missing_fields"),
+            task.step_id,
+            task.responsible_agent_id,
+        )
+        return None
+
+    channel = EvolutionWhatsAppChannel(
+        whatsapp_instance=whatsapp_instance,
+        whatsapp_key=whatsapp_key,
+    )
+    try:
+        resp = await channel.send_text(phoneno, interrupt_message)
+    finally:
+        await channel.close()
+    msg_id = _extract_message_id(resp)
+    logger.info(
+        t("queues.task_queue_handle.interrupt_whatsapp_sent"),
+        task.step_id,
+        phoneno,
+        msg_id,
+    )
+    return msg_id
+
+
+def _extract_message_id(evolution_response: dict[str, Any]) -> str | None:
+    if not isinstance(evolution_response, dict):
+        return None
+    key = evolution_response.get("key")
+    if isinstance(key, dict):
+        message_id = key.get("id")
+        return message_id if isinstance(message_id, str) else None
+    return None

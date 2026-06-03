@@ -3,7 +3,13 @@ import asyncio
 import pytest
 
 from backend.llm.types import StreamChunk
-from backend.queues.message_queue import MessageQueue, MsgQueueTask, TaskState
+from backend.queues.message_queue import (
+    CmnMsgQueueTask,
+    MessageQueue,
+    MsgQueueTask,
+    TaskState,
+)
+from backend.queues.msg_queue_handle import handle_agent_message
 
 
 class RecordingTask(MsgQueueTask):
@@ -17,6 +23,119 @@ class RecordingTask(MsgQueueTask):
 
     async def callback(self, chunk):
         self.chunks.append(chunk)
+
+
+def test_message_queue_instance_requires_initial_handler(monkeypatch):
+    monkeypatch.setattr(MessageQueue, "_instance", None)
+
+    with pytest.raises(RuntimeError):
+        MessageQueue.instance()
+
+
+def test_message_queue_instance_reuses_initialized_queue(monkeypatch):
+    monkeypatch.setattr(MessageQueue, "_instance", None)
+
+    async def handler(task):
+        return True
+
+    first = MessageQueue.instance(handler, max_concurrency=1)
+    second = MessageQueue.instance()
+
+    assert second is first
+
+
+@pytest.mark.asyncio
+async def test_cmn_task_callback_returns_stream_consumer_ack():
+    task = CmnMsgQueueTask("hello", "agent-1", "session-1")
+    stream = task.stream_gen()
+
+    callback_task = asyncio.create_task(
+        task.callback(StreamChunk(chunk_type="interrupt", content="approve?"))
+    )
+    chunk = await stream.__anext__()
+
+    assert chunk.chunk_type == "interrupt"
+    task.ack_stream_callback("approval-msg-1")
+
+    assert await asyncio.wait_for(callback_task, timeout=1) == "approval-msg-1"
+    await stream.aclose()
+
+
+@pytest.mark.asyncio
+async def test_cmn_task_callback_defaults_to_none_without_ack():
+    task = CmnMsgQueueTask("hello", "agent-1", "session-1")
+    stream = task.stream_gen()
+
+    callback_task = asyncio.create_task(
+        task.callback(StreamChunk(chunk_type="content", content="hello"))
+    )
+
+    chunk = await stream.__anext__()
+    assert chunk.content == "hello"
+
+    next_chunk_task = asyncio.create_task(stream.__anext__())
+    assert await asyncio.wait_for(callback_task, timeout=1) is None
+
+    next_chunk_task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await next_chunk_task
+    await stream.aclose()
+
+
+@pytest.mark.asyncio
+async def test_cmn_task_stream_gen_yields_chunks_and_stops_after_done():
+    task = CmnMsgQueueTask("hello", "agent-1", "session-1")
+    stream = task.stream_gen()
+
+    content_callback = asyncio.create_task(
+        task.callback(StreamChunk(chunk_type="content", content="hello"))
+    )
+    first_chunk = await stream.__anext__()
+    task.ack_stream_callback(None)
+
+    done_callback = asyncio.create_task(task.callback(StreamChunk(chunk_type="done")))
+    second_chunk = await stream.__anext__()
+    task.ack_stream_callback(None)
+
+    assert first_chunk.content == "hello"
+    assert second_chunk.chunk_type == "done"
+    assert await asyncio.wait_for(content_callback, timeout=1) is None
+    assert await asyncio.wait_for(done_callback, timeout=1) is None
+    with pytest.raises(StopAsyncIteration):
+        await stream.__anext__()
+
+
+@pytest.mark.asyncio
+async def test_handle_agent_message_sets_wait_msg_id_from_cmn_stream_ack(monkeypatch):
+    class FakeAgent:
+        agent_id = "agent-1"
+        user_id = "user-1"
+
+        async def send(self, *args, **kwargs):
+            yield StreamChunk(chunk_type="interrupt", content="approve?")
+
+    async def get_agent(agent_id, session_id):
+        return FakeAgent()
+
+    async def get_agent_sandbox(agent_id, user_id):
+        return object()
+
+    monkeypatch.setattr("backend.queues.msg_queue_handle.Agent.get_agent", get_agent)
+    monkeypatch.setattr(
+        "backend.queues.msg_queue_handle.get_agent_sandbox", get_agent_sandbox
+    )
+
+    task = CmnMsgQueueTask("hello", "agent-1", "session-1")
+    stream = task.stream_gen()
+    handler_task = asyncio.create_task(handle_agent_message(task))
+
+    chunk = await stream.__anext__()
+    assert chunk.chunk_type == "interrupt"
+    task.ack_stream_callback("approval-msg-1")
+    await stream.aclose()
+
+    assert await asyncio.wait_for(handler_task, timeout=1) is False
+    assert task.wait_msg_id == "approval-msg-1"
 
 
 @pytest.mark.asyncio

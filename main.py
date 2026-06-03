@@ -162,7 +162,7 @@ async def main(
         raise
 
     channel = channel_factory()
-    message_queue = MessageQueue(
+    message_queue = MessageQueue.instance(
         handle_agent_message,
         max_concurrency=get_message_queue_max_concurrency(),
     )

@@ -5,7 +5,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, TypedDict
+from typing import Any, AsyncGenerator, TypedDict
 
 from backend.i18n import t
 from backend.llm.types import StreamChunk
@@ -42,10 +42,92 @@ class MsgQueueTask:
         self.task_state = state
 
 
+@dataclass
+class _StreamQueueItem:
+    chunk: StreamChunk
+    result: asyncio.Future[str | None]
+
+
+class CmnMsgQueueTask(MsgQueueTask):
+    _queue: asyncio.Queue[_StreamQueueItem]
+    _current_result: asyncio.Future[str | None] | None
+    _stream_closed: bool
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._queue = asyncio.Queue()
+        self._current_result = None
+        self._stream_closed = False
+
+    async def callback(self, chunk: StreamChunk) -> str | None:
+        if self._stream_closed:
+            return None
+        result = asyncio.get_running_loop().create_future()
+        await self._queue.put(_StreamQueueItem(chunk=chunk, result=result))
+        return await result
+
+    def stream_gen(self) -> AsyncGenerator[StreamChunk, None]:
+        """Async generator that yields StreamChunks until the task ends."""
+
+        async def _gen() -> AsyncGenerator[StreamChunk, None]:
+            try:
+                while True:
+                    item = await self._queue.get()
+                    self._current_result = item.result
+                    try:
+                        yield item.chunk
+                    finally:
+                        self._resolve_stream_callback(None)
+
+                    if self._is_terminal_chunk(item.chunk):
+                        logger.debug(("串流已結束"))
+                        self._stream_closed = True
+                        return
+            except GeneratorExit:
+                logger.debug(("generator 已強制關閉"))
+                self._stream_closed = True
+                self._resolve_stream_callback(None)
+            except Exception as exc:
+                self._stream_closed = True
+                logger.error(("stream_gen 錯誤：%s"), exc)
+                yield StreamChunk(chunk_type="done")
+
+        return _gen()
+
+    def ack_stream_callback(self, result: str | None) -> None:
+        self._resolve_stream_callback(result)
+
+    def _resolve_stream_callback(self, result: str | None) -> None:
+        if self._current_result is None:
+            return
+        if not self._current_result.done():
+            self._current_result.set_result(result)
+        self._current_result = None
+
+    @staticmethod
+    def _is_terminal_chunk(chunk: StreamChunk) -> bool:
+        return chunk.chunk_type == "done"
+
+
 MsgQueueHandler = Callable[[MsgQueueTask], Awaitable[bool]]
 
 
 class MessageQueue:
+    _instance: MessageQueue | None = None
+
+    @classmethod
+    def instance(
+        cls,
+        handler: MsgQueueHandler | None = None,
+        *,
+        max_concurrency: int = 4,
+    ) -> MessageQueue:
+        if cls._instance is None:
+            if handler is None:
+                raise RuntimeError(t("queues.message_queue.not_initialized"))
+            cls._instance = cls(handler, max_concurrency=max_concurrency)
+        return cls._instance
+
     def __init__(self, handler: MsgQueueHandler, max_concurrency: int = 4) -> None:
         if max_concurrency < 1:
             raise ValueError(t("queues.message_queue.invalid_max_concurrency"))
@@ -95,6 +177,22 @@ class MessageQueue:
         self.start()
         await self._enqueue_task(task)
         return True
+
+    async def create(
+        self,
+        agent_id: str,
+        session_id: str,
+        message: str,
+        files: list[FilePayload] | None = None,
+    ) -> CmnMsgQueueTask:
+        task = CmnMsgQueueTask(
+            agent_id=agent_id,
+            session_id=session_id,
+            message=message,
+            files=files,
+        )
+        await self.enqueue(task)
+        return task
 
     async def enqueue(self, task: MsgQueueTask) -> None:
         if not task.agent_id or not task.session_id:

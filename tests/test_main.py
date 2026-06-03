@@ -78,6 +78,10 @@ async def test_main_starts_message_queue_listener_and_cleans_up(monkeypatch):
             memory_calls.append("destroy")
 
     class FakeQueue:
+        @classmethod
+        def instance(cls, handler, max_concurrency):
+            return cls(handler, max_concurrency)
+
         def __init__(self, handler, max_concurrency):
             self.handler = handler
             self.max_concurrency = max_concurrency
