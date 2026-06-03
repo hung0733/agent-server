@@ -42,6 +42,22 @@ class AgentDAO(BaseDAO[Agent]):
         result = await self.session.scalars(stmt)
         return list(result)
 
+    async def get_first_active_sub_agent_by_user_and_type(
+        self, *, user_id: int, agent_type_id: int
+    ) -> Agent | None:
+        stmt = (
+            select(Agent)
+            .where(
+                Agent.user_id == user_id,
+                Agent.agent_type_id == agent_type_id,
+                Agent.is_active.is_(True),
+                Agent.is_sub_agent.is_(True),
+            )
+            .order_by(Agent.id.asc())
+            .limit(1)
+        )
+        return await self.session.scalar(stmt)
+
     async def _resolve_agent_type(self, values: dict[str, Any]) -> tuple[dict[str, Any], Any | None]:
         code = values.pop("agent_type", None)
         agent_type = None

@@ -193,7 +193,7 @@ class MsgUtil:
         messages: list[BaseMessage],
         session_db_id: int,
         step_id: str,
-        conversation_metadata: Dict[str, str],
+        conversation_metadata: Dict[str, Any],
     ) -> list[AgentMsgHistCreate]:
         dtos: list[AgentMsgHistCreate] = []
 
@@ -280,7 +280,7 @@ class MsgUtil:
 
     @staticmethod
     def base_msg_to_tdai_memory_rec(
-        messages: list[BaseMessage], conversation_metadata: Dict[str, str]
+        messages: list[BaseMessage], conversation_metadata: Dict[str, Any]
     ) -> tuple[str, str, list[ConversationMessage], list[ToolCallMessage]]:
 
         user_msg: str = ""

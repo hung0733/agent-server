@@ -41,7 +41,7 @@ from backend.queues.msg_queue_handle import handle_agent_message
 from backend.tdai_memory.models import RecallResult
 from backend.tools.memory import MemoryTools
 from backend.tools.sandbox import SandboxTools
-from backend.tools.system import SystemTools
+from backend.tools.bulter import BulterTools
 
 
 class FakeLLM:
@@ -122,11 +122,11 @@ def _patch_assign_task_persistence(monkeypatch):
     FakeAssignedTaskDAO.created_data = None
     FakeAssignedTaskDAO.initial_steps_args = None
     monkeypatch.setattr(
-        "backend.tools.system.async_session_factory",
+        "backend.tools.bulter.async_session_factory",
         lambda: fake_session,
     )
     monkeypatch.setattr(
-        "backend.tools.system.AssignedTaskDAO",
+        "backend.tools.bulter.AssignedTaskDAO",
         FakeAssignedTaskDAO,
     )
     return fake_session
@@ -415,6 +415,41 @@ async def test_graph_binds_assign_task_for_bulter_agent_type():
     assert result["messages"][-1].content == "done"
 
 
+@pytest.mark.asyncio
+async def test_graph_binds_brainstormer_tools_for_brainstormer_agent_type():
+    class ToolCallingLLM:
+        def __init__(self):
+            self.bound_tools = None
+
+        def bind_tools(self, tools):
+            self.bound_tools = tools
+            return self
+
+        async def ainvoke(self, messages):
+            return AIMessage(content="done")
+
+    llm = ToolCallingLLM()
+    config = GraphNode.prepare_chat_node_config(
+        thread_id="session-1",
+        models=FakeModels(llm),
+        sys_prompt="",
+        involves_secrets=False,
+        think_mode=False,
+        args={},
+        agent_type="brainstormer",
+    )
+
+    result = await chat_node({"messages": [HumanMessage(content="hello")]}, config)
+
+    assert [tool.name for tool in llm.bound_tools] == [
+        "tdai_memory_search",
+        "tdai_conversation_search",
+        "ask_user_question",
+        "submit_html_plan_for_approval",
+    ]
+    assert result["messages"][-1].content == "done"
+
+
 def test_prepare_chat_node_config_includes_agent_db_id_for_assign_task():
     config = GraphNode.prepare_chat_node_config(
         thread_id="session-1",
@@ -546,7 +581,7 @@ async def test_bulter_graph_executes_assign_task_tool_call(monkeypatch):
 
     graph = StateGraph(MessageState)
     graph.add_node("chat", chat_node)
-    graph.add_node("tools", ToolNode(SystemTools + MemoryTools + SandboxTools))
+    graph.add_node("tools", ToolNode(BulterTools + MemoryTools + SandboxTools))
     graph.add_edge(START, "chat")
     graph.add_conditional_edges("chat", agent_route_after_chat)
     graph.add_edge("tools", END)
@@ -871,6 +906,7 @@ async def test_message_task_resumes_assign_task_after_human_approval(monkeypatch
         456,
         789,
         "user-1",
+        "Alice",
         "agent-1",
         "session-message-approve",
         "bulter",
@@ -999,6 +1035,7 @@ class FakeInterruptGraph:
 
 class FakeAgent:
     user_db_id = 1
+    user_name = "Alice"
     agent_db_id = 2
     session_db_id = 3
     agent_id = "agent-1"
@@ -1007,7 +1044,13 @@ class FakeAgent:
     models = object()
     sys_prompt = ""
     sender_agent_name = "user"
+    sender_agent_id = None
+    sender_agent_db_id = None
+    sender_agent_session_db_id = None
+    sender_agent_session_id = None
+    sender_is_sub_agent = False
     recv_agent_name = "agent"
+    recv_is_sub_agent = False
     stm_trigger_token = 10000
     stm_summary_token = 5000
 
@@ -1022,6 +1065,7 @@ async def test_prepare_sys_prompt_defaults_to_empty_string():
         2,
         3,
         "user-1",
+        "Alice",
         "agent-1",
         "session-1",
         "assistant",
@@ -1040,6 +1084,7 @@ def test_agent_runtime_marks_user_to_agent_conversation():
         2,
         3,
         "user-1",
+        "Alice",
         "agent-1",
         "session-1",
         "assistant",
@@ -1059,14 +1104,25 @@ def test_agent_runtime_marks_agent_to_agent_conversation():
         2,
         3,
         "user-1",
+        "Alice",
         "agent-1",
         "session-1",
         "assistant",
         "Receiver",
         99,
         "Sender",
+        99,
+        100,
+        "sender-default",
+        True,
+        False,
     )
 
+    assert agent.sender_agent_db_id == 99
+    assert agent.sender_agent_session_db_id == 100
+    assert agent.sender_agent_session_id == "sender-default"
+    assert agent.sender_is_sub_agent is True
+    assert agent.recv_is_sub_agent is False
     assert agent.sender_type == "agent"
     assert agent.recv_type == "agent"
     assert agent.conversation_kind == "agent_to_agent"
@@ -1106,8 +1162,14 @@ async def test_agent_proc_send_streams_content_chunks(monkeypatch):
     assert graph.configs[0]["configurable"]["conversation_kind"] == "user_to_agent"
     assert graph.configs[0]["configurable"]["sender_type"] == "user"
     assert graph.configs[0]["configurable"]["sandbox"] is sandbox
+    assert graph.configs[0]["configurable"]["user_name"] == "Alice"
     assert graph.configs[0]["configurable"]["agent_db_id"] == 2
     assert graph.configs[0]["configurable"]["agent_type"] == "assistant"
+    assert graph.configs[0]["configurable"]["sender_agent_db_id"] is None
+    assert graph.configs[0]["configurable"]["sender_agent_session_db_id"] is None
+    assert graph.configs[0]["configurable"]["sender_agent_session_id"] is None
+    assert graph.configs[0]["configurable"]["sender_is_sub_agent"] is False
+    assert graph.configs[0]["configurable"]["recv_is_sub_agent"] is False
 
 
 @pytest.mark.asyncio

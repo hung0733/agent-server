@@ -392,7 +392,13 @@ async def test_dao_crud_happy_path(monkeypatch):
                 user_to_agent_session.session_id,
             )
             assert user_to_agent_runtime is not None
-            assert user_to_agent_runtime[-1] == "Alice"
+            assert user_to_agent_runtime[4] == "Alice"
+            assert user_to_agent_runtime[10] == "Alice"
+            assert user_to_agent_runtime[11] is None
+            assert user_to_agent_runtime[12] is None
+            assert user_to_agent_runtime[13] is None
+            assert user_to_agent_runtime[14] is False
+            assert user_to_agent_runtime[15] is False
 
             sender_agent = await agent_dao.create(
                 AgentCreate(
@@ -401,8 +407,85 @@ async def test_dao_crud_happy_path(monkeypatch):
                     name="Sender Agent",
                     llm_group_id=group.id,
                     agent_type="assistant",
+                    is_sub_agent=True,
                 )
             )
+            sender_default_session = await session_dao.create(
+                AgentSessionCreate(
+                    recv_agent_id=sender_agent.id,
+                    session_id="sender-default",
+                    name="Sender Default",
+                    session_type="default",
+                )
+            )
+            assert (
+                await session_dao.get_default_session_by_agent_db_id(sender_agent.id)
+            ) == sender_default_session
+
+            await agent_dao.create(
+                AgentCreate(
+                    user_id=user.id,
+                    agent_id="inactive-brainstormer",
+                    name="Inactive Brainstormer",
+                    llm_group_id=group.id,
+                    agent_type="brainstormer",
+                    is_active=False,
+                    is_sub_agent=True,
+                )
+            )
+            await agent_dao.create(
+                AgentCreate(
+                    user_id=user.id,
+                    agent_id="non-sub-brainstormer",
+                    name="Non Sub Brainstormer",
+                    llm_group_id=group.id,
+                    agent_type="brainstormer",
+                    is_sub_agent=False,
+                )
+            )
+            assigned_brainstormer = await agent_dao.create(
+                AgentCreate(
+                    user_id=user.id,
+                    agent_id="assigned-brainstormer",
+                    name="Assigned Brainstormer",
+                    llm_group_id=group.id,
+                    agent_type="brainstormer",
+                    is_sub_agent=True,
+                )
+            )
+            later_brainstormer = await agent_dao.create(
+                AgentCreate(
+                    user_id=user.id,
+                    agent_id="later-brainstormer",
+                    name="Later Brainstormer",
+                    llm_group_id=group.id,
+                    agent_type="brainstormer",
+                    is_sub_agent=True,
+                )
+            )
+            assert (
+                await agent_dao.get_first_active_sub_agent_by_user_and_type(
+                    user_id=user.id,
+                    agent_type_id=steps[0].agent_type_id,
+                )
+            ) == assigned_brainstormer
+            assert later_brainstormer.id > assigned_brainstormer.id
+
+            await assigned_task_dao.update_task_session(
+                task_db_id=assigned_task.id,
+                session_db_id=sender_default_session.id,
+            )
+            await assigned_task_dao.update_step_assignment_and_session(
+                step_db_id=steps[0].id,
+                assign_agent_db_id=assigned_brainstormer.id,
+                session_db_id=sender_default_session.id,
+            )
+            await session.refresh(assigned_task)
+            await session.refresh(steps[0])
+            assert assigned_task.session_id == sender_default_session.id
+            assert steps[0].assign_agent_id == assigned_brainstormer.id
+            assert steps[0].session_id == sender_default_session.id
+
             agent_to_agent_session = await session_dao.create(
                 AgentSessionCreate(
                     recv_agent_id=updated_agent.id,
@@ -417,12 +500,19 @@ async def test_dao_crud_happy_path(monkeypatch):
                 agent_to_agent_session.session_id,
             )
             assert agent_to_agent_runtime is not None
-            assert agent_to_agent_runtime[-1] == "Sender Agent"
+            assert agent_to_agent_runtime[4] == "Alice"
+            assert agent_to_agent_runtime[10] == "Sender Agent"
+            assert agent_to_agent_runtime[11] == sender_agent.id
+            assert agent_to_agent_runtime[12] == sender_default_session.id
+            assert agent_to_agent_runtime[13] == sender_default_session.session_id
+            assert agent_to_agent_runtime[14] is True
+            assert agent_to_agent_runtime[15] is False
 
-            await session_dao.delete(user_to_agent_session)
-            await session_dao.delete(agent_to_agent_session)
             await session.delete(process_log)
             await assigned_task_dao.delete(assigned_task)
+            await session_dao.delete(user_to_agent_session)
+            await session_dao.delete(agent_to_agent_session)
+            await session_dao.delete(sender_default_session)
             await agent_dao.delete(updated_agent)
             assert await agent_dao.get_by_id(agent.id) is None
     finally:

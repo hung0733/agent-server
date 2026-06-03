@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -12,10 +13,14 @@ from backend.queues.task_queue import (
     TaskQueueStepStatus,
 )
 from backend.queues.task_queue_handle import (
+    handle_assigned_task_init_message_step,
     handle_assigned_task_init_step,
+    handle_assigned_task_response_step,
     handle_assigned_task_resume_step,
     handle_assigned_task_send_step,
 )
+
+TASK_CREATE_DT = datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
 
 
 class FakeSession:
@@ -34,8 +39,13 @@ class FakeSession:
 class FakeAssignedTaskDAO:
     rows = []
     list_calls = []
+    processing_marks = []
+    processing_mark_result = True
+    processing_clears = []
     logs = []
     finished_logs = []
+    task_session_updates = []
+    step_updates = []
     process_count = 0
     next_log_id = 100
 
@@ -45,6 +55,13 @@ class FakeAssignedTaskDAO:
     async def list_due_pending_steps(self, *, now, limit):
         type(self).list_calls.append({"now": now, "limit": limit})
         return type(self).rows[:limit]
+
+    async def mark_step_processing(self, *, step_db_id, now):
+        type(self).processing_marks.append({"step_db_id": step_db_id, "now": now})
+        return type(self).processing_mark_result
+
+    async def clear_step_processing(self, **kwargs):
+        type(self).processing_clears.append(kwargs)
 
     async def count_process_logs(self, *, step_db_id):
         return type(self).process_count
@@ -58,6 +75,71 @@ class FakeAssignedTaskDAO:
     async def finish_process_log(self, **kwargs):
         type(self).finished_logs.append(kwargs)
 
+    async def update_task_session(self, **kwargs):
+        type(self).task_session_updates.append(kwargs)
+
+    async def update_step_assignment_and_session(self, **kwargs):
+        type(self).step_updates.append(kwargs)
+
+
+class FakeAgentDAO:
+    agent = SimpleNamespace(id=456, agent_id="agent-assigned")
+    by_agent_id = {"agent-assigned": agent}
+    find_calls = []
+
+    def __init__(self, session):
+        self.session = session
+
+    async def get_first_active_sub_agent_by_user_and_type(self, **kwargs):
+        type(self).find_calls.append(kwargs)
+        return type(self).agent
+
+    async def get_by_agent_id(self, agent_id):
+        return type(self).by_agent_id.get(agent_id)
+
+
+class FakeAgentSessionDAO:
+    default_session = SimpleNamespace(id=321, session_id="default-main")
+    by_session_id = {"step-session-abc": SimpleNamespace(id=654)}
+    created_sessions = []
+    default_calls = []
+    session_id_calls = []
+
+    def __init__(self, session):
+        self.session = session
+
+    async def get_default_session_by_agent_db_id(self, agent_db_id):
+        type(self).default_calls.append(agent_db_id)
+        return type(self).default_session
+
+    async def get_by_session_id(self, session_id):
+        type(self).session_id_calls.append(session_id)
+        return type(self).by_session_id.get(session_id)
+
+    async def create(self, data):
+        session = SimpleNamespace(
+            id=654,
+            session_id=data.session_id,
+            name=data.name,
+            recv_agent_id=data.recv_agent_id,
+            sender_agent_id=data.sender_agent_id,
+            session_type=data.session_type,
+        )
+        type(self).created_sessions.append(session)
+        return session
+
+
+class FakeAgentMsgHistDAO:
+    history_count = 0
+    count_calls = []
+
+    def __init__(self, session):
+        self.session = session
+
+    async def count_by_session_id(self, session_id):
+        type(self).count_calls.append(session_id)
+        return type(self).history_count
+
 
 def _session_factory():
     return FakeSession()
@@ -66,15 +148,20 @@ def _session_factory():
 def _step(step_db_id: int, task_db_id: int = 10):
     responsible_agent = SimpleNamespace(id=123, agent_id="agent-main")
     assign_agent = SimpleNamespace(id=456, agent_id="agent-assigned")
-    session = SimpleNamespace(session_id="session-abc")
+    task_session = SimpleNamespace(session_id="task-session-abc")
+    step_session = SimpleNamespace(session_id="step-session-abc")
     return SimpleNamespace(
         id=step_db_id,
         step_id=f"step-{step_db_id}",
         task_id=task_db_id,
         task=SimpleNamespace(
             task_id=f"task-{task_db_id}",
+            task_name="Build task tracker",
+            goal="Build a reliable task tracker for the product team",
+            create_dt=TASK_CREATE_DT,
+            user_id=999,
             responsible_agent=responsible_agent,
-            session=session,
+            session=task_session,
         ),
         agent_type="brainstormer",
         agent_type_id=789,
@@ -83,27 +170,33 @@ def _step(step_db_id: int, task_db_id: int = 10):
         seq_no=1,
         assign_agent_id=assign_agent.id,
         assign_agent=assign_agent,
-        session=None,
+        session=step_session,
     )
 
 
 def _task(
     *,
     status: TaskQueueStepStatus = TaskQueueStepStatus.INIT,
-    responsible_agent_id: int = 123,
+    responsible_agent_id: str = "agent-main",
     step_db_id: int = 1,
 ):
     return TaskQueueStep(
-        step_db_id,
-        f"step-{step_db_id}",
-        10,
-        "task-10",
-        responsible_agent_id,
-        "planner",
-        "Plan",
-        "Plan it",
-        1,
-        datetime.now(timezone.utc),
+        step_db_id=step_db_id,
+        step_id=f"step-{step_db_id}",
+        task_db_id=10,
+        task_id="task-10",
+        task_name="Build task tracker",
+        task_goal="Build a reliable task tracker for the product team",
+        task_create_dt=TASK_CREATE_DT,
+        title="Plan",
+        goal="Plan it",
+        seq_no=1,
+        started_at=datetime.now(timezone.utc),
+        agent_type="planner",
+        responsible_agent_id=responsible_agent_id,
+        user_db_id=999,
+        responsible_agent_db_id=123,
+        agent_type_db_id=789,
         status=status,
     )
 
@@ -116,14 +209,31 @@ def _reset_fakes():
     FakeSession.commits = 0
     FakeAssignedTaskDAO.rows = []
     FakeAssignedTaskDAO.list_calls = []
+    FakeAssignedTaskDAO.processing_marks = []
+    FakeAssignedTaskDAO.processing_mark_result = True
+    FakeAssignedTaskDAO.processing_clears = []
     FakeAssignedTaskDAO.logs = []
     FakeAssignedTaskDAO.finished_logs = []
+    FakeAssignedTaskDAO.task_session_updates = []
+    FakeAssignedTaskDAO.step_updates = []
     FakeAssignedTaskDAO.process_count = 0
     FakeAssignedTaskDAO.next_log_id = 100
+    FakeAgentDAO.agent = SimpleNamespace(id=456, agent_id="agent-assigned")
+    FakeAgentDAO.by_agent_id = {"agent-assigned": FakeAgentDAO.agent}
+    FakeAgentDAO.find_calls = []
+    FakeAgentSessionDAO.default_session = SimpleNamespace(
+        id=321, session_id="default-main"
+    )
+    FakeAgentSessionDAO.by_session_id = {"step-session-abc": SimpleNamespace(id=654)}
+    FakeAgentSessionDAO.created_sessions = []
+    FakeAgentSessionDAO.default_calls = []
+    FakeAgentSessionDAO.session_id_calls = []
+    FakeAgentMsgHistDAO.history_count = 0
+    FakeAgentMsgHistDAO.count_calls = []
 
 
 @pytest.mark.asyncio
-async def test_task_queue_enqueues_due_pending_step_without_marking_step(monkeypatch):
+async def test_task_queue_enqueues_due_pending_step_without_marking_processing(monkeypatch):
     _reset_fakes()
     monkeypatch.setattr("backend.queues.task_queue.AssignedTaskDAO", FakeAssignedTaskDAO)
     FakeAssignedTaskDAO.rows = [(_step(1), 123)]
@@ -133,15 +243,67 @@ async def test_task_queue_enqueues_due_pending_step_without_marking_step(monkeyp
 
     _, _, queued = await queue._queue.get()
     assert queued.step_db_id == 1
-    assert queued.responsible_agent_id == 123
-    assert queued.assign_agent_id == 456
-    assert queued.agent_type_id == 789
-    assert queued.responsible_agent.agent_id == "agent-main"
-    assert queued.assign_agent.agent_id == "agent-assigned"
-    assert queued.session_id == "session-abc"
+    assert queued.task_name == "Build task tracker"
+    assert queued.task_goal == "Build a reliable task tracker for the product team"
+    assert queued.task_create_dt == TASK_CREATE_DT
+    assert queued.agent_type == "brainstormer"
+    assert queued.responsible_agent_id == "agent-main"
+    assert queued.user_db_id == 999
+    assert queued.responsible_agent_db_id == 123
+    assert queued.agent_type_db_id == 789
+    assert queued.assign_agent_db_id == 456
+    assert queued.task_session_id == "task-session-abc"
+    assert queued.step_session_id == "step-session-abc"
+    assert queued.assign_agent_id == "agent-assigned"
     assert queued.status == TaskQueueStepStatus.INIT
     assert queue._queued_step_ids == {1}
     assert FakeAssignedTaskDAO.list_calls[0]["limit"] == 4
+    assert FakeAssignedTaskDAO.processing_marks == []
+
+
+@pytest.mark.asyncio
+async def test_task_queue_marks_processing_before_first_handler(monkeypatch):
+    _reset_fakes()
+    monkeypatch.setattr("backend.queues.task_queue.AssignedTaskDAO", FakeAssignedTaskDAO)
+
+    calls = []
+
+    async def init_handler(task):
+        calls.append(task.status)
+        task.status = TaskQueueStepStatus.COMPLETED
+        return TaskQueueHandlerResult(success=True, log="done")
+
+    queue = _queue({TaskQueueStepStatus.INIT: init_handler})
+    task = _task(status=TaskQueueStepStatus.INIT)
+
+    assert await queue._handle_task(task) is True
+
+    assert calls == [TaskQueueStepStatus.INIT]
+    assert FakeAssignedTaskDAO.processing_marks == [
+        {"step_db_id": 1, "now": task.started_at}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_task_queue_skips_handler_when_processing_mark_fails(monkeypatch):
+    _reset_fakes()
+    monkeypatch.setattr("backend.queues.task_queue.AssignedTaskDAO", FakeAssignedTaskDAO)
+    FakeAssignedTaskDAO.processing_mark_result = False
+    calls = []
+
+    async def init_handler(task):
+        calls.append(task.status)
+        return None
+
+    queue = _queue({TaskQueueStepStatus.INIT: init_handler})
+    task = _task(status=TaskQueueStepStatus.INIT)
+
+    assert await queue._handle_task(task) is True
+    assert calls == []
+    assert task.process_log_db_id is None
+    assert FakeAssignedTaskDAO.processing_marks == [
+        {"step_db_id": 1, "now": task.started_at}
+    ]
 
 
 @pytest.mark.asyncio
@@ -154,8 +316,8 @@ async def test_task_queue_enqueues_same_agent_steps_and_worker_gate_decides(monk
     await queue._enqueue_due_steps()
 
     assert queue._queue.qsize() == 2
-    task = _task(responsible_agent_id=123)
-    queue._active_responsible_agent_ids.add(123)
+    task = _task(responsible_agent_id="agent-main")
+    queue._active_responsible_agent_ids.add("agent-main")
     assert await queue._handle_task(task) is False
 
 
@@ -186,14 +348,22 @@ async def test_task_queue_interrupt_blocks_same_agent_send_and_init(monkeypatch)
 
     queue = _queue()
     await queue._enqueue_task(
-        _task(status=TaskQueueStepStatus.INTERRUPT, responsible_agent_id=123)
+        _task(status=TaskQueueStepStatus.INTERRUPT, responsible_agent_id="agent-main")
     )
 
-    send_task = _task(status=TaskQueueStepStatus.SEND, responsible_agent_id=123)
-    init_task = _task(status=TaskQueueStepStatus.INIT, responsible_agent_id=123)
-    resume_task = _task(status=TaskQueueStepStatus.RESUME, responsible_agent_id=123)
+    send_task = _task(status=TaskQueueStepStatus.SEND, responsible_agent_id="agent-main")
+    init_message_task = _task(
+        status=TaskQueueStepStatus.INIT_MESSAGE, responsible_agent_id="agent-main"
+    )
+    response_task = _task(
+        status=TaskQueueStepStatus.RESPONSE, responsible_agent_id="agent-main"
+    )
+    init_task = _task(status=TaskQueueStepStatus.INIT, responsible_agent_id="agent-main")
+    resume_task = _task(status=TaskQueueStepStatus.RESUME, responsible_agent_id="agent-main")
 
     assert await queue._handle_task(send_task) is False
+    assert await queue._handle_task(init_message_task) is False
+    assert await queue._handle_task(response_task) is False
     assert await queue._handle_task(init_task) is False
     assert await queue._handle_task(resume_task) is False
 
@@ -212,6 +382,9 @@ async def test_task_queue_completed_with_result_closes_process_log(monkeypatch):
     assert FakeAssignedTaskDAO.finished_logs[0]["process_log_db_id"] == 99
     assert FakeAssignedTaskDAO.finished_logs[0]["status"] == "success"
     assert FakeAssignedTaskDAO.finished_logs[0]["log"] == "saved"
+    assert FakeAssignedTaskDAO.processing_clears == [
+        {"step_db_id": 1, "next_run_at": None}
+    ]
 
 
 @pytest.mark.asyncio
@@ -237,7 +410,9 @@ async def test_task_queue_priority_order():
     queue = _queue()
     for status in (
         TaskQueueStepStatus.INIT,
+        TaskQueueStepStatus.INIT_MESSAGE,
         TaskQueueStepStatus.SEND,
+        TaskQueueStepStatus.RESPONSE,
         TaskQueueStepStatus.INTERRUPT,
         TaskQueueStepStatus.RESUME,
         TaskQueueStepStatus.COMPLETED,
@@ -253,28 +428,204 @@ async def test_task_queue_priority_order():
         TaskQueueStepStatus.COMPLETED,
         TaskQueueStepStatus.RESUME,
         TaskQueueStepStatus.INTERRUPT,
+        TaskQueueStepStatus.RESPONSE,
         TaskQueueStepStatus.SEND,
+        TaskQueueStepStatus.INIT_MESSAGE,
         TaskQueueStepStatus.INIT,
     ]
 
 
 @pytest.mark.asyncio
-async def test_assigned_task_handlers_are_split_by_status():
+async def test_assigned_task_init_step_initializes_assignment_and_sessions(
+    monkeypatch, caplog
+):
+    _reset_fakes()
+    monkeypatch.setattr(
+        "backend.queues.task_queue_handle.async_session_factory", _session_factory
+    )
+    monkeypatch.setattr("backend.queues.task_queue_handle.AgentDAO", FakeAgentDAO)
+    monkeypatch.setattr(
+        "backend.queues.task_queue_handle.AgentSessionDAO", FakeAgentSessionDAO
+    )
+    monkeypatch.setattr(
+        "backend.queues.task_queue_handle.AssignedTaskDAO", FakeAssignedTaskDAO
+    )
+    caplog.set_level(logging.INFO, logger="backend.queues.task_queue_handle")
+
     init_task = _task(status=TaskQueueStepStatus.INIT)
     init_result = await handle_assigned_task_init_step(init_task)
     assert init_result is None
-    assert init_task.status == TaskQueueStepStatus.SEND
+    assert init_task.status == TaskQueueStepStatus.INIT_MESSAGE
+    assert init_task.assign_agent_id == "agent-assigned"
+    assert init_task.assign_agent_db_id == 456
+    assert init_task.task_session_id == "default-main"
+    assert init_task.step_session_id.startswith("session-")
+    assert FakeAgentDAO.find_calls == [{"user_id": 999, "agent_type_id": 789}]
+    assert FakeAgentSessionDAO.default_calls == [123]
+    assert FakeAssignedTaskDAO.task_session_updates == [
+        {"task_db_id": 10, "session_db_id": 321}
+    ]
+    assert FakeAssignedTaskDAO.step_updates == [
+        {"step_db_id": 1, "assign_agent_db_id": 456},
+        {"step_db_id": 1, "session_db_id": 654},
+    ]
+    assert FakeAgentSessionDAO.created_sessions[0].recv_agent_id == 456
+    assert FakeAgentSessionDAO.created_sessions[0].sender_agent_id == 123
+    assert FakeAgentSessionDAO.created_sessions[0].session_type == "chat"
+    assert "status=init" in caplog.text
+    assert "responsible_agent_id=agent-main" in caplog.text
+    assert "assign_agent_id=None" in caplog.text
+    assert "task_session_id=" in caplog.text
+    assert "step_session_id=" in caplog.text
+    assert "task_name=Build task tracker" in caplog.text
+    assert "step_name=Plan" in caplog.text
 
-    send_result = await handle_assigned_task_send_step(init_task)
-    assert send_result is not None
-    assert send_result.success is True
-    assert init_task.status == TaskQueueStepStatus.COMPLETED
 
+@pytest.mark.asyncio
+async def test_assigned_task_init_step_reuses_existing_assignment_and_sessions(
+    monkeypatch,
+):
+    _reset_fakes()
+    monkeypatch.setattr(
+        "backend.queues.task_queue_handle.async_session_factory", _session_factory
+    )
+    monkeypatch.setattr("backend.queues.task_queue_handle.AgentDAO", FakeAgentDAO)
+    monkeypatch.setattr(
+        "backend.queues.task_queue_handle.AgentSessionDAO", FakeAgentSessionDAO
+    )
+    monkeypatch.setattr(
+        "backend.queues.task_queue_handle.AssignedTaskDAO", FakeAssignedTaskDAO
+    )
+
+    task = _task(status=TaskQueueStepStatus.INIT)
+    task.assign_agent_id = "agent-assigned"
+    task.assign_agent_db_id = 456
+    task.task_session_id = "task-session-abc"
+    task.step_session_id = "step-session-abc"
+
+    result = await handle_assigned_task_init_step(task)
+
+    assert result is None
+    assert task.status == TaskQueueStepStatus.INIT_MESSAGE
+    assert FakeAgentDAO.find_calls == []
+    assert FakeAgentSessionDAO.default_calls == []
+    assert FakeAgentSessionDAO.created_sessions == []
+    assert FakeAssignedTaskDAO.task_session_updates == []
+    assert FakeAssignedTaskDAO.step_updates == []
+
+
+@pytest.mark.asyncio
+async def test_assigned_task_init_step_raises_when_sub_agent_missing(monkeypatch):
+    _reset_fakes()
+    FakeAgentDAO.agent = None
+    monkeypatch.setattr(
+        "backend.queues.task_queue_handle.async_session_factory", _session_factory
+    )
+    monkeypatch.setattr("backend.queues.task_queue_handle.AgentDAO", FakeAgentDAO)
+    monkeypatch.setattr(
+        "backend.queues.task_queue_handle.AgentSessionDAO", FakeAgentSessionDAO
+    )
+    monkeypatch.setattr(
+        "backend.queues.task_queue_handle.AssignedTaskDAO", FakeAssignedTaskDAO
+    )
+
+    with pytest.raises(LookupError):
+        await handle_assigned_task_init_step(_task(status=TaskQueueStepStatus.INIT))
+
+
+@pytest.mark.asyncio
+async def test_assigned_task_init_message_step_prepares_initial_message(monkeypatch):
+    _reset_fakes()
+    monkeypatch.setattr(
+        "backend.queues.task_queue_handle.async_session_factory", _session_factory
+    )
+    monkeypatch.setattr(
+        "backend.queues.task_queue_handle.AgentSessionDAO", FakeAgentSessionDAO
+    )
+    monkeypatch.setattr(
+        "backend.queues.task_queue_handle.AgentMsgHistDAO", FakeAgentMsgHistDAO
+    )
+    init_message_task = _task(status=TaskQueueStepStatus.INIT_MESSAGE)
+    init_message_task.step_session_id = "step-session-abc"
+
+    init_message_result = await handle_assigned_task_init_message_step(init_message_task)
+
+    assert init_message_result is None
+    assert init_message_task.status == TaskQueueStepStatus.SEND
+    assert init_message_task.message == (
+        "請開始處理以下 assigned task step。\n\n"
+        "任務名稱：Build task tracker\n"
+        "任務目標：\n"
+        "Build a reliable task tracker for the product team\n\n"
+        "Session 目標：\n"
+        "Plan it\n\n"
+        "請專注完成這個 session 的目標，並在需要時提出明確問題或交付可供下一步使用的結果。"
+    )
+    assert "task-10" not in init_message_task.message
+    assert "step-1" not in init_message_task.message
+    assert FakeAgentSessionDAO.session_id_calls == ["step-session-abc"]
+    assert FakeAgentMsgHistDAO.count_calls == [654]
+
+
+@pytest.mark.asyncio
+async def test_assigned_task_init_message_step_prepares_continue_message(monkeypatch):
+    _reset_fakes()
+    FakeAgentMsgHistDAO.history_count = 2
+    monkeypatch.setattr(
+        "backend.queues.task_queue_handle.async_session_factory", _session_factory
+    )
+    monkeypatch.setattr(
+        "backend.queues.task_queue_handle.AgentSessionDAO", FakeAgentSessionDAO
+    )
+    monkeypatch.setattr(
+        "backend.queues.task_queue_handle.AgentMsgHistDAO", FakeAgentMsgHistDAO
+    )
+    init_message_task = _task(status=TaskQueueStepStatus.INIT_MESSAGE)
+    init_message_task.step_session_id = "step-session-abc"
+
+    init_message_result = await handle_assigned_task_init_message_step(init_message_task)
+
+    assert init_message_result is None
+    assert init_message_task.status == TaskQueueStepStatus.SEND
+    assert init_message_task.message == (
+        "請繼續處理之前的任務動作。"
+        "請根據這個 session 之前的對話及已完成內容繼續推進。"
+    )
+    assert "Build task tracker" not in init_message_task.message
+    assert "task-10" not in init_message_task.message
+    assert "step-1" not in init_message_task.message
+    assert FakeAgentSessionDAO.session_id_calls == ["step-session-abc"]
+    assert FakeAgentMsgHistDAO.count_calls == [654]
+
+
+@pytest.mark.asyncio
+async def test_assigned_task_send_response_and_resume_handlers_are_split_by_status(
+    caplog,
+):
+    caplog.set_level(logging.INFO, logger="backend.queues.task_queue_handle")
+    send_task = _task(status=TaskQueueStepStatus.SEND)
+
+    caplog.clear()
+    send_result = await handle_assigned_task_send_step(send_task)
+    assert send_result is None
+    assert send_task.status == TaskQueueStepStatus.RESPONSE
+    assert "status=send" in caplog.text
+
+    caplog.clear()
+    response_task = _task(status=TaskQueueStepStatus.RESPONSE)
+    response_result = await handle_assigned_task_response_step(response_task)
+    assert response_result is not None
+    assert response_result.success is True
+    assert response_task.status == TaskQueueStepStatus.COMPLETED
+    assert "status=response" in caplog.text
+
+    caplog.clear()
     resume_task = _task(status=TaskQueueStepStatus.RESUME)
     resume_result = await handle_assigned_task_resume_step(resume_task)
     assert resume_result is not None
     assert resume_result.success is True
     assert resume_task.status == TaskQueueStepStatus.COMPLETED
+    assert "status=resume" in caplog.text
 
 
 def test_task_queue_step_change_status():

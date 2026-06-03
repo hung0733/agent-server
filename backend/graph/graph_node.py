@@ -13,7 +13,7 @@ from langchain_core.messages import (
 from langchain_core.language_models import BaseChatModel
 from langchain_core.runnables import RunnableConfig
 from langchain_openai import ChatOpenAI
-from langgraph.prebuilt import ToolNode
+from langgraph.prebuilt import ToolNode, ToolRuntime
 
 from backend.dto.agent_msg_hist import AgentMsgHistCreate
 from backend.i18n import t
@@ -21,9 +21,10 @@ from backend.llm.llm import LLMSet
 from backend.llm.types import StreamChunk
 from backend.tdai_memory.manager import MemoryManager
 from backend.tdai_memory.models import CompletedTurn
+from backend.tools.brainstormer import BrainstormerTools
 from backend.tools.memory import MemoryTools
 from backend.tools.sandbox import SandboxTools
-from backend.tools.system import SystemTools
+from backend.tools.bulter import BulterTools
 from backend.utils.message import MsgUtil
 from backend.utils.tools import Tools
 
@@ -88,6 +89,62 @@ class GraphNode:
     }
 
     @staticmethod
+    def is_butler_asking(config: RunnableConfig) -> bool:
+        return GraphNode.get_configure(
+            config, "sender_agent_db_id", None
+        ) is not None and GraphNode.get_configure(config, "sender_is_sub_agent", False)
+
+    @staticmethod
+    def store_user_message(config: RunnableConfig, messages: list[BaseMessage]) -> None:
+        session_id: str = GraphNode.get_configure(config, "sender_agent_session_id", "")
+        session_db_id: int = GraphNode.get_configure(
+            config, "sender_agent_session_db_id", 0
+        )
+        step_id: str = GraphNode.get_configure(config, "step_id", "")
+        agent_id: str = GraphNode.get_configure(config, "sender_agent_id", "")
+        conversation_metadata = {
+            "conversation_kind": "user_to_agent",
+            "sender_name": GraphNode.get_configure(config, "user_name", ""),
+            "sender_type": "user",
+            "recv_name": GraphNode.get_configure(config, "recv_name", ""),
+            "recv_type": GraphNode.get_configure(config, "recv_type", "agent"),
+        }
+
+        user_msg, assistant_msg, cm, tcm = MsgUtil.base_msg_to_tdai_memory_rec(
+            messages, conversation_metadata
+        )
+
+        dtos: list[AgentMsgHistCreate] = MsgUtil.base_msg_to_msg_hist_rec(
+            messages, session_db_id, step_id, conversation_metadata
+        )
+
+        turn: CompletedTurn = CompletedTurn(
+            session_key=session_id,
+            user_text=user_msg,
+            assistant_text=assistant_msg,
+            messages=cm,
+            tool_call=tcm,
+            metadata=conversation_metadata,
+        )
+
+        Tools.start_async_task(
+            MemoryManager.instance().capture(agent_id=agent_id, turn=turn)
+        )
+
+        Tools.start_async_task(MsgUtil.save_agent_msg_hist(dtos))
+
+    @staticmethod
+    def get_tool_runtime(state: MessageState, config: RunnableConfig) -> ToolRuntime:
+        return ToolRuntime(
+            state=state,
+            context=None,
+            config=config,
+            stream_writer=lambda _: None,
+            tool_call_id=None,
+            store=None,
+        )  # type: ignore
+
+    @staticmethod
     def store_message(config: RunnableConfig, messages: list[BaseMessage]) -> None:
         session_id: str = GraphNode.get_configure(config, "thread_id", "")
         session_db_id: int = GraphNode.get_configure(config, "session_db_id", 0)
@@ -128,7 +185,7 @@ class GraphNode:
 
     @staticmethod
     def get_all_tools() -> list[Any]:
-        return MemoryTools + SystemTools + SandboxTools
+        return MemoryTools + BulterTools + BrainstormerTools + SandboxTools
 
     @staticmethod
     def build_tool_node(tools: list[Any]) -> ToolNode:
@@ -146,7 +203,9 @@ class GraphNode:
 
         tools: list[Any] = list(MemoryTools)
         if GraphNode.get_configure(config, "agent_type", "") == "bulter":
-            tools += SystemTools
+            tools += BulterTools
+        if GraphNode.get_configure(config, "agent_type", "") == "brainstormer":
+            tools += BrainstormerTools
         if (GraphNode.get_configure(config, "sandbox")) is not None:
             tools += SandboxTools
 
@@ -415,6 +474,7 @@ class GraphNode:
         recv_type: str = "agent",
         conversation_kind: str = "",
         user_db_id: int | None = None,
+        user_name: str = "",
         session_db_id: int | None = None,
         agent_db_id: int | None = None,
         agent_id: str = "",
@@ -422,6 +482,12 @@ class GraphNode:
         sandbox: Any | None = None,
         ltm_msg: str = "",
         timelines: list[BaseMessage] = [],
+        sender_agent_id: str = "",
+        sender_agent_db_id: int | None = None,
+        sender_agent_session_db_id: int | None = None,
+        sender_agent_session_id: str | None = None,
+        sender_is_sub_agent: bool = False,
+        recv_is_sub_agent: bool = False,
     ) -> RunnableConfig:
         return {
             "configurable": {
@@ -438,6 +504,7 @@ class GraphNode:
                 "recv_type": recv_type,
                 "conversation_kind": conversation_kind,
                 "user_db_id": user_db_id,
+                "user_name": user_name,
                 "agent_db_id": agent_db_id,
                 "agent_id": agent_id,
                 "agent_type": agent_type,
@@ -445,5 +512,11 @@ class GraphNode:
                 "ltm_msg": ltm_msg,
                 "timelines": timelines,
                 "session_db_id": session_db_id,
+                "sender_agent_db_id": sender_agent_db_id,
+                "sender_agent_id": sender_agent_id,
+                "sender_agent_session_db_id": sender_agent_session_db_id,
+                "sender_agent_session_id": sender_agent_session_id,
+                "sender_is_sub_agent": sender_is_sub_agent,
+                "recv_is_sub_agent": recv_is_sub_agent,
             }
         }

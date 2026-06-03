@@ -136,7 +136,13 @@ async def test_main_starts_message_queue_listener_and_cleans_up(monkeypatch):
     task_queue = queue_calls[3][1]
     task_handlers = {
         main_module.TaskQueueStepStatus.INIT: main_module.handle_assigned_task_init_step,
+        main_module.TaskQueueStepStatus.INIT_MESSAGE: (
+            main_module.handle_assigned_task_init_message_step
+        ),
         main_module.TaskQueueStepStatus.SEND: main_module.handle_assigned_task_send_step,
+        main_module.TaskQueueStepStatus.RESPONSE: (
+            main_module.handle_assigned_task_response_step
+        ),
         main_module.TaskQueueStepStatus.RESUME: main_module.handle_assigned_task_resume_step,
     }
     assert setup_calls == [True]

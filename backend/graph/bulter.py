@@ -3,7 +3,6 @@ from datetime import datetime, timezone
 from typing import Any
 
 from langchain_core.runnables import RunnableConfig
-from langgraph.prebuilt import ToolRuntime
 from langgraph.graph import END, START, StateGraph
 from langchain_core.messages import (
     AIMessage,
@@ -14,12 +13,12 @@ from backend.graph.agent import chat_node, end_node, route_after_chat
 from backend.graph.graph_node import GraphNode, MessageState
 from backend.graph.interrupt_nodes import human_review_node, route_after_human_review
 from backend.i18n import t
-from backend.tools.system import assign_task
+from backend.tools.bulter import assign_task
 
 logger = logging.getLogger(__name__)
 
 
-def route_after_chat_assign_task(state: MessageState) -> str:
+def route_after_chat_bulter(state: MessageState) -> str:
     if not state.get("messages"):
         return "end_node"
 
@@ -47,7 +46,9 @@ def pre_assign_task_node(state: MessageState, config: RunnableConfig) -> dict[st
                 task_name = args.get("task_name", "?")
                 goal = args.get("goal", "?")
 
-                logger.info(t("graph.bulter.assign_task.approval_requested"), task_name, goal)
+                logger.info(
+                    t("graph.bulter.assign_task.approval_requested"), task_name, goal
+                )
 
                 approval_msg = AIMessage(
                     content=t("graph.bulter.assign_task.approval_message")
@@ -61,7 +62,9 @@ def pre_assign_task_node(state: MessageState, config: RunnableConfig) -> dict[st
                     "human_review_result": None,
                 }
 
-    return {"messages": [ToolMessage(content=t("graph.bulter.assign_task.invalid_call"))]}
+    return {
+        "messages": [ToolMessage(content=t("graph.bulter.assign_task.invalid_call"))]
+    }
 
 
 async def assign_task_node(
@@ -70,15 +73,10 @@ async def assign_task_node(
     review_data = state.get("human_review_data") or {}
     task_name = review_data.get("task_name", "")
     goal = review_data.get("goal", "")
-    runtime = ToolRuntime(
-        state=state,
-        context=None,
-        config=config,
-        stream_writer=lambda _: None,
-        tool_call_id=None,
-        store=None,
+
+    result = await assign_task.coroutine(  # type: ignore
+        task_name, goal, GraphNode.get_tool_runtime(state, config)
     )
-    result = await assign_task.coroutine(task_name, goal, runtime)
     task_id = result.get("task_id") or ""
     status = result.get("status") or ""
 
@@ -115,7 +113,7 @@ workflow.add_node("tools", GraphNode.build_tool_node(GraphNode.get_all_tools()))
 workflow.add_node("end_node", end_node)
 
 workflow.add_edge(START, "chat")
-workflow.add_conditional_edges("chat", route_after_chat_assign_task)
+workflow.add_conditional_edges("chat", route_after_chat_bulter)
 workflow.add_conditional_edges("pre_assign_task_node", route_after_pre_assign_task)
 workflow.add_conditional_edges("human_review_node", route_after_human_review)
 workflow.add_edge("assign_task_node", "end_node")

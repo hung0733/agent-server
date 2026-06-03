@@ -7,7 +7,7 @@ from typing import Annotated, TypedDict
 import pytest
 
 from backend.i18n import t
-from backend.tools.system import assign_task, list_assigned_tasks, read_assigned_task
+from backend.tools.bulter import assign_task, list_assigned_tasks, read_assigned_task
 from langchain_core.messages import AIMessage
 from langgraph.graph import START, StateGraph
 from langgraph.graph.message import add_messages
@@ -142,11 +142,11 @@ def _patch_assign_task_persistence(monkeypatch):
     FakeAssignedTaskDAO.list_args = None
     FakeAssignedTaskDAO.detail_args = None
     monkeypatch.setattr(
-        "backend.tools.system.async_session_factory",
+        "backend.tools.bulter.async_session_factory",
         lambda: fake_session,
     )
     monkeypatch.setattr(
-        "backend.tools.system.AssignedTaskDAO",
+        "backend.tools.bulter.AssignedTaskDAO",
         FakeAssignedTaskDAO,
     )
     return fake_session

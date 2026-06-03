@@ -134,6 +134,7 @@ class AssignedTaskDAO(BaseDAO[AssignedTask]):
             )
             .where(
                 AssignedTaskStep.status == "pending",
+                AssignedTaskStep.processing_started_at.is_(None),
                 or_(
                     AssignedTaskStep.next_run_at.is_(None),
                     AssignedTaskStep.next_run_at <= now,
@@ -173,6 +174,40 @@ class AssignedTaskDAO(BaseDAO[AssignedTask]):
             update(AssignedTaskStep)
             .where(AssignedTaskStep.id == step_db_id)
             .values(processing_started_at=None, next_run_at=next_run_at)
+        )
+        await self.session.execute(stmt)
+        await self.session.flush()
+
+    async def update_task_session(
+        self, *, task_db_id: int, session_db_id: int
+    ) -> None:
+        stmt = (
+            update(AssignedTask)
+            .where(AssignedTask.id == task_db_id)
+            .values(session_id=session_db_id)
+        )
+        await self.session.execute(stmt)
+        await self.session.flush()
+
+    async def update_step_assignment_and_session(
+        self,
+        *,
+        step_db_id: int,
+        assign_agent_db_id: int | None = None,
+        session_db_id: int | None = None,
+    ) -> None:
+        values = {}
+        if assign_agent_db_id is not None:
+            values["assign_agent_id"] = assign_agent_db_id
+        if session_db_id is not None:
+            values["session_id"] = session_db_id
+        if not values:
+            return
+
+        stmt = (
+            update(AssignedTaskStep)
+            .where(AssignedTaskStep.id == step_db_id)
+            .values(**values)
         )
         await self.session.execute(stmt)
         await self.session.flush()

@@ -38,6 +38,7 @@ class Agent:
     session_db_id: int
 
     user_id: str
+    user_name: str
     agent_id: str
     session_id: str
 
@@ -45,7 +46,12 @@ class Agent:
 
     recv_agent_name: str
     sender_agent_id: int | None
+    sender_agent_db_id: int | None
+    sender_agent_session_db_id: int | None
+    sender_agent_session_id: str | None
     sender_agent_name: str
+    sender_is_sub_agent: bool
+    recv_is_sub_agent: bool
     sender_type: str
     recv_type: str
     conversation_kind: str
@@ -58,12 +64,18 @@ class Agent:
         agent_db_id: int,
         session_db_id: int,
         user_id: str,
+        user_name: str,
         agent_id: str,
         session_id: str,
         agent_type: str,
         recv_agent_name: str,
         sender_agent_id: int | None = None,
         sender_agent_name: str | None = None,
+        sender_agent_db_id: int | None = None,
+        sender_agent_session_db_id: int | None = None,
+        sender_agent_session_id: str | None = None,
+        sender_is_sub_agent: bool = False,
+        recv_is_sub_agent: bool = False,
     ):
         if sender_agent_name is None and isinstance(sender_agent_id, str):
             sender_agent_name = sender_agent_id
@@ -75,23 +87,44 @@ class Agent:
         self.session_id = session_id
         self.user_db_id = user_db_id
         self.user_id = user_id
+        self.user_name = user_name
         self.agent_type = agent_type
         self.recv_agent_name = recv_agent_name
         self.sender_agent_id = sender_agent_id
+        self.sender_agent_db_id = sender_agent_db_id
+        self.sender_agent_session_db_id = sender_agent_session_db_id
+        self.sender_agent_session_id = sender_agent_session_id
         self.sender_agent_name = sender_agent_name or ""
-        self.sender_type = "agent" if sender_agent_id is not None else "user"
+        self.sender_is_sub_agent = sender_is_sub_agent
+        self.recv_is_sub_agent = recv_is_sub_agent
+        self.sender_type = "agent" if sender_agent_db_id is not None else "user"
         self.recv_type = "agent"
         self.conversation_kind = (
-            "agent_to_agent" if sender_agent_id is not None else "user_to_agent"
+            "agent_to_agent" if sender_agent_db_id is not None else "user_to_agent"
         )
 
         if Agent._graph is None:
             Agent._graph = workflow.compile(checkpointer=GraphStore.checkpointer)
 
     @classmethod
-    async def get_db_agent(
-        cls, agent_id: str, session_id: str
-    ) -> tuple[int, int, int, str, str, str, str, str, int | None, str]:
+    async def get_db_agent(cls, agent_id: str, session_id: str) -> tuple[
+        int,
+        int,
+        int,
+        str,
+        str,
+        str,
+        str,
+        str,
+        str,
+        int | None,
+        str,
+        int | None,
+        int | None,
+        str | None,
+        bool,
+        bool,
+    ]:
         async with async_session_factory() as session:
             row = await AgentSessionDAO(session).get_agent_runtime_data(
                 agent_id, session_id
@@ -105,10 +138,14 @@ class Agent:
     @classmethod
     async def get_agent(cls, agent_id: str, session_id: str):
         row = await cls.get_db_agent(agent_id, session_id)
-        if row[6] == "bulter":
+        if row[7] == "bulter":
             from backend.agent.butler import Bulter
 
             agent = Bulter(*row)
+        elif row[7] == "brainstormer":
+            from backend.agent.brainstormer import Brainstormer
+
+            agent = Brainstormer(*row)
         else:
             agent = cls(*row)
         await agent.init_llm_models()
@@ -241,6 +278,7 @@ class Agent:
             recv_type=getattr(agent, "recv_type", "agent"),
             conversation_kind=getattr(agent, "conversation_kind", "user_to_agent"),
             user_db_id=agent.user_db_id,
+            user_name=getattr(agent, "user_name", ""),
             agent_db_id=agent.agent_db_id,
             agent_id=agent.agent_id,
             agent_type=agent.agent_type,
@@ -248,6 +286,14 @@ class Agent:
             ltm_msg=ltm_msg,
             timelines=timelines,
             session_db_id=agent.session_db_id,
+            sender_agent_db_id=getattr(agent, "sender_agent_db_id", None),
+            sender_agent_id=str(getattr(agent, "sender_agent_id", "") or ""),
+            sender_agent_session_db_id=getattr(
+                agent, "sender_agent_session_db_id", None
+            ),
+            sender_agent_session_id=getattr(agent, "sender_agent_session_id", None),
+            sender_is_sub_agent=getattr(agent, "sender_is_sub_agent", False),
+            recv_is_sub_agent=getattr(agent, "recv_is_sub_agent", False),
         )
 
         pending_text_end = False

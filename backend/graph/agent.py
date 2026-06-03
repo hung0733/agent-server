@@ -36,12 +36,14 @@ async def chat_node(state: MessageState, config: RunnableConfig):
         think_mode,
         bool(args),
     )
-    # logger.info(messages)
+    logger.info(messages)
 
     model_to_use = GraphNode.with_runtime_model_args(config, model_to_use)
     model_with_tools = GraphNode.build_tools(config, model_to_use)
 
     response: AIMessage = await model_with_tools.ainvoke(messages)
+
+    logger.info(response)
 
     GraphNode.log_base_message_response(response)
     response.additional_kwargs = {

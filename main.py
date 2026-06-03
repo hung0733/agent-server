@@ -25,7 +25,9 @@ from backend.queues.message_queue import MessageQueue
 from backend.queues.msg_queue_handle import handle_agent_message
 from backend.queues.task_queue import TaskQueue, TaskQueueStepStatus
 from backend.queues.task_queue_handle import (
+    handle_assigned_task_init_message_step,
     handle_assigned_task_init_step,
+    handle_assigned_task_response_step,
     handle_assigned_task_resume_step,
     handle_assigned_task_send_step,
 )
@@ -167,7 +169,9 @@ async def main(
     task_queue = TaskQueue(
         {
             TaskQueueStepStatus.INIT: handle_assigned_task_init_step,
+            TaskQueueStepStatus.INIT_MESSAGE: handle_assigned_task_init_message_step,
             TaskQueueStepStatus.SEND: handle_assigned_task_send_step,
+            TaskQueueStepStatus.RESPONSE: handle_assigned_task_response_step,
             TaskQueueStepStatus.RESUME: handle_assigned_task_resume_step,
         },
         max_concurrency=get_task_queue_max_concurrency(),

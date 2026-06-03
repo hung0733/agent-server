@@ -128,7 +128,7 @@ async def create_default_session(
             recv_agent_id=agent_db_id,
             session_id=session_id,
             name=t("scripts.new_agent.default_session_name"),
-            session_type="chat",
+            session_type="default",
             sender_agent_id=None,
             is_confidential=False,
         )

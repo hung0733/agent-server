@@ -6,7 +6,6 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import StrEnum
-from typing import TYPE_CHECKING
 
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -14,15 +13,14 @@ from backend.dao.assigned_task import AssignedTaskDAO
 from backend.db.session import async_session_factory
 from backend.i18n import t
 
-if TYPE_CHECKING:
-    from backend.entities import Agent
-
 logger = logging.getLogger(__name__)
 
 
 class TaskQueueStepStatus(StrEnum):
     INIT = "init"
+    INIT_MESSAGE = "init_message"
     SEND = "send"
+    RESPONSE = "response"
     INTERRUPT = "interrupt"
     RESUME = "resume"
     COMPLETED = "completed"
@@ -40,17 +38,23 @@ class TaskQueueStep:
     step_id: str
     task_db_id: int
     task_id: str
-    responsible_agent_id: int
-    agent_type: str
+    task_name: str
+    task_goal: str
+    task_create_dt: datetime
     title: str
     goal: str
     seq_no: int
     started_at: datetime
-    assign_agent_id: int | None = None
-    agent_type_id: int | None = None
-    responsible_agent: Agent | None = None
-    assign_agent: Agent | None = None
-    session_id: str = ""
+    agent_type: str
+    responsible_agent_id: str
+    user_db_id: int | None = None
+    responsible_agent_db_id: int | None = None
+    agent_type_db_id: int | None = None
+    assign_agent_db_id: int | None = None
+    task_session_id: str | None = ""
+    step_session_id: str | None = ""
+    assign_agent_id: str | None = None
+    message: str = ""
     status: TaskQueueStepStatus = TaskQueueStepStatus.INIT
     process_log_db_id: int | None = None
     handler_result: TaskQueueHandlerResult | None = None
@@ -66,8 +70,10 @@ _STATUS_PRIORITY = {
     TaskQueueStepStatus.COMPLETED: 0,
     TaskQueueStepStatus.RESUME: 1,
     TaskQueueStepStatus.INTERRUPT: 2,
-    TaskQueueStepStatus.SEND: 3,
-    TaskQueueStepStatus.INIT: 4,
+    TaskQueueStepStatus.RESPONSE: 3,
+    TaskQueueStepStatus.SEND: 4,
+    TaskQueueStepStatus.INIT_MESSAGE: 5,
+    TaskQueueStepStatus.INIT: 6,
 }
 
 
@@ -94,8 +100,8 @@ class TaskQueue:
         )
         self._poller: asyncio.Task[None] | None = None
         self._workers: list[asyncio.Task[None]] = []
-        self._active_responsible_agent_ids: set[int] = set()
-        self._interrupted_responsible_agent_ids: set[int] = set()
+        self._active_responsible_agent_ids: set[str] = set()
+        self._interrupted_responsible_agent_ids: set[str] = set()
         self._queued_step_ids: set[int] = set()
         self._counter = 0
 
@@ -140,7 +146,7 @@ class TaskQueue:
                 limit=available_slots,
             )
             claimed = 0
-            for step, responsible_agent_id in rows:
+            for step, _responsible_agent_db_id in rows:
                 if step.id in self._queued_step_ids:
                     continue
                 if claimed >= available_slots:
@@ -151,17 +157,26 @@ class TaskQueue:
                     step_id=step.step_id,
                     task_db_id=step.task_id,
                     task_id=step.task.task_id,
-                    responsible_agent_id=responsible_agent_id,
-                    agent_type=step.agent_type,
+                    task_name=step.task.task_name,
+                    task_goal=step.task.goal,
+                    task_create_dt=step.task.create_dt,
                     title=step.title,
                     goal=step.goal,
                     seq_no=step.seq_no,
                     started_at=now,
-                    assign_agent_id=step.assign_agent_id,
-                    agent_type_id=step.agent_type_id,
-                    responsible_agent=step.task.responsible_agent,
-                    assign_agent=step.assign_agent,
-                    session_id=_step_session_id(step),
+                    agent_type=step.agent_type,
+                    responsible_agent_id=step.task.responsible_agent.agent_id,
+                    user_db_id=step.task.user_id,
+                    responsible_agent_db_id=_responsible_agent_db_id,
+                    agent_type_db_id=step.agent_type_id,
+                    assign_agent_db_id=step.assign_agent_id,
+                    task_session_id=(
+                        step.task.session.session_id if step.task.session else ""
+                    ),
+                    step_session_id=step.session.session_id if step.session else "",
+                    assign_agent_id=(
+                        step.assign_agent.agent_id if step.assign_agent else None
+                    ),
                 )
                 await self._enqueue_task(task)
                 self._queued_step_ids.add(step.id)
@@ -201,6 +216,10 @@ class TaskQueue:
 
         self._active_responsible_agent_ids.add(task.responsible_agent_id)
         try:
+            if task.process_log_db_id is None and not await self._mark_step_processing(
+                task
+            ):
+                return True
             await self._ensure_process_log(task)
             result = await self._run_handler(task, handler)
             if result is not None:
@@ -219,7 +238,9 @@ class TaskQueue:
             return True
         if task.status in (
             TaskQueueStepStatus.INIT,
+            TaskQueueStepStatus.INIT_MESSAGE,
             TaskQueueStepStatus.SEND,
+            TaskQueueStepStatus.RESPONSE,
         ):
             return task.responsible_agent_id in self._interrupted_responsible_agent_ids
         return False
@@ -232,6 +253,17 @@ class TaskQueue:
         except Exception as exc:
             logger.exception(t("queues.task_queue.handler_failed"), task.step_id)
             return TaskQueueHandlerResult(success=False, log=str(exc))
+
+    async def _mark_step_processing(self, task: TaskQueueStep) -> bool:
+        async with self._session_factory() as session:
+            dao = AssignedTaskDAO(session)
+            marked = await dao.mark_step_processing(
+                step_db_id=task.step_db_id,
+                now=task.started_at,
+            )
+            if marked:
+                await session.commit()
+            return marked
 
     async def _ensure_process_log(self, task: TaskQueueStep) -> None:
         if task.process_log_db_id is not None:
@@ -264,6 +296,10 @@ class TaskQueue:
                 finished_at=finished_at,
                 log=task.handler_result.log,
             )
+            await dao.clear_step_processing(
+                step_db_id=task.step_db_id,
+                next_run_at=None,
+            )
             await session.commit()
         self._interrupted_responsible_agent_ids.discard(task.responsible_agent_id)
         return True
@@ -276,16 +312,3 @@ class TaskQueue:
             TaskQueueStepStatus.COMPLETED,
         ):
             self._interrupted_responsible_agent_ids.discard(task.responsible_agent_id)
-
-
-def _step_session_id(step: object) -> str:
-    step_session = getattr(step, "session", None)
-    if step_session is not None:
-        return str(step_session.session_id)
-
-    task = getattr(step, "task", None)
-    task_session = getattr(task, "session", None)
-    if task_session is not None:
-        return str(task_session.session_id)
-
-    return ""
