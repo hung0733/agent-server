@@ -92,7 +92,9 @@ class GraphNode:
     def is_butler_asking(config: RunnableConfig) -> bool:
         return GraphNode.get_configure(
             config, "sender_agent_db_id", None
-        ) is not None and GraphNode.get_configure(config, "sender_is_sub_agent", False)
+        ) is not None and not GraphNode.get_configure(
+            config, "sender_is_sub_agent", False
+        )
 
     @staticmethod
     def store_user_message(config: RunnableConfig, messages: list[BaseMessage]) -> None:
@@ -216,6 +218,10 @@ class GraphNode:
         logger.info(t("graph.agent.tools_loaded"), ", ".join(tool_names))
 
         try:
+            if GraphNode.get_configure(config, "agent_type", "") == "brainstormer":
+                return bind_tools(tools, tool_choice="required")  # type: ignore
+            return bind_tools(tools)  # type: ignore
+        except TypeError:
             return bind_tools(tools)  # type: ignore
         except NotImplementedError:
             return model

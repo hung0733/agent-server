@@ -41,7 +41,6 @@ class FakeAssignedTaskDAO:
     list_calls = []
     processing_marks = []
     processing_mark_result = True
-    processing_clears = []
     logs = []
     finished_logs = []
     task_session_updates = []
@@ -59,9 +58,6 @@ class FakeAssignedTaskDAO:
     async def mark_step_processing(self, *, step_db_id, now):
         type(self).processing_marks.append({"step_db_id": step_db_id, "now": now})
         return type(self).processing_mark_result
-
-    async def clear_step_processing(self, **kwargs):
-        type(self).processing_clears.append(kwargs)
 
     async def count_process_logs(self, *, step_db_id):
         return type(self).process_count
@@ -289,7 +285,6 @@ def _reset_fakes():
     FakeAssignedTaskDAO.list_calls = []
     FakeAssignedTaskDAO.processing_marks = []
     FakeAssignedTaskDAO.processing_mark_result = True
-    FakeAssignedTaskDAO.processing_clears = []
     FakeAssignedTaskDAO.logs = []
     FakeAssignedTaskDAO.finished_logs = []
     FakeAssignedTaskDAO.task_session_updates = []
@@ -348,6 +343,21 @@ async def test_task_queue_enqueues_due_pending_step_without_marking_processing(m
     assert queue._queued_step_ids == {1}
     assert FakeAssignedTaskDAO.list_calls[0]["limit"] == 4
     assert FakeAssignedTaskDAO.processing_marks == []
+
+
+@pytest.mark.asyncio
+async def test_task_queue_skips_step_already_tracked_in_memory(monkeypatch):
+    _reset_fakes()
+    monkeypatch.setattr("backend.queues.task_queue.AssignedTaskDAO", FakeAssignedTaskDAO)
+    FakeAssignedTaskDAO.rows = [(_step(1), 123)]
+
+    queue = _queue()
+    queue._queued_step_ids.add(1)
+    await queue._enqueue_due_steps()
+
+    assert queue._queue.qsize() == 0
+    assert queue._queued_step_ids == {1}
+    assert FakeAssignedTaskDAO.list_calls[0]["limit"] == 5
 
 
 @pytest.mark.asyncio
@@ -426,7 +436,7 @@ async def test_task_queue_only_calls_registered_status_handler(monkeypatch):
     interrupt_task = _task(status=TaskQueueStepStatus.INTERRUPT, step_db_id=2)
 
     assert await queue._handle_task(init_task) is True
-    assert await queue._handle_task(interrupt_task) is False
+    assert await queue._handle_task(interrupt_task) is True
     assert calls == [TaskQueueStepStatus.INIT]
 
 
@@ -471,9 +481,22 @@ async def test_task_queue_completed_with_result_closes_process_log(monkeypatch):
     assert FakeAssignedTaskDAO.finished_logs[0]["process_log_db_id"] == 99
     assert FakeAssignedTaskDAO.finished_logs[0]["status"] == "success"
     assert FakeAssignedTaskDAO.finished_logs[0]["log"] == "saved"
-    assert FakeAssignedTaskDAO.processing_clears == [
-        {"step_db_id": 1, "next_run_at": None}
-    ]
+
+
+@pytest.mark.asyncio
+async def test_task_queue_failed_handler_finishes_process_log(monkeypatch):
+    _reset_fakes()
+    monkeypatch.setattr("backend.queues.task_queue.AssignedTaskDAO", FakeAssignedTaskDAO)
+
+    async def init_handler(task):
+        raise RuntimeError("handler failed")
+
+    queue = _queue({TaskQueueStepStatus.INIT: init_handler})
+    task = _task(status=TaskQueueStepStatus.INIT)
+
+    assert await queue._handle_task(task) is True
+    assert FakeAssignedTaskDAO.finished_logs[0]["status"] == "failed"
+    assert FakeAssignedTaskDAO.finished_logs[0]["log"] == "handler failed"
 
 
 @pytest.mark.asyncio

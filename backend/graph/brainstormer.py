@@ -32,7 +32,7 @@ def route_after_chat_brainstormer(state: MessageState) -> str:
     return route_after_chat(state)
 
 
-def pre_user_question_node(
+async def pre_user_question_node(
     state: MessageState, config: RunnableConfig
 ) -> dict[str, Any]:
     last_message = state["messages"][-1]
@@ -44,7 +44,7 @@ def pre_user_question_node(
 
                 logger.info(f"User question requested: {question}")
 
-                message = ask_user_question.coroutine(**args)  # type: ignore
+                message = await ask_user_question.coroutine(**args)  # type: ignore
 
                 question_msg = AIMessage(
                     content=message,
@@ -72,10 +72,13 @@ workflow.add_node("chat", chat_node)
 workflow.add_node("human_review_node", human_review_node)
 workflow.add_node("tools", GraphNode.build_tool_node(GraphNode.get_all_tools()))
 workflow.add_node("end_node", end_node)
+workflow.add_node("pre_user_question_node", pre_user_question_node)
+
 
 workflow.add_edge(START, "chat")
 workflow.add_conditional_edges("chat", route_after_chat_brainstormer)
 workflow.add_conditional_edges("human_review_node", route_after_human_review)
+workflow.add_edge("pre_user_question_node", "human_review_node")
 workflow.add_edge("tools", "chat")
 workflow.add_edge("end_node", END)
 

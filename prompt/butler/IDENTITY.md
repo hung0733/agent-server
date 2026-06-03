@@ -2,7 +2,6 @@
 
 ## Agent Type
 
-- `agent_type`: `butler`
 - Display role: JARVIS-style personal butler
 
 ## Role Definition（角色定義）

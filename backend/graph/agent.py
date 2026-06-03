@@ -42,6 +42,12 @@ async def chat_node(state: MessageState, config: RunnableConfig):
     model_with_tools = GraphNode.build_tools(config, model_to_use)
 
     response: AIMessage = await model_with_tools.ainvoke(messages)
+    if (
+        GraphNode.get_configure(config, "agent_type", "") == "brainstormer"
+        and response.tool_calls
+        and response.content
+    ):
+        response.content = ""
 
     logger.info(response)
 

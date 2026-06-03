@@ -134,7 +134,6 @@ class AssignedTaskDAO(BaseDAO[AssignedTask]):
             )
             .where(
                 AssignedTaskStep.status == "pending",
-                AssignedTaskStep.processing_started_at.is_(None),
                 or_(
                     AssignedTaskStep.next_run_at.is_(None),
                     AssignedTaskStep.next_run_at <= now,
@@ -153,30 +152,20 @@ class AssignedTaskDAO(BaseDAO[AssignedTask]):
             .where(
                 AssignedTaskStep.id == step_db_id,
                 AssignedTaskStep.status == "pending",
-                AssignedTaskStep.processing_started_at.is_(None),
                 or_(
                     AssignedTaskStep.next_run_at.is_(None),
                     AssignedTaskStep.next_run_at <= now,
                 ),
             )
-            .values(processing_started_at=now)
+            .values(
+                processing_started_at=func.coalesce(
+                    AssignedTaskStep.processing_started_at,
+                    now,
+                )
+            )
             .returning(AssignedTaskStep.id)
         )
         return (await self.session.scalar(stmt)) is not None
-
-    async def clear_step_processing(
-        self,
-        *,
-        step_db_id: int,
-        next_run_at: datetime | None = None,
-    ) -> None:
-        stmt = (
-            update(AssignedTaskStep)
-            .where(AssignedTaskStep.id == step_db_id)
-            .values(processing_started_at=None, next_run_at=next_run_at)
-        )
-        await self.session.execute(stmt)
-        await self.session.flush()
 
     async def update_task_session(
         self, *, task_db_id: int, session_db_id: int

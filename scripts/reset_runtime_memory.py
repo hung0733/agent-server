@@ -23,7 +23,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from backend.i18n import t
 from backend.tdai_memory.manager import MemoryManager
 
-PRESERVED_AGENT_FILES = {"SOUL.md", "IDENTITY.md"}
+PRESERVED_AGENT_FILES = {"SOUL.md", "IDENTITY.md", "persona.md"}
 EMBEDDING_MODEL_DIMENSIONS = {
     "text-embedding-3-small": 1536,
     "text-embedding-3-large": 3072,
@@ -136,6 +136,28 @@ async def reset_postgres(*, dry_run: bool) -> dict[str, object]:
             langgraph_tables,
         )
         agent_msg_hist_count = await _count_table(conn, "public", "agent_msg_hist")
+        assigned_task_session_ref_count = await _count_table(
+            conn,
+            "public",
+            "assigned_task",
+            (
+                " WHERE session_id IN ("
+                "SELECT id FROM public.session "
+                "WHERE session_id NOT LIKE 'default-%'"
+                ")"
+            ),
+        )
+        assigned_task_step_session_ref_count = await _count_table(
+            conn,
+            "public",
+            "assigned_task_step",
+            (
+                " WHERE session_id IN ("
+                "SELECT id FROM public.session "
+                "WHERE session_id NOT LIKE 'default-%'"
+                ")"
+            ),
+        )
         non_default_session_count = await _count_table(
             conn,
             "public",
@@ -152,6 +174,10 @@ async def reset_postgres(*, dry_run: bool) -> dict[str, object]:
             "langgraph_table_counts": langgraph_table_counts,
             "agent_msg_hist_count": agent_msg_hist_count,
             "agent_msg_hist_deleted": 0,
+            "assigned_task_session_ref_count": assigned_task_session_ref_count,
+            "assigned_task_session_refs_cleared": 0,
+            "assigned_task_step_session_ref_count": assigned_task_step_session_ref_count,
+            "assigned_task_step_session_refs_cleared": 0,
             "non_default_session_count": non_default_session_count,
             "sessions_deleted": 0,
         }
@@ -162,10 +188,36 @@ async def reset_postgres(*, dry_run: bool) -> dict[str, object]:
             await _truncate_schema(conn, memory_schema, memory_tables)
             await _truncate_schema(conn, langgraph_schema, langgraph_tables)
             msg_status = await conn.execute("DELETE FROM public.agent_msg_hist")
+            task_status = await conn.execute(
+                """
+                UPDATE public.assigned_task
+                SET session_id = NULL
+                WHERE session_id IN (
+                    SELECT id FROM public.session
+                    WHERE session_id NOT LIKE 'default-%'
+                )
+                """
+            )
+            task_step_status = await conn.execute(
+                """
+                UPDATE public.assigned_task_step
+                SET session_id = NULL
+                WHERE session_id IN (
+                    SELECT id FROM public.session
+                    WHERE session_id NOT LIKE 'default-%'
+                )
+                """
+            )
             session_status = await conn.execute(
                 "DELETE FROM public.session WHERE session_id NOT LIKE 'default-%'"
             )
             summary["agent_msg_hist_deleted"] = _status_row_count(msg_status)
+            summary["assigned_task_session_refs_cleared"] = _status_row_count(
+                task_status
+            )
+            summary["assigned_task_step_session_refs_cleared"] = _status_row_count(
+                task_step_status
+            )
             summary["sessions_deleted"] = _status_row_count(session_status)
         return summary
     finally:
@@ -271,6 +323,14 @@ async def run(*, yes: bool) -> None:
     print(
         t("scripts.reset_runtime_memory.public_agent_msg_hist")
         % postgres_summary["agent_msg_hist_count"]
+    )
+    print(
+        t("scripts.reset_runtime_memory.public_assigned_task_session_refs")
+        % postgres_summary["assigned_task_session_ref_count"]
+    )
+    print(
+        t("scripts.reset_runtime_memory.public_assigned_task_step_session_refs")
+        % postgres_summary["assigned_task_step_session_ref_count"]
     )
     print(
         t("scripts.reset_runtime_memory.public_session")

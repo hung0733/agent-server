@@ -27,6 +27,7 @@ from backend.graph.agent import (
 )
 
 from backend.graph.graph_node import GraphNode, MessageState
+from backend.graph.brainstormer import pre_user_question_node
 from backend.graph.bulter import assign_task_node, workflow as butler_workflow
 from backend.graph.interrupt_nodes import (
     APPROVE_LABEL,
@@ -420,9 +421,11 @@ async def test_graph_binds_brainstormer_tools_for_brainstormer_agent_type():
     class ToolCallingLLM:
         def __init__(self):
             self.bound_tools = None
+            self.bound_tool_kwargs = None
 
-        def bind_tools(self, tools):
+        def bind_tools(self, tools, **kwargs):
             self.bound_tools = tools
+            self.bound_tool_kwargs = kwargs
             return self
 
         async def ainvoke(self, messages):
@@ -447,6 +450,7 @@ async def test_graph_binds_brainstormer_tools_for_brainstormer_agent_type():
         "ask_user_question",
         "submit_html_plan_for_approval",
     ]
+    assert llm.bound_tool_kwargs == {"tool_choice": "required"}
     assert result["messages"][-1].content == "done"
 
 
@@ -657,6 +661,53 @@ async def test_bulter_graph_intercepts_assign_task_for_approval(monkeypatch):
         "task_name": "Task tracker",
         "goal": "Create root task tracking",
     }
+
+
+@pytest.mark.asyncio
+async def test_brainstormer_user_question_uses_tool_args_not_message_content():
+    state = {
+        "messages": [
+            AIMessage(
+                content="呢段 content 不應直接輸出。",
+                tool_calls=[
+                    {
+                        "name": "ask_user_question",
+                        "args": {
+                            "question": "請確認名城資料來源。",
+                            "description": "需要決定預載標準，因為資料表 seed、搜尋和爬蟲來源都會受影響。",
+                            "choose": [
+                                "採用日本城郭協會「日本100名城」作為固定 seed 名單。",
+                                "先做自訂匯入流程，由用戶自行維護名單。",
+                            ],
+                        },
+                        "id": "call-1",
+                    }
+                ],
+            )
+        ],
+        "human_review_node": None,
+        "human_review_data": None,
+        "human_review_result": None,
+    }
+    config = GraphNode.prepare_chat_node_config(
+        thread_id="session-1",
+        models=None,
+        sys_prompt="",
+        involves_secrets=False,
+        think_mode=False,
+        args={},
+        agent_type="brainstormer",
+    )
+
+    result = await pre_user_question_node(state, config)
+
+    content = result["messages"][0].content
+    assert "呢段 content 不應直接輸出" not in content
+    assert "請確認名城資料來源" in content
+    assert "日本100名城" in content
+    assert "自訂匯入流程" in content
+    assert result["human_review_node"] == "chat_node"
+    assert result["human_review_data"]["question"] == "請確認名城資料來源。"
 
 
 @pytest.mark.asyncio
@@ -1510,3 +1561,44 @@ async def test_chat_node_preserves_reasoning_and_tool_calls():
             "type": "tool_call",
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_chat_node_clears_brainstormer_content_when_tool_calling():
+    class ToolLLM:
+        def bind_tools(self, tools, **kwargs):
+            return self
+
+        async def ainvoke(self, messages):
+            return AIMessage(
+                content="呢段追問正文不應由 chat content 輸出。",
+                tool_calls=[
+                    {
+                        "name": "ask_user_question",
+                        "args": {
+                            "question": "請確認資料來源。",
+                            "description": "要決定 seed 名單來源。",
+                            "choose": ["日本100名城", "自訂匯入"],
+                        },
+                        "id": "call-1",
+                    }
+                ],
+            )
+
+    config = GraphNode.prepare_chat_node_config(
+        thread_id="session-1",
+        models=FakeModels(ToolLLM()),
+        sys_prompt="",
+        involves_secrets=False,
+        think_mode=False,
+        args={},
+        agent_type="brainstormer",
+    )
+
+    result = await chat_node({"messages": [HumanMessage(content="hello")]}, config)
+    message = result["messages"][0]
+
+    assert isinstance(message, AIMessage)
+    assert message.content == ""
+    assert message.additional_kwargs["text_done"] is True
+    assert message.tool_calls[0]["name"] == "ask_user_question"

@@ -268,6 +268,26 @@ async def test_dao_crud_happy_path(monkeypatch):
                 "將已批准的 HTML 計劃轉換成可執行子步驟。",
                 "在開始執行前審核規劃輸出。",
             ]
+            first_started_at = datetime(2026, 1, 2, 4, 0, 0, tzinfo=timezone.utc)
+            second_started_at = datetime(2026, 1, 2, 5, 0, 0, tzinfo=timezone.utc)
+            assert await assigned_task_dao.mark_step_processing(
+                step_db_id=steps[0].id,
+                now=first_started_at,
+            ) is True
+            await session.refresh(steps[0])
+            assert steps[0].processing_started_at == first_started_at
+            assert await assigned_task_dao.mark_step_processing(
+                step_db_id=steps[0].id,
+                now=second_started_at,
+            ) is True
+            await session.refresh(steps[0])
+            assert steps[0].processing_started_at == first_started_at
+            due_steps = await assigned_task_dao.list_due_pending_steps(
+                now=second_started_at,
+                limit=10,
+            )
+            assert [step.id for step, _agent_id in due_steps] == [steps[0].id]
+
             started_at = datetime.now(timezone.utc)
             process_log = await assigned_task_dao.create_process_log(
                 step_db_id=steps[0].id,

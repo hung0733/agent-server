@@ -112,6 +112,11 @@ class TaskQueue:
         self._workers = [
             asyncio.create_task(self._worker()) for _ in range(self._max_concurrency)
         ]
+        logger.info(
+            t("queues.task_queue.started"),
+            self._max_concurrency,
+            self._poll_interval_seconds,
+        )
 
     async def stop(self) -> None:
         tasks = [task for task in [self._poller, *self._workers] if task is not None]
@@ -143,11 +148,18 @@ class TaskQueue:
             dao = AssignedTaskDAO(session)
             rows = await dao.list_due_pending_steps(
                 now=now,
-                limit=available_slots,
+                limit=available_slots + len(self._queued_step_ids),
             )
+            if rows:
+                logger.debug(t("queues.task_queue.poll_due_steps"), len(rows))
             claimed = 0
             for step, _responsible_agent_db_id in rows:
                 if step.id in self._queued_step_ids:
+                    logger.debug(
+                        t("queues.task_queue.skip_queued_step"),
+                        step.id,
+                        step.step_id,
+                    )
                     continue
                 if claimed >= available_slots:
                     break
@@ -179,7 +191,6 @@ class TaskQueue:
                     ),
                 )
                 await self._enqueue_task(task)
-                self._queued_step_ids.add(step.id)
                 claimed += 1
 
             if claimed:
@@ -193,13 +204,12 @@ class TaskQueue:
                 if not completed:
                     await self._enqueue_task(task)
                     await asyncio.sleep(0)
-                else:
-                    self._queued_step_ids.discard(task.step_db_id)
             finally:
                 self._queue.task_done()
 
     async def _enqueue_task(self, task: TaskQueueStep) -> None:
         self._sync_interrupt_state(task)
+        self._queued_step_ids.add(task.step_db_id)
         await self._queue.put((_STATUS_PRIORITY[task.status], self._counter, task))
         self._counter += 1
 
@@ -209,6 +219,9 @@ class TaskQueue:
 
         if task.status == TaskQueueStepStatus.COMPLETED:
             return await self._complete_task_if_ready(task)
+        if task.status == TaskQueueStepStatus.INTERRUPT:
+            self._sync_interrupt_state(task)
+            return True
 
         handler = self._handlers.get(task.status)
         if handler is None:
@@ -224,9 +237,11 @@ class TaskQueue:
             result = await self._run_handler(task, handler)
             if result is not None:
                 task.handler_result = result
+                if not result.success:
+                    return await self._finish_task_if_ready(task)
             self._sync_interrupt_state(task)
             if task.status == TaskQueueStepStatus.COMPLETED:
-                return await self._complete_task_if_ready(task)
+                return await self._finish_task_if_ready(task)
             return False
         finally:
             self._active_responsible_agent_ids.discard(task.responsible_agent_id)
@@ -263,6 +278,11 @@ class TaskQueue:
             )
             if marked:
                 await session.commit()
+                logger.info(
+                    t("queues.task_queue.claimed_step"),
+                    task.step_id,
+                    task.task_id,
+                )
             return marked
 
     async def _ensure_process_log(self, task: TaskQueueStep) -> None:
@@ -284,24 +304,28 @@ class TaskQueue:
             await session.commit()
 
     async def _complete_task_if_ready(self, task: TaskQueueStep) -> bool:
+        return await self._finish_task_if_ready(task)
+
+    async def _finish_task_if_ready(self, task: TaskQueueStep) -> bool:
         if task.handler_result is None:
             return False
 
         finished_at = datetime.now(timezone.utc)
+        success = task.handler_result.success
         async with self._session_factory() as session:
             dao = AssignedTaskDAO(session)
             await dao.finish_process_log(
                 process_log_db_id=task.process_log_db_id,
-                status="success" if task.handler_result.success else "failed",
+                status="success" if success else "failed",
                 finished_at=finished_at,
                 log=task.handler_result.log,
             )
-            await dao.clear_step_processing(
-                step_db_id=task.step_db_id,
-                next_run_at=None,
-            )
             await session.commit()
         self._interrupted_responsible_agent_ids.discard(task.responsible_agent_id)
+        if success:
+            logger.info(t("queues.task_queue.completed_step"), task.step_id, task.task_id)
+        else:
+            logger.info(t("queues.task_queue.failed_step"), task.step_id, task.task_id)
         return True
 
     def _sync_interrupt_state(self, task: TaskQueueStep) -> None:

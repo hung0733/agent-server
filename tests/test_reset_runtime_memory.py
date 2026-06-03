@@ -46,7 +46,6 @@ def test_memory_file_cleanup_preserves_soul_and_identity(tmp_path):
 
     assert {path.name for path in dry_targets} == {
         "conversations",
-        "persona.md",
         "scene_blocks",
     }
     assert (agent_dir / "persona.md").exists()
@@ -56,7 +55,7 @@ def test_memory_file_cleanup_preserves_soul_and_identity(tmp_path):
 
     assert (agent_dir / "SOUL.md").read_text(encoding="utf-8") == "soul"
     assert (agent_dir / "IDENTITY.md").read_text(encoding="utf-8") == "identity"
-    assert not (agent_dir / "persona.md").exists()
+    assert (agent_dir / "persona.md").read_text(encoding="utf-8") == "persona"
     assert not conversations_dir.exists()
     assert not scene_dir.exists()
     assert data_dir.exists()
@@ -90,6 +89,16 @@ class FakePostgresConn:
             'SELECT COUNT(*) FROM "langgraph"."writes"': 44,
             'SELECT COUNT(*) FROM "public"."agent_msg_hist"': 7,
             (
+                'SELECT COUNT(*) FROM "public"."assigned_task"'
+                " WHERE session_id IN (SELECT id FROM public.session "
+                "WHERE session_id NOT LIKE 'default-%')"
+            ): 2,
+            (
+                'SELECT COUNT(*) FROM "public"."assigned_task_step"'
+                " WHERE session_id IN (SELECT id FROM public.session "
+                "WHERE session_id NOT LIKE 'default-%')"
+            ): 4,
+            (
                 'SELECT COUNT(*) FROM "public"."session"'
                 " WHERE session_id NOT LIKE 'default-%'"
             ): 3,
@@ -100,6 +109,10 @@ class FakePostgresConn:
         self.executed.append((query, args))
         if query.startswith("DELETE FROM public.agent_msg_hist"):
             return "DELETE 7"
+        if "UPDATE public.assigned_task_step" in query:
+            return "UPDATE 4"
+        if "UPDATE public.assigned_task" in query:
+            return "UPDATE 2"
         if query.startswith("DELETE FROM public.session"):
             return "DELETE 3"
         return "TRUNCATE TABLE"
@@ -137,6 +150,8 @@ async def test_postgres_dry_run_discovers_tables_without_deleting(monkeypatch):
         "writes": 44,
     }
     assert summary["agent_msg_hist_count"] == 7
+    assert summary["assigned_task_session_ref_count"] == 2
+    assert summary["assigned_task_step_session_ref_count"] == 4
     assert summary["non_default_session_count"] == 3
     assert conn.executed == []
     assert conn.closed is True
@@ -161,12 +176,21 @@ async def test_postgres_apply_clears_runtime_tables(monkeypatch):
     assert any('"memories"."l0_conversations"' in query for query in statements)
     assert any('"langgraph"."checkpoints"' in query for query in statements)
     assert "DELETE FROM public.agent_msg_hist" in statements
+    assert any("UPDATE public.assigned_task\n" in query for query in statements)
+    assert any("UPDATE public.assigned_task_step\n" in query for query in statements)
     assert "DELETE FROM public.session WHERE session_id NOT LIKE 'default-%'" in statements
+    assert statements.index("DELETE FROM public.agent_msg_hist") < statements.index(
+        "DELETE FROM public.session WHERE session_id NOT LIKE 'default-%'"
+    )
     assert summary["memory_table_counts"]["l0_conversations"] == 11
     assert summary["langgraph_table_counts"]["checkpoints"] == 33
     assert summary["agent_msg_hist_count"] == 7
+    assert summary["assigned_task_session_ref_count"] == 2
+    assert summary["assigned_task_step_session_ref_count"] == 4
     assert summary["non_default_session_count"] == 3
     assert summary["agent_msg_hist_deleted"] == 7
+    assert summary["assigned_task_session_refs_cleared"] == 2
+    assert summary["assigned_task_step_session_refs_cleared"] == 4
     assert summary["sessions_deleted"] == 3
     assert conn.closed is True
 
