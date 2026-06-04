@@ -28,7 +28,6 @@ from backend.queues.task_queue_handle import (
     handle_assigned_task_init_message_step,
     handle_assigned_task_init_step,
     handle_assigned_task_response_step,
-    handle_assigned_task_resume_step,
     handle_assigned_task_send_step,
 )
 from backend.tdai_memory import MemoryManager
@@ -172,7 +171,6 @@ async def main(
             TaskQueueStepStatus.INIT_MESSAGE: handle_assigned_task_init_message_step,
             TaskQueueStepStatus.SEND: handle_assigned_task_send_step,
             TaskQueueStepStatus.RESPONSE: handle_assigned_task_response_step,
-            TaskQueueStepStatus.RESUME: handle_assigned_task_resume_step,
         },
         max_concurrency=get_task_queue_max_concurrency(),
         poll_interval_seconds=get_task_queue_poll_interval_seconds(),

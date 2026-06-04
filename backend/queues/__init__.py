@@ -15,7 +15,6 @@ from backend.queues.task_queue_handle import (
     handle_assigned_task_init_step,
     handle_assigned_task_init_message_step,
     handle_assigned_task_response_step,
-    handle_assigned_task_resume_step,
     handle_assigned_task_send_step,
 )
 
@@ -31,7 +30,6 @@ __all__ = [
     "handle_assigned_task_init_message_step",
     "handle_assigned_task_init_step",
     "handle_assigned_task_response_step",
-    "handle_assigned_task_resume_step",
     "handle_assigned_task_send_step",
     "handle_agent_message",
 ]

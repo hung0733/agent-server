@@ -147,7 +147,6 @@ async def test_main_starts_message_queue_listener_and_cleans_up(monkeypatch):
         main_module.TaskQueueStepStatus.RESPONSE: (
             main_module.handle_assigned_task_response_step
         ),
-        main_module.TaskQueueStepStatus.RESUME: main_module.handle_assigned_task_resume_step,
     }
     assert setup_calls == [True]
     assert migration_calls == [True]

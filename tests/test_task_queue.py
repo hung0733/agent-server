@@ -16,7 +16,6 @@ from backend.queues.task_queue_handle import (
     handle_assigned_task_init_message_step,
     handle_assigned_task_init_step,
     handle_assigned_task_response_step,
-    handle_assigned_task_resume_step,
     handle_assigned_task_send_step,
 )
 
@@ -433,22 +432,20 @@ async def test_task_queue_only_calls_registered_status_handler(monkeypatch):
 
     queue = _queue({TaskQueueStepStatus.INIT: init_handler})
     init_task = _task(status=TaskQueueStepStatus.INIT)
-    interrupt_task = _task(status=TaskQueueStepStatus.INTERRUPT, step_db_id=2)
+    send_task = _task(status=TaskQueueStepStatus.SEND, step_db_id=2)
 
     assert await queue._handle_task(init_task) is True
-    assert await queue._handle_task(interrupt_task) is True
+    assert await queue._handle_task(send_task) is False
     assert calls == [TaskQueueStepStatus.INIT]
 
 
 @pytest.mark.asyncio
-async def test_task_queue_interrupt_blocks_same_agent_send_and_init(monkeypatch):
+async def test_task_queue_active_agent_blocks_same_agent_steps(monkeypatch):
     _reset_fakes()
     monkeypatch.setattr("backend.queues.task_queue.AssignedTaskDAO", FakeAssignedTaskDAO)
 
     queue = _queue()
-    await queue._enqueue_task(
-        _task(status=TaskQueueStepStatus.INTERRUPT, responsible_agent_id="agent-main")
-    )
+    queue._active_responsible_agent_ids.add("agent-main")
 
     send_task = _task(status=TaskQueueStepStatus.SEND, responsible_agent_id="agent-main")
     init_message_task = _task(
@@ -458,13 +455,11 @@ async def test_task_queue_interrupt_blocks_same_agent_send_and_init(monkeypatch)
         status=TaskQueueStepStatus.RESPONSE, responsible_agent_id="agent-main"
     )
     init_task = _task(status=TaskQueueStepStatus.INIT, responsible_agent_id="agent-main")
-    resume_task = _task(status=TaskQueueStepStatus.RESUME, responsible_agent_id="agent-main")
 
     assert await queue._handle_task(send_task) is False
     assert await queue._handle_task(init_message_task) is False
     assert await queue._handle_task(response_task) is False
     assert await queue._handle_task(init_task) is False
-    assert await queue._handle_task(resume_task) is False
 
 
 @pytest.mark.asyncio
@@ -525,8 +520,6 @@ async def test_task_queue_priority_order():
         TaskQueueStepStatus.INIT_MESSAGE,
         TaskQueueStepStatus.SEND,
         TaskQueueStepStatus.RESPONSE,
-        TaskQueueStepStatus.INTERRUPT,
-        TaskQueueStepStatus.RESUME,
         TaskQueueStepStatus.COMPLETED,
     ):
         await queue._enqueue_task(_task(status=status))
@@ -538,8 +531,6 @@ async def test_task_queue_priority_order():
 
     assert ordered == [
         TaskQueueStepStatus.COMPLETED,
-        TaskQueueStepStatus.RESUME,
-        TaskQueueStepStatus.INTERRUPT,
         TaskQueueStepStatus.RESPONSE,
         TaskQueueStepStatus.SEND,
         TaskQueueStepStatus.INIT_MESSAGE,
@@ -711,7 +702,7 @@ async def test_assigned_task_init_message_step_prepares_continue_message(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_assigned_task_send_response_and_resume_handlers_are_split_by_status(
+async def test_assigned_task_send_response_handler_completes(
     monkeypatch, caplog
 ):
     _reset_fakes()
@@ -747,17 +738,8 @@ async def test_assigned_task_send_response_and_resume_handlers_are_split_by_stat
     assert response_task.status == TaskQueueStepStatus.COMPLETED
     assert "status=response" in caplog.text
 
-    caplog.clear()
-    resume_task = _task(status=TaskQueueStepStatus.RESUME)
-    resume_result = await handle_assigned_task_resume_step(resume_task)
-    assert resume_result is not None
-    assert resume_result.success is True
-    assert resume_task.status == TaskQueueStepStatus.COMPLETED
-    assert "status=resume" in caplog.text
-
-
 @pytest.mark.asyncio
-async def test_assigned_task_send_interrupt_sends_whatsapp_and_marks_interrupt(
+async def test_assigned_task_send_interrupt_sends_whatsapp_and_completes(
     monkeypatch,
 ):
     _reset_fakes()
@@ -785,8 +767,9 @@ async def test_assigned_task_send_interrupt_sends_whatsapp_and_marks_interrupt(
 
     send_result = await handle_assigned_task_send_step(send_task)
 
-    assert send_result is None
-    assert send_task.status == TaskQueueStepStatus.INTERRUPT
+    assert send_result is not None
+    assert send_result.success is True
+    assert send_task.status == TaskQueueStepStatus.COMPLETED
     assert FakeEvolutionWhatsAppChannel.sent == [
         {
             "instance": "main-instance",
@@ -843,6 +826,6 @@ async def test_assigned_task_send_interrupt_missing_whatsapp_data_falls_back_res
 def test_task_queue_step_change_status():
     task = _task(status=TaskQueueStepStatus.INIT)
 
-    task.change_status(TaskQueueStepStatus.INTERRUPT)
+    task.change_status(TaskQueueStepStatus.RESPONSE)
 
-    assert task.status == TaskQueueStepStatus.INTERRUPT
+    assert task.status == TaskQueueStepStatus.RESPONSE

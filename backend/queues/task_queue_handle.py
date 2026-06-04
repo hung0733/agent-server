@@ -181,7 +181,7 @@ async def handle_assigned_task_send_step(
             t("queues.task_queue_handle.interrupted"),
             task.step_id,
         )
-        task.change_status(TaskQueueStepStatus.INTERRUPT)
+        return _complete_scaffold_task(task)
     elif interrupt_message:
         logger.info(
             t("queues.task_queue_handle.interrupt_fallback_response"),
@@ -198,13 +198,6 @@ async def handle_assigned_task_send_step(
 
 
 async def handle_assigned_task_response_step(
-    task: TaskQueueStep,
-) -> TaskQueueHandlerResult | None:
-    _log_started(task)
-    return _complete_scaffold_task(task)
-
-
-async def handle_assigned_task_resume_step(
     task: TaskQueueStep,
 ) -> TaskQueueHandlerResult | None:
     _log_started(task)

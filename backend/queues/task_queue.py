@@ -21,8 +21,6 @@ class TaskQueueStepStatus(StrEnum):
     INIT_MESSAGE = "init_message"
     SEND = "send"
     RESPONSE = "response"
-    INTERRUPT = "interrupt"
-    RESUME = "resume"
     COMPLETED = "completed"
 
 
@@ -68,12 +66,10 @@ TaskQueueHandler = Callable[[TaskQueueStep], Awaitable[TaskQueueHandlerResult | 
 
 _STATUS_PRIORITY = {
     TaskQueueStepStatus.COMPLETED: 0,
-    TaskQueueStepStatus.RESUME: 1,
-    TaskQueueStepStatus.INTERRUPT: 2,
-    TaskQueueStepStatus.RESPONSE: 3,
-    TaskQueueStepStatus.SEND: 4,
-    TaskQueueStepStatus.INIT_MESSAGE: 5,
-    TaskQueueStepStatus.INIT: 6,
+    TaskQueueStepStatus.RESPONSE: 1,
+    TaskQueueStepStatus.SEND: 2,
+    TaskQueueStepStatus.INIT_MESSAGE: 3,
+    TaskQueueStepStatus.INIT: 4,
 }
 
 
@@ -101,7 +97,6 @@ class TaskQueue:
         self._poller: asyncio.Task[None] | None = None
         self._workers: list[asyncio.Task[None]] = []
         self._active_responsible_agent_ids: set[str] = set()
-        self._interrupted_responsible_agent_ids: set[str] = set()
         self._queued_step_ids: set[int] = set()
         self._counter = 0
 
@@ -208,7 +203,6 @@ class TaskQueue:
                 self._queue.task_done()
 
     async def _enqueue_task(self, task: TaskQueueStep) -> None:
-        self._sync_interrupt_state(task)
         self._queued_step_ids.add(task.step_db_id)
         await self._queue.put((_STATUS_PRIORITY[task.status], self._counter, task))
         self._counter += 1
@@ -219,9 +213,6 @@ class TaskQueue:
 
         if task.status == TaskQueueStepStatus.COMPLETED:
             return await self._complete_task_if_ready(task)
-        if task.status == TaskQueueStepStatus.INTERRUPT:
-            self._sync_interrupt_state(task)
-            return True
 
         handler = self._handlers.get(task.status)
         if handler is None:
@@ -239,7 +230,6 @@ class TaskQueue:
                 task.handler_result = result
                 if not result.success:
                     return await self._finish_task_if_ready(task)
-            self._sync_interrupt_state(task)
             if task.status == TaskQueueStepStatus.COMPLETED:
                 return await self._finish_task_if_ready(task)
             return False
@@ -251,13 +241,6 @@ class TaskQueue:
             return False
         if task.responsible_agent_id in self._active_responsible_agent_ids:
             return True
-        if task.status in (
-            TaskQueueStepStatus.INIT,
-            TaskQueueStepStatus.INIT_MESSAGE,
-            TaskQueueStepStatus.SEND,
-            TaskQueueStepStatus.RESPONSE,
-        ):
-            return task.responsible_agent_id in self._interrupted_responsible_agent_ids
         return False
 
     async def _run_handler(
@@ -321,18 +304,8 @@ class TaskQueue:
                 log=task.handler_result.log,
             )
             await session.commit()
-        self._interrupted_responsible_agent_ids.discard(task.responsible_agent_id)
         if success:
             logger.info(t("queues.task_queue.completed_step"), task.step_id, task.task_id)
         else:
             logger.info(t("queues.task_queue.failed_step"), task.step_id, task.task_id)
         return True
-
-    def _sync_interrupt_state(self, task: TaskQueueStep) -> None:
-        if task.status == TaskQueueStepStatus.INTERRUPT:
-            self._interrupted_responsible_agent_ids.add(task.responsible_agent_id)
-        elif task.status in (
-            TaskQueueStepStatus.RESUME,
-            TaskQueueStepStatus.COMPLETED,
-        ):
-            self._interrupted_responsible_agent_ids.discard(task.responsible_agent_id)
