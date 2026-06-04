@@ -139,7 +139,7 @@ class MessageQueue:
         self._workers: list[asyncio.Task[None]] = []
         self._counter = 0
         self._agent_state: dict[str, str] = {}
-        self._interrupt_tasks: dict[tuple[str, str], MsgQueueTask] = {}
+        self._interrupt_tasks: dict[str, MsgQueueTask] = {}
 
     def start(self) -> None:
         if self._workers:
@@ -161,7 +161,7 @@ class MessageQueue:
     async def resume_interrupt(
         self, agent_id: str, msg_id: str, resume_task: MsgQueueTask | None = None
     ) -> bool:
-        task = self._interrupt_tasks.pop((agent_id, msg_id), None)
+        task = self._interrupt_tasks.pop(msg_id, None)
         if not task:
             return False
 
@@ -169,10 +169,11 @@ class MessageQueue:
         if resume_task is not None:
             task.message = resume_task.message
             task.files = resume_task.files
-            task.callback = resume_task.callback
+            if resume_task.agent_id == task.agent_id:
+                task.callback = resume_task.callback
         task.change_task_state(TaskState.RESUME)
-        if self._agent_state.get(agent_id) == TaskState.INTERRUPT:
-            self._agent_state.pop(agent_id, None)
+        if self._agent_state.get(task.agent_id) == TaskState.INTERRUPT:
+            self._agent_state.pop(task.agent_id, None)
 
         self.start()
         await self._enqueue_task(task)
@@ -229,7 +230,7 @@ class MessageQueue:
             if task.wait_msg_id:
                 self._agent_state[task.agent_id] = TaskState.INTERRUPT
                 task.change_task_state(TaskState.INTERRUPT)
-                self._interrupt_tasks[(task.agent_id, task.wait_msg_id)] = task
+                self._interrupt_tasks[task.wait_msg_id] = task
             else:
                 self._agent_state.pop(task.agent_id, None)
 

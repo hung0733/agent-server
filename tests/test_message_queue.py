@@ -446,16 +446,16 @@ async def test_resume_interrupt_uses_resume_task_payload():
 
 
 @pytest.mark.asyncio
-async def test_resume_interrupt_requires_matching_msg_id_and_agent_id():
+async def test_resume_interrupt_requires_matching_msg_id_only():
     interrupt_done = asyncio.Event()
-    pending_handler_ran = asyncio.Event()
+    handled = []
 
     async def handler(task):
+        handled.append(task.message)
         if task.message == "interrupt_task":
             task.wait_msg_id = "msg-123"
             interrupt_done.set()
             return False
-        pending_handler_ran.set()
         return True
 
     queue = MessageQueue(handler, max_concurrency=1)
@@ -465,15 +465,49 @@ async def test_resume_interrupt_requires_matching_msg_id_and_agent_id():
     await asyncio.wait_for(interrupt_done.wait(), timeout=1)
 
     assert await queue.resume_interrupt("agent-1", "wrong-msg") is False
-    assert await queue.resume_interrupt("wrong-agent", "msg-123") is False
-    assert t1.task_state == TaskState.INTERRUPT
-    assert t1.wait_msg_id == "msg-123"
+    assert await queue.resume_interrupt("wrong-agent", "msg-123") is True
+    assert t1.task_state == TaskState.RESUME
+    assert t1.wait_msg_id is None
 
-    await queue.enqueue(RecordingTask("pending_task", agent_id="agent-1"))
-    with pytest.raises(asyncio.TimeoutError):
-        await asyncio.wait_for(pending_handler_ran.wait(), timeout=0.1)
-
+    await queue._queue.join()
     await queue.stop()
+
+    assert handled == ["interrupt_task", "interrupt_task"]
+
+
+@pytest.mark.asyncio
+async def test_resume_interrupt_does_not_replace_callback_for_different_agent():
+    interrupt_done = asyncio.Event()
+    callback_results = []
+
+    async def handler(task):
+        if task.message == "interrupt_task":
+            task.wait_msg_id = "msg-123"
+            interrupt_done.set()
+            return False
+        await task.callback(StreamChunk(chunk_type="done"))
+        return True
+
+    queue = MessageQueue(handler, max_concurrency=1)
+
+    t1 = RecordingTask("interrupt_task", agent_id="agent-1")
+    await queue.enqueue(t1)
+    await asyncio.wait_for(interrupt_done.wait(), timeout=1)
+
+    resume_task = RecordingTask("approved", agent_id="wrong-agent")
+
+    async def callback(chunk):
+        callback_results.append(chunk)
+
+    resume_task.callback = callback
+
+    assert await queue.resume_interrupt("wrong-agent", "msg-123", resume_task) is True
+
+    await queue._queue.join()
+    await queue.stop()
+
+    assert t1.chunks[-1].chunk_type == "done"
+    assert callback_results == []
 
 
 @pytest.mark.asyncio
