@@ -1279,7 +1279,7 @@ def test_agent_runtime_marks_agent_to_agent_conversation():
         "session-1",
         "assistant",
         "Receiver",
-        99,
+        "agent-sender-1",
         "Sender",
         99,
         100,
@@ -1288,6 +1288,7 @@ def test_agent_runtime_marks_agent_to_agent_conversation():
         False,
     )
 
+    assert agent.sender_agent_id == "agent-sender-1"
     assert agent.sender_agent_db_id == 99
     assert agent.sender_agent_session_db_id == 100
     assert agent.sender_agent_session_id == "sender-default"
@@ -1314,6 +1315,7 @@ async def test_agent_proc_send_streams_content_chunks(monkeypatch):
     )
 
     graph = FakeGraph()
+    graph.configs.clear()
     chunks = [
         chunk
         async for chunk in Agent.proc_send(
@@ -1335,11 +1337,51 @@ async def test_agent_proc_send_streams_content_chunks(monkeypatch):
     assert graph.configs[0]["configurable"]["user_name"] == "Alice"
     assert graph.configs[0]["configurable"]["agent_db_id"] == 2
     assert graph.configs[0]["configurable"]["agent_type"] == "assistant"
+    assert graph.configs[0]["configurable"]["sender_agent_id"] == ""
     assert graph.configs[0]["configurable"]["sender_agent_db_id"] is None
     assert graph.configs[0]["configurable"]["sender_agent_session_db_id"] is None
     assert graph.configs[0]["configurable"]["sender_agent_session_id"] is None
     assert graph.configs[0]["configurable"]["sender_is_sub_agent"] is False
     assert graph.configs[0]["configurable"]["recv_is_sub_agent"] is False
+
+
+@pytest.mark.asyncio
+async def test_agent_proc_send_uses_public_sender_agent_id(monkeypatch):
+    class FakeMemoryManager:
+        async def recall(self, *, agent_id, session_key, user_text):
+            return RecallResult()
+
+    class FakeSenderAgent(FakeAgent):
+        sender_agent_id = "agent-sender-1"
+        sender_agent_db_id = 99
+        sender_agent_session_db_id = 100
+        sender_agent_session_id = "sender-default"
+        sender_agent_name = "Sender"
+        sender_type = "agent"
+        conversation_kind = "agent_to_agent"
+
+    monkeypatch.setattr(
+        "backend.agent.agent.MemoryManager.instance",
+        lambda: FakeMemoryManager(),
+    )
+
+    graph = FakeGraph()
+    graph.configs.clear()
+    chunks = [
+        chunk
+        async for chunk in Agent.proc_send(
+            agent=FakeSenderAgent(),
+            message="hello",
+            think_mode=False,
+            metadata={},
+            sandbox=None,
+            graph=graph,
+        )
+    ]
+
+    assert [chunk.chunk_type for chunk in chunks] == ["content", "content", "text_end"]
+    assert graph.configs[0]["configurable"]["sender_agent_id"] == "agent-sender-1"
+    assert graph.configs[0]["configurable"]["sender_agent_db_id"] == 99
 
 
 @pytest.mark.asyncio

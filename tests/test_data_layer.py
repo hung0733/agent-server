@@ -413,6 +413,7 @@ async def test_dao_crud_happy_path(monkeypatch):
             )
             assert user_to_agent_runtime is not None
             assert user_to_agent_runtime[4] == "Alice"
+            assert user_to_agent_runtime[9] is None
             assert user_to_agent_runtime[10] == "Alice"
             assert user_to_agent_runtime[11] is None
             assert user_to_agent_runtime[12] is None
@@ -521,6 +522,7 @@ async def test_dao_crud_happy_path(monkeypatch):
             )
             assert agent_to_agent_runtime is not None
             assert agent_to_agent_runtime[4] == "Alice"
+            assert agent_to_agent_runtime[9] == sender_agent.agent_id
             assert agent_to_agent_runtime[10] == "Sender Agent"
             assert agent_to_agent_runtime[11] == sender_agent.id
             assert agent_to_agent_runtime[12] == sender_default_session.id
