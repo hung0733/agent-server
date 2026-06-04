@@ -27,7 +27,11 @@ from backend.graph.agent import (
 )
 
 from backend.graph.graph_node import GraphNode, MessageState
-from backend.graph.brainstormer import pre_user_question_node
+from backend.graph.brainstormer import (
+    pre_submit_approval_node,
+    pre_user_question_node,
+    submit_approval_node,
+)
 from backend.graph.bulter import assign_task_node, workflow as butler_workflow
 from backend.graph.interrupt_nodes import (
     APPROVE_LABEL,
@@ -82,6 +86,29 @@ class FakeAsyncSessionContext:
 
     async def __aexit__(self, exc_type, exc, tb):
         return None
+
+
+class FakeBrainstormerStepSession:
+    commits = 0
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return None
+
+    async def commit(self):
+        type(self).commits += 1
+
+
+class FakeBrainstormerAssignedTaskDAO:
+    updates = []
+
+    def __init__(self, session):
+        self.session = session
+
+    async def update_step_output_html_by_session_id(self, **kwargs):
+        type(self).updates.append(kwargs)
 
 
 class FakeAssignTaskAsyncSession:
@@ -706,8 +733,100 @@ async def test_brainstormer_user_question_uses_tool_args_not_message_content():
     assert "請確認名城資料來源" in content
     assert "日本100名城" in content
     assert "自訂匯入流程" in content
-    assert result["human_review_node"] == "chat_node"
+    assert result["human_review_node"] == "chat"
     assert result["human_review_data"]["question"] == "請確認名城資料來源。"
+
+
+@pytest.mark.asyncio
+async def test_brainstormer_pre_submit_approval_uses_tool_args_not_message_content(
+    monkeypatch,
+):
+    FakeBrainstormerStepSession.commits = 0
+    FakeBrainstormerAssignedTaskDAO.updates = []
+    monkeypatch.setattr(
+        "backend.graph.brainstormer.async_session_factory",
+        lambda: FakeBrainstormerStepSession(),
+    )
+    monkeypatch.setattr(
+        "backend.graph.brainstormer.AssignedTaskDAO",
+        FakeBrainstormerAssignedTaskDAO,
+    )
+
+    html_plan = "<html><body><h1>計劃書</h1></body></html>"
+    state = {
+        "messages": [
+            AIMessage(
+                content="呢段 content 不應直接輸出。",
+                tool_calls=[
+                    {
+                        "name": "submit_html_plan_for_approval",
+                        "args": {
+                            "task_id": "task-1",
+                            "task_name": "名城資料整理",
+                            "goal": "整理可審批的 HTML 計劃。",
+                            "html_plan": html_plan,
+                        },
+                        "id": "call-1",
+                    }
+                ],
+            )
+        ],
+        "human_review_node": None,
+        "human_review_data": None,
+        "human_review_result": None,
+    }
+    config = GraphNode.prepare_chat_node_config(
+        thread_id="session-1",
+        models=None,
+        sys_prompt="",
+        involves_secrets=False,
+        think_mode=False,
+        args={},
+        agent_type="brainstormer",
+        session_db_id=321,
+    )
+
+    result = await pre_submit_approval_node(state, config)
+
+    content = result["messages"][0].content
+    assert "呢段 content 不應直接輸出" not in content
+    assert "task-1" in content
+    assert "名城資料整理" in content
+    assert html_plan in content
+    assert result["human_review_node"] == "submit_approval_node"
+    assert result["human_review_data"]["html_plan"] == html_plan
+    assert FakeBrainstormerAssignedTaskDAO.updates == [
+        {"session_db_id": 321, "output_html": html_plan}
+    ]
+    assert FakeBrainstormerStepSession.commits == 1
+
+
+@pytest.mark.asyncio
+async def test_brainstormer_submit_approval_node_returns_approved_message():
+    state = {
+        "messages": [HumanMessage(content="approve")],
+        "human_review_node": "submit_approval_node",
+        "human_review_data": {"html_plan": "<html></html>"},
+        "human_review_result": APPROVE_LABEL,
+    }
+    config = GraphNode.prepare_chat_node_config(
+        thread_id="session-1",
+        models=None,
+        sys_prompt="",
+        involves_secrets=False,
+        think_mode=False,
+        args={},
+        agent_type="brainstormer",
+    )
+
+    result = await submit_approval_node(state, config)
+
+    assert result["messages"][0].content == t(
+        "graph.brainstormer.submit_approval.approved_message"
+    )
+    assert result["human_review_node"] is None
+    assert result["human_review_data"] is None
+    assert result["human_review_result"] is None
 
 
 @pytest.mark.asyncio

@@ -6,6 +6,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 from langchain_core.messages import (
     AIMessage,
+    BaseMessage,
     ToolMessage,
 )
 
@@ -38,7 +39,8 @@ def route_after_chat_bulter(state: MessageState) -> str:
 
 
 def pre_assign_task_node(state: MessageState, config: RunnableConfig) -> dict[str, Any]:
-    last_message = state["messages"][-1]
+    messages: list[BaseMessage] = list(state["messages"])
+    last_message = messages[-1]
     if isinstance(last_message, AIMessage):
         for tool_call in last_message.tool_calls:
             if tool_call.get("name") == "assign_task":
@@ -55,11 +57,16 @@ def pre_assign_task_node(state: MessageState, config: RunnableConfig) -> dict[st
                     % (task_name, goal),
                     additional_kwargs={"datetime": datetime.now(timezone.utc)},
                 )
+
+                messages.append(approval_msg)
+                GraphNode.store_message(config, messages)
+
                 return {
                     "messages": [approval_msg],
                     "human_review_node": "assign_task_node",
                     "human_review_data": {"task_name": task_name, "goal": goal},
                     "human_review_result": None,
+                    "human_review_approve": True,
                 }
 
     return {
@@ -91,6 +98,7 @@ async def assign_task_node(
         "human_review_node": None,
         "human_review_data": None,
         "human_review_result": None,
+        "human_review_approve": None,
     }
 
 

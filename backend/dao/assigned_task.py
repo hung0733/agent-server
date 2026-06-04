@@ -201,6 +201,17 @@ class AssignedTaskDAO(BaseDAO[AssignedTask]):
         await self.session.execute(stmt)
         await self.session.flush()
 
+    async def update_step_output_html_by_session_id(
+        self, *, session_db_id: int, output_html: str
+    ) -> None:
+        stmt = (
+            update(AssignedTaskStep)
+            .where(AssignedTaskStep.session_id == session_db_id)
+            .values(output_html=output_html)
+        )
+        await self.session.execute(stmt)
+        await self.session.flush()
+
     async def count_failed_process_logs(self, *, step_db_id: int) -> int:
         stmt = select(func.count()).select_from(AssignedTaskStepProcessLog).where(
             AssignedTaskStepProcessLog.step_id == step_db_id,

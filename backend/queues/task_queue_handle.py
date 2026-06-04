@@ -178,10 +178,16 @@ async def handle_assigned_task_send_step(
                 if msg_id:
                     msg_task.ack_stream_callback(msg_id)
 
+    logger.info("Message Queue Task Completed")
+
     if resp_message and await _is_step_pending(task):
         task.message = resp_message
+        logger.info(
+            "Queues task step received response message, moving to RESPONSE step"
+        )
         task.change_status(TaskQueueStepStatus.RESPONSE)
         return None
+    logger.info("Queues task step did not receive response message, completing task")
     return _complete_scaffold_task(task)
 
 

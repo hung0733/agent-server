@@ -167,6 +167,8 @@ class MessageQueue:
             return False
 
         task.wait_msg_id = None
+        if hasattr(task, '_stream_closed'):
+            task._stream_closed = False
         if resume_task is not None:
             task.message = resume_task.message
             task.files = resume_task.files

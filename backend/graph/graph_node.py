@@ -64,6 +64,7 @@ class MessageState(TypedDict):
     human_review_node: Optional[str]
     human_review_data: Optional[Dict[str, Any]]
     human_review_result: Optional[str]
+    human_review_approve: Optional[bool]
 
 
 class GraphNode:

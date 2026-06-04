@@ -17,17 +17,23 @@ OTHER_LABEL = "other"
 
 async def human_review_node(state: MessageState, config: RunnableConfig) -> dict:
     messages: list[BaseMessage] = list(state["messages"])
-    GraphNode.store_message(config, messages)
-
     last_message: BaseMessage = messages[-1]
 
     user_message: HumanMessage = interrupt(
         {"type": "human_review", "message": last_message}
     )
 
+    if GraphNode.is_butler_asking(config):
+        GraphNode.store_user_message(config, [user_message])
+
     messages.append(user_message)
 
-    review_result: str = await _classify_approval_reply(messages, config)
+    if state.get("human_review_approve") is not None and state.get(
+        "human_review_approve"
+    ):
+        review_result: str = await _classify_approval_reply(messages, config)
+    else:
+        review_result: str = APPROVE_LABEL
 
     return {
         "messages": [user_message],
