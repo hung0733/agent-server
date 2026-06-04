@@ -45,7 +45,7 @@ class Agent:
     agent_type: str
 
     recv_agent_name: str
-    sender_agent_id: int | None
+    sender_agent_id: str | None
     sender_agent_db_id: int | None
     sender_agent_session_db_id: int | None
     sender_agent_session_id: str | None
@@ -69,7 +69,7 @@ class Agent:
         session_id: str,
         agent_type: str,
         recv_agent_name: str,
-        sender_agent_id: int | None = None,
+        sender_agent_id: str | None = None,
         sender_agent_name: str | None = None,
         sender_agent_db_id: int | None = None,
         sender_agent_session_db_id: int | None = None,
@@ -79,7 +79,6 @@ class Agent:
     ):
         if sender_agent_name is None and isinstance(sender_agent_id, str):
             sender_agent_name = sender_agent_id
-            sender_agent_id = None
 
         self.agent_db_id = agent_db_id
         self.agent_id = agent_id
