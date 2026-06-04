@@ -35,7 +35,7 @@ SCENE_SYSTEM_PROMPT = """# Memory Consolidation Architect
 每個場景區塊由 META header + content 組成：
 ```
 -----META-START-----
-{"label": "場景標題", "heat": "hot", "update_frequency": "daily"}
+{{"label": "場景標題", "heat": "hot", "update_frequency": "daily"}}
 -----META-END-----
 
 場景內容（Markdown 格式，包含所有屬於此場景的記憶）
@@ -58,7 +58,7 @@ SCENE_SYSTEM_PROMPT = """# Memory Consolidation Architect
 ### 觸發 PERSONA 更新
 如果場景變化重大（例如用戶核心偏好或身份發生改變），在輸出中加入：
 ```
-[PERSONA_UPDATE_REQUEST]{reason}[/PERSONA_UPDATE_REQUEST]
+[PERSONA_UPDATE_REQUEST]{{reason}}[/PERSONA_UPDATE_REQUEST]
 ```
 
 輸出格式（純 JSON）：
