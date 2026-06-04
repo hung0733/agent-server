@@ -609,6 +609,7 @@ _MESSAGES["zh_HK"].update(
         "tdai_memory.offload.backend_summarize_failed": "Backend summarize 失敗",
         "tdai_memory.offload.batch_summarize_retry": "Batch summarize 失敗，準備重試：attempt=%d delay_seconds=%d",
         "tdai_memory.offload.build_mermaid_flowchart_failed": "建立 Mermaid flowchart 失敗",
+        "tdai_memory.offload.flush_timer_failed": "Offload flush timer 執行失敗",
         "tdai_memory.offload.generate_mmd_summary_failed": "生成 MMD summary 失敗",
         "tdai_memory.offload.invalid_batch_summary_response": "Batch summarize response 格式無效",
         "tdai_memory.offload.pending_tool_call_missing": "找不到 pending tool call：tool_call_id=%s "
@@ -760,6 +761,7 @@ _MESSAGES["en"].update(
         "tdai_memory.offload.backend_summarize_failed": "Backend summarize failed",
         "tdai_memory.offload.batch_summarize_retry": "Batch summarize failed, retrying: attempt=%d delay_seconds=%d",
         "tdai_memory.offload.build_mermaid_flowchart_failed": "Failed to build Mermaid flowchart",
+        "tdai_memory.offload.flush_timer_failed": "Offload flush timer failed",
         "tdai_memory.offload.generate_mmd_summary_failed": "Failed to generate MMD summary",
         "tdai_memory.offload.invalid_batch_summary_response": "Invalid batch summarize response format",
         "tdai_memory.offload.pending_tool_call_missing": "No pending tool call found for tool_call_id=%s "

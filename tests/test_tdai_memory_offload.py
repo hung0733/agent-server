@@ -57,6 +57,32 @@ async def test_flush_pending_falls_back_to_result_text(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_flush_pending_creates_missing_offload_dirs(tmp_path, monkeypatch):
+    async def summarize(*args, **kwargs):
+        return [("摘要", 0)]
+
+    monkeypatch.setattr(offload_manager, "_summarize_batch", summarize)
+
+    manager = offload_manager.OffloadManager(
+        str(tmp_path),
+        llm_client=object(),
+        config=MemoryConfig(),
+    )
+    agent_id = "agent-1"
+    session_key = "session-1"
+
+    state = offload_manager.OffloadStateManager()
+    state.add_tool_pair("tc-1", "tool", {"arg": "value"}, "重要工具結果")
+
+    await manager._flush_pending(agent_id, session_key, state)
+
+    ref_path = tmp_path / agent_id / "offload" / "refs" / "tc-1.md"
+    jsonl_path = tmp_path / agent_id / "offload" / "offload.jsonl"
+    assert ref_path.read_text() == "# Tool: tool\n\n重要工具結果"
+    assert json.loads(jsonl_path.read_text().strip())["summary"] == "摘要"
+
+
+@pytest.mark.asyncio
 async def test_summarize_batch_falls_back_when_llm_returns_empty_content(monkeypatch):
     class FakeMessage:
         content = ""

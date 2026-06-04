@@ -343,7 +343,13 @@ class OffloadManager:
             await asyncio.sleep(5)
         except asyncio.CancelledError:
             return
-        await self._flush_pending(agent_id, session_key, state)
+        try:
+            await self._flush_pending(agent_id, session_key, state)
+        except Exception:
+            logger.warning(
+                t("tdai_memory.offload.flush_timer_failed"),
+                exc_info=True,
+            )
 
     async def _flush_pending(
         self, agent_id: str, session_key: str, state: OffloadStateManager
@@ -411,7 +417,9 @@ class OffloadManager:
                     timestamp_epoch_ms=entry_timestamp_epoch,
                 )
 
-                def _write(ep=ref_path, rfn=ref_filename, tn=tool_name, rt=result_text, ent=entry, jp=jsonl_path):
+                def _write(ep=ref_path, tn=tool_name, rt=result_text, ent=entry, jp=jsonl_path):
+                    os.makedirs(refs_dir, exist_ok=True)
+                    os.makedirs(os.path.dirname(jp), exist_ok=True)
                     with open(ep, "w") as f:
                         f.write(f"# Tool: {tn}\n\n{rt}")
                     with open(jp, "a") as f:
