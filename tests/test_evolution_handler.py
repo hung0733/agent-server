@@ -577,6 +577,31 @@ async def test_log_inbound_message_done_does_not_resend_agent_response(monkeypat
 
 
 @pytest.mark.asyncio
+async def test_whatsapp_task_callback_flushes_agent_response_on_task_end():
+    sent_messages = []
+
+    class FakeChannel:
+        async def send_text(self, number, text, **options):
+            sent_messages.append((number, text, options))
+            return {"ok": True}
+
+    task = WhatsAppMsgQueueTask(
+        message="hi",
+        agent_id="agent-123",
+        session_id="default-123",
+        channel=FakeChannel(),
+        phone_no="85298765432",
+    )
+
+    await task.callback(StreamChunk(chunk_type="content", content="fallback"))
+    assert sent_messages == []
+
+    await task.callback(StreamChunk(chunk_type="task_end"))
+
+    assert sent_messages == [("85298765432", "fallback", {})]
+
+
+@pytest.mark.asyncio
 async def test_log_inbound_message_task_callback_sends_tool_summary_as_separate_reply(monkeypatch):
     sent_messages = []
 

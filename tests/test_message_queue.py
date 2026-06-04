@@ -106,6 +106,23 @@ async def test_cmn_task_stream_gen_yields_chunks_and_stops_after_done():
 
 
 @pytest.mark.asyncio
+async def test_cmn_task_stream_gen_yields_task_end_and_stops():
+    task = CmnMsgQueueTask("hello", "agent-1", "session-1")
+    stream = task.stream_gen()
+
+    task_end_callback = asyncio.create_task(
+        task.callback(StreamChunk(chunk_type="task_end"))
+    )
+    chunk = await stream.__anext__()
+    task.ack_stream_callback(None)
+
+    assert chunk.chunk_type == "task_end"
+    assert await asyncio.wait_for(task_end_callback, timeout=1) is None
+    with pytest.raises(StopAsyncIteration):
+        await stream.__anext__()
+
+
+@pytest.mark.asyncio
 async def test_handle_agent_message_sets_wait_msg_id_from_cmn_stream_ack(monkeypatch):
     class FakeAgent:
         agent_id = "agent-1"
@@ -215,10 +232,12 @@ async def test_message_queue_serializes_same_agent_id_tasks():
     queue = MessageQueue(handler, max_concurrency=4)
 
     await queue.enqueue(RecordingTask("first", agent_id="agent-1"))
-    await queue.enqueue(RecordingTask("second", agent_id="agent-1"))
+    second_task = RecordingTask("second", agent_id="agent-1")
+    await queue.enqueue(second_task)
     await asyncio.wait_for(first_started.wait(), timeout=1)
     with pytest.raises(asyncio.TimeoutError):
         await asyncio.wait_for(second_started.wait(), timeout=0.05)
+    assert [chunk.chunk_type for chunk in second_task.chunks] == []
 
     release_first.set()
     await queue._queue.join()
@@ -267,8 +286,12 @@ async def test_handler_calls_task_callback_with_chunks_and_done():
     await queue._queue.join()
     await queue.stop()
 
-    assert [chunk.chunk_type for chunk in task.chunks] == ["content", "done"]
+    assert [chunk.chunk_type for chunk in task.chunks] == [
+        "content",
+        "done",
+    ]
     assert task.chunks[0].content == "hello"
+    assert task.task_state == TaskState.COMPLETED
 
 
 @pytest.mark.asyncio
@@ -303,6 +326,7 @@ async def test_handler_exception_callbacks_error_done():
     assert len(task.chunks) == 1
     assert task.chunks[0].chunk_type == "done"
     assert task.chunks[0].data == {"error": "boom"}
+    assert task.task_state == TaskState.COMPLETED
 
 
 @pytest.mark.asyncio
@@ -347,6 +371,7 @@ async def test_task_state_transitions_to_interrupt():
     await queue.stop()
 
     assert task.task_state == TaskState.INTERRUPT
+    assert [chunk.chunk_type for chunk in task.chunks] == []
 
 
 @pytest.mark.asyncio
@@ -506,7 +531,8 @@ async def test_resume_interrupt_does_not_replace_callback_for_different_agent():
     await queue._queue.join()
     await queue.stop()
 
-    assert t1.chunks[-1].chunk_type == "done"
+    assert [chunk.chunk_type for chunk in t1.chunks[-1:]] == ["done"]
+    assert t1.task_state == TaskState.COMPLETED
     assert callback_results == []
 
 

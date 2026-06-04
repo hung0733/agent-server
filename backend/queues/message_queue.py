@@ -24,6 +24,7 @@ class TaskState(StrEnum):
     PROCESSING = "processing"
     INTERRUPT = "interrupt"
     RESUME = "resume"
+    COMPLETED = "completed"
 
 
 @dataclass
@@ -106,7 +107,7 @@ class CmnMsgQueueTask(MsgQueueTask):
 
     @staticmethod
     def _is_terminal_chunk(chunk: StreamChunk) -> bool:
-        return chunk.chunk_type == "done"
+        return chunk.chunk_type in {"done", "task_end"}
 
 
 MsgQueueHandler = Callable[[MsgQueueTask], Awaitable[bool]]
@@ -213,6 +214,8 @@ class MessageQueue:
 
             passed: bool = await self._handle_task(task)
             if passed or task.task_state == TaskState.INTERRUPT:
+                if passed:
+                    task.change_task_state(TaskState.COMPLETED)
                 self._queue.task_done()
 
     async def _handle_task(self, task: MsgQueueTask) -> bool:

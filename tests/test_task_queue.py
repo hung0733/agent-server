@@ -24,6 +24,7 @@ TASK_CREATE_DT = datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
 
 class FakeSession:
     commits = 0
+    step_status = "pending"
 
     async def __aenter__(self):
         return self
@@ -33,6 +34,9 @@ class FakeSession:
 
     async def commit(self):
         type(self).commits += 1
+
+    async def get(self, model, id_):
+        return SimpleNamespace(id=id_, status=type(self).step_status)
 
 
 class FakeAssignedTaskDAO:
@@ -280,6 +284,7 @@ def _queue(handlers=None):
 
 def _reset_fakes():
     FakeSession.commits = 0
+    FakeSession.step_status = "pending"
     FakeAssignedTaskDAO.rows = []
     FakeAssignedTaskDAO.list_calls = []
     FakeAssignedTaskDAO.processing_marks = []
@@ -707,6 +712,9 @@ async def test_assigned_task_send_response_handler_completes(
 ):
     _reset_fakes()
     monkeypatch.setattr("backend.queues.task_queue_handle.MessageQueue", FakeMessageQueue)
+    monkeypatch.setattr(
+        "backend.queues.task_queue_handle.async_session_factory", _session_factory
+    )
     FakeMessageQueue.chunks = [
         SimpleNamespace(chunk_type="content", content="done", data=None)
     ]

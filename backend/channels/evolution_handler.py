@@ -54,7 +54,7 @@ class WhatsAppMsgQueueTask(MsgQueueTask):
             )
             return None
 
-        if chunk.chunk_type in {"text_end", "done"}:
+        if chunk.chunk_type in {"text_end", "done", "task_end"}:
             await self._flush_tool_parts()
             return await self._flush_response_parts()
 

@@ -12,8 +12,9 @@ from backend.dao.session import AgentSessionDAO
 from backend.dao.user_acc import UserAccDAO
 from backend.db.session import async_session_factory
 from backend.dto.session import AgentSessionCreate
+from backend.entities.assigned_task import AssignedTaskStep
 from backend.i18n import t
-from backend.queues.message_queue import CmnMsgQueueTask, MessageQueue
+from backend.queues.message_queue import CmnMsgQueueTask, MessageQueue, TaskState
 from backend.queues.task_queue import (
     TaskQueueHandlerResult,
     TaskQueueStep,
@@ -165,36 +166,23 @@ async def handle_assigned_task_send_step(
 
     resp_message: str = ""
     interrupt_message: str = ""
-    interrupt_sent: bool = False
-    async for chunk in msg_task.stream_gen():
-        if chunk.chunk_type == "content":
-            resp_message += chunk.content or ""
-        elif chunk.chunk_type == "interrupt":
-            interrupt_message = _interrupt_message_from_chunk(chunk)
-            msg_id = await _send_interrupt_to_user(task, interrupt_message)
-            if msg_id:
-                msg_task.ack_stream_callback(msg_id)
-                interrupt_sent = True
+    while msg_task.task_state != TaskState.COMPLETED:
+        async for chunk in msg_task.stream_gen():
+            if chunk.chunk_type == "content":
+                resp_message += chunk.content or ""
+            elif chunk.chunk_type == "interrupt":
+                resp_message = ""
+                interrupt_message = _interrupt_message_from_chunk(chunk)
+                logger.info(t("queues.task_queue_handle.interrupted"), task.step_id)
+                msg_id = await _send_interrupt_to_user(task, interrupt_message)
+                if msg_id:
+                    msg_task.ack_stream_callback(msg_id)
 
-    if interrupt_sent:
-        logger.info(
-            t("queues.task_queue_handle.interrupted"),
-            task.step_id,
-        )
-        return _complete_scaffold_task(task)
-    elif interrupt_message:
-        logger.info(
-            t("queues.task_queue_handle.interrupt_fallback_response"),
-            task.step_id,
-        )
-        task.message = interrupt_message
-        task.change_status(TaskQueueStepStatus.RESPONSE)
-    elif resp_message:
+    if resp_message and await _is_step_pending(task):
         task.message = resp_message
         task.change_status(TaskQueueStepStatus.RESPONSE)
-    else:
-        return _complete_scaffold_task(task)
-    return None
+        return None
+    return _complete_scaffold_task(task)
 
 
 async def handle_assigned_task_response_step(
@@ -225,6 +213,12 @@ def _complete_scaffold_task(task: TaskQueueStep) -> TaskQueueHandlerResult:
     task.change_status(TaskQueueStepStatus.COMPLETED)
     logger.info(t("queues.task_queue_handle.completed"), task.step_id, task.task_id)
     return TaskQueueHandlerResult(success=True, log=log)
+
+
+async def _is_step_pending(task: TaskQueueStep) -> bool:
+    async with async_session_factory() as session:
+        step = await session.get(AssignedTaskStep, task.step_db_id)
+    return bool(step and step.status == "pending")
 
 
 def _interrupt_message_from_chunk(chunk: Any) -> str:
