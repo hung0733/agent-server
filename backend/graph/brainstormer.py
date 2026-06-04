@@ -46,7 +46,7 @@ async def pre_user_question_node(
                 args = tool_call.get("args") or {}
                 question = args.get("question", "?")
 
-                logger.info(f"User question requested: {question}")
+                logger.info(t("graph.brainstormer.user_question_requested"), question)
 
                 message = await ask_user_question.coroutine(**args)  # type: ignore
 

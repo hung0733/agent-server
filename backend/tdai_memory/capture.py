@@ -10,7 +10,10 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Optional
 
+from langchain_core.messages import HumanMessage
+
 from backend.i18n import t
+from backend.llm.llm import LLMSet
 from backend.tdai_memory.offload.manager import OffloadManager
 from .models import (
     CaptureResult,
@@ -97,6 +100,69 @@ def _apply_filtering(turn: CompletedTurn) -> list[ConversationMessage]:
     return messages
 
 
+def _should_capture_message(message: ConversationMessage) -> bool:
+    if message.role == "user":
+        return bool(message.content and message.content.strip())
+    return should_capture_l0(message.content)
+
+
+def _is_short_user_input(text: str) -> bool:
+    return len(text.strip()) <= 8
+
+
+async def _is_meaningful_short_user_input(
+    *, assistant_context: str, user_text: str
+) -> bool:
+    if not assistant_context.strip():
+        return True
+
+    prompt = t("tdai_memory.capture.short_user_input_judge_prompt") % (
+        assistant_context.strip(),
+        user_text.strip(),
+    )
+    try:
+        client = await LLMSet.getRteModel()
+        response = await client.ainvoke([HumanMessage(content=prompt)])
+        content = client.get_resp_content(response).strip().lower()
+    except Exception:
+        logger.exception(t("tdai_memory.capture.short_user_input_judge_failed"))
+        return True
+
+    if "discard" in content:
+        return False
+    if "keep" in content:
+        return True
+    return True
+
+
+async def _filter_messages_for_capture(
+    messages: list[ConversationMessage],
+) -> list[ConversationMessage]:
+    filtered: list[ConversationMessage] = []
+    assistant_context = ""
+
+    for msg in messages:
+        if msg.role == "assistant" and msg.content:
+            assistant_context = msg.content
+
+        if not _should_capture_message(msg):
+            continue
+
+        if (
+            msg.role == "user"
+            and _is_short_user_input(msg.content)
+            and not await _is_meaningful_short_user_input(
+                assistant_context=assistant_context,
+                user_text=msg.content,
+            )
+        ):
+            continue
+
+        filtered.append(msg)
+
+    return filtered
+
+
 async def perform_auto_capture(
     turn: CompletedTurn,
     agent_id: str,
@@ -115,8 +181,7 @@ async def perform_auto_capture(
         logger.warning(t("tdai_memory.capture.postgres_degraded_skipping"))
         return CaptureResult()
 
-    filtered_msgs = _apply_filtering(turn)
-    filtered_msgs = [m for m in filtered_msgs if should_capture_l0(m.content)]
+    filtered_msgs = await _filter_messages_for_capture(_apply_filtering(turn))
 
     async with await _get_capture_lock(turn.session_key):
         runner_state = await postgres.read_runner_state(agent_id, turn.session_key)
@@ -132,8 +197,6 @@ async def perform_auto_capture(
 
         if cursor > 0:
             filtered_msgs = [m for m in filtered_msgs if m.timestamp > cursor]
-
-        now_epoch_ms = int(time.time() * 1000)
 
         date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         conversations_dir = os.path.join(data_dir, agent_id, "conversations")
@@ -207,10 +270,11 @@ async def perform_auto_capture(
 
         if len(records) > 0:
             try:
+                last_captured_timestamp = max(record.timestamp for record in records)
                 await postgres.write_runner_state(
                     agent_id,
                     turn.session_key,
-                    now_epoch_ms,
+                    last_captured_timestamp,
                     round_index=round_index,
                 )
             except Exception:

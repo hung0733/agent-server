@@ -38,6 +38,7 @@ from backend.graph.interrupt_nodes import (
     CANCEL_LABEL,
     OTHER_LABEL,
     _classify_approval_reply,
+    human_review_node,
 )
 from backend.i18n import t
 from backend.llm.types import StreamChunk
@@ -691,7 +692,11 @@ async def test_bulter_graph_intercepts_assign_task_for_approval(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_brainstormer_user_question_uses_tool_args_not_message_content():
+async def test_brainstormer_user_question_uses_tool_args_not_message_content(
+    monkeypatch,
+):
+    monkeypatch.setattr(GraphNode, "store_message", lambda config, messages: None)
+
     state = {
         "messages": [
             AIMessage(
@@ -743,6 +748,7 @@ async def test_brainstormer_pre_submit_approval_uses_tool_args_not_message_conte
 ):
     FakeBrainstormerStepSession.commits = 0
     FakeBrainstormerAssignedTaskDAO.updates = []
+    monkeypatch.setattr(GraphNode, "store_message", lambda config, messages: None)
     monkeypatch.setattr(
         "backend.graph.brainstormer.async_session_factory",
         lambda: FakeBrainstormerStepSession(),
@@ -921,6 +927,122 @@ async def test_human_review_classifier_sends_user_message_to_llm(monkeypatch):
     assert len(calls) == 1
     assert isinstance(calls[0][0], HumanMessage)
     assert "同意" in calls[0][0].content
+
+
+@pytest.mark.asyncio
+async def test_human_review_resume_stores_user_message(monkeypatch):
+    stored_messages = []
+    mirrored_messages = []
+
+    monkeypatch.setattr(
+        GraphNode,
+        "store_message",
+        lambda config, messages: stored_messages.append(list(messages)),
+    )
+    monkeypatch.setattr(
+        GraphNode,
+        "store_user_message",
+        lambda config, messages: mirrored_messages.append(list(messages)),
+    )
+
+    graph = StateGraph(MessageState)
+    graph.add_node("human_review_node", human_review_node)
+    graph.add_edge(START, "human_review_node")
+    graph.add_edge("human_review_node", END)
+    app = graph.compile(checkpointer=InMemorySaver())
+    config = GraphNode.prepare_chat_node_config(
+        thread_id="session-review-store",
+        models=None,
+        sys_prompt="",
+        involves_secrets=False,
+        think_mode=False,
+        args={},
+        agent_id="agent-1",
+        session_db_id=123,
+        agent_type="brainstormer",
+    )
+
+    interrupted = await app.ainvoke(
+        {
+            "messages": [AIMessage(content="請選擇部署策略。")],
+            "human_review_node": "chat",
+            "human_review_data": {},
+            "human_review_result": None,
+            "human_review_approve": False,
+        },
+        config=config,
+    )
+    assert interrupted["__interrupt__"][0].value["type"] == "human_review"
+
+    result = await app.ainvoke(
+        Command(resume=HumanMessage(content="只個人使用")), config=config
+    )
+
+    assert result["human_review_result"] == APPROVE_LABEL
+    assert len(stored_messages) == 1
+    assert isinstance(stored_messages[0][0], AIMessage)
+    assert isinstance(stored_messages[0][1], HumanMessage)
+    assert stored_messages[0][1].content == "只個人使用"
+    assert mirrored_messages == []
+
+
+@pytest.mark.asyncio
+async def test_human_review_resume_stores_and_mirrors_butler_user_message(monkeypatch):
+    stored_messages = []
+    mirrored_messages = []
+
+    monkeypatch.setattr(
+        GraphNode,
+        "store_message",
+        lambda config, messages: stored_messages.append(list(messages)),
+    )
+    monkeypatch.setattr(
+        GraphNode,
+        "store_user_message",
+        lambda config, messages: mirrored_messages.append(list(messages)),
+    )
+
+    graph = StateGraph(MessageState)
+    graph.add_node("human_review_node", human_review_node)
+    graph.add_edge(START, "human_review_node")
+    graph.add_edge("human_review_node", END)
+    app = graph.compile(checkpointer=InMemorySaver())
+    config = GraphNode.prepare_chat_node_config(
+        thread_id="step-session-review-store",
+        models=None,
+        sys_prompt="",
+        involves_secrets=False,
+        think_mode=False,
+        args={},
+        agent_id="sub-agent-1",
+        session_db_id=123,
+        agent_type="brainstormer",
+        sender_agent_db_id=456,
+        sender_agent_id="parent-agent-1",
+        sender_agent_session_db_id=789,
+        sender_agent_session_id="parent-session-1",
+        sender_is_sub_agent=False,
+    )
+
+    interrupted = await app.ainvoke(
+        {
+            "messages": [AIMessage(content="請確認。")],
+            "human_review_node": "chat",
+            "human_review_data": {},
+            "human_review_result": None,
+            "human_review_approve": False,
+        },
+        config=config,
+    )
+    assert interrupted["__interrupt__"][0].value["type"] == "human_review"
+
+    result = await app.ainvoke(Command(resume=HumanMessage(content="2")), config=config)
+
+    assert result["human_review_result"] == APPROVE_LABEL
+    assert len(stored_messages) == 1
+    assert len(mirrored_messages) == 1
+    assert stored_messages[0][1].content == "2"
+    assert mirrored_messages[0][1].content == "2"
 
 
 @pytest.mark.asyncio

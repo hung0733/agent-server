@@ -23,10 +23,11 @@ async def human_review_node(state: MessageState, config: RunnableConfig) -> dict
         {"type": "human_review", "message": last_message}
     )
 
-    if GraphNode.is_butler_asking(config):
-        GraphNode.store_user_message(config, [user_message])
-
     messages.append(user_message)
+    GraphNode.store_message(config, [last_message, user_message])
+
+    if GraphNode.is_butler_asking(config):
+        GraphNode.store_user_message(config, [last_message, user_message])
 
     if state.get("human_review_approve") is not None and state.get(
         "human_review_approve"

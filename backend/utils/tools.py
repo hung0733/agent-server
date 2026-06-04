@@ -38,8 +38,18 @@ class Tools:
         """
         task = asyncio.create_task(coro)
         Tools._pending_tasks.add(task)
-        task.add_done_callback(Tools._pending_tasks.discard)
+        task.add_done_callback(Tools._on_task_done)
         return task
+
+    @staticmethod
+    def _on_task_done(task: asyncio.Task) -> None:
+        Tools._pending_tasks.discard(task)
+        try:
+            task.result()
+        except asyncio.CancelledError:
+            return
+        except Exception:
+            logger.exception(t("utils.tools.background_task_failed"))
 
     @staticmethod
     def require_env(name: str) -> str:

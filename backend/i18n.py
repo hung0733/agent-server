@@ -472,6 +472,7 @@ _MESSAGES["zh_HK"].update(
         "graph.bulter.assign_task.invalid_call": "找不到有效的 assign_task 工具調用。",
         "graph.bulter.assign_task.route_fallback": "Butler assign_task route fallback：tool_calls=%s",
         "graph.brainstormer.submit_approval.approved_message": "計劃書已核准",
+        "graph.brainstormer.user_question_requested": "Brainstormer 等待用戶回答問題：question=%s",
         "graph.interrupt.approval_request": "我準備執行以下任務，請確認：\n\n任務名稱：%s\n目標：%s\n\n回覆「同意」或「確認」批准執行，「取消」則不執行。",
         "graph.interrupt.approved": "已執行任務。\n\n任務名稱：%s\n目標：%s\n目前狀態：%s\n下一步：%s",
         "graph.interrupt.cancelled": "已取消執行任務。",
@@ -580,6 +581,7 @@ _MESSAGES["en"].update(
         "graph.bulter.assign_task.invalid_call": "No valid assign_task tool call was found.",
         "graph.bulter.assign_task.route_fallback": "Butler assign_task route fallback: tool_calls=%s",
         "graph.brainstormer.submit_approval.approved_message": "The plan has been approved.",
+        "graph.brainstormer.user_question_requested": "Brainstormer is waiting for a user answer: question=%s",
         "graph.interrupt.approval_request": 'I am ready to execute the following task. Please confirm:\n\nTask name: %s\nGoal: %s\n\nReply "approve" or "yes" to proceed, "cancel" or "no" to abort.',
         "graph.interrupt.approved": "Task executed.\n\nTask name: %s\nGoal: %s\nCurrent status: %s\nNext step: %s",
         "graph.interrupt.cancelled": "Task execution has been cancelled.",
@@ -596,6 +598,8 @@ _MESSAGES["zh_HK"].update(
         "tdai_memory.capture.done": "Capture 完成：agent=%s session=%s records=%d (%.0fms)",
         "tdai_memory.capture.postgres_degraded_skipping": "PostgresStore 已降級，略過 capture",
         "tdai_memory.capture.scheduler_notify_failed": "通知 scheduler 失敗：agent=%s session=%s",
+        "tdai_memory.capture.short_user_input_judge_failed": "短 user input 判斷失敗，保留原訊息",
+        "tdai_memory.capture.short_user_input_judge_prompt": "你係一個對話記錄過濾器。請判斷以下短用戶輸入在上一條 assistant 訊息語境下，是否應該保存到長期記憶的原始對話記錄。\n\n上一條 assistant 訊息：\n%s\n\n短用戶輸入：\n%s\n\n如果短用戶輸入是有意義的回答、選項、確認、拒絕、偏好、指令或修正，回覆 keep。\n如果只是無內容廢話、誤觸、填充語、純標點或不值得保存的噪音，回覆 discard。\n\n只輸出 keep 或 discard。",
         "tdai_memory.capture.upsert_l0_failed": "upsert_l0 失敗：record_id=%s",
         "tdai_memory.capture.write_runner_state_failed": "write_runner_state 失敗：agent=%s session=%s",
         "tdai_memory.config.offload_backend_url_missing": "offload.mode 為 'backend'，但未設定 "
@@ -739,6 +743,7 @@ _MESSAGES["zh_HK"].update(
         "tdai_memory.store.write_pipeline_state_failed": "write_pipeline_state 失敗",
         "tdai_memory.store.write_runner_state_failed": "write_runner_state 失敗",
         "tdai_memory.utils.managed_timer_callback_failed": "ManagedTimer[%s] callback 失敗",
+        "utils.tools.background_task_failed": "背景 task 執行失敗",
         "utils.tools.waiting_pending_tasks": "正在等待 %d 個 pending task 完成",
     }
 )
@@ -748,6 +753,8 @@ _MESSAGES["en"].update(
         "tdai_memory.capture.done": "Capture done: agent=%s session=%s records=%d (%.0fms)",
         "tdai_memory.capture.postgres_degraded_skipping": "PostgresStore degraded, skipping capture",
         "tdai_memory.capture.scheduler_notify_failed": "scheduler notify failed for %s/%s",
+        "tdai_memory.capture.short_user_input_judge_failed": "Short user input judge failed; keeping the original message",
+        "tdai_memory.capture.short_user_input_judge_prompt": "You are a conversation log filter. Decide whether the following short user input should be saved to the raw long-term conversation record, given the previous assistant message.\n\nPrevious assistant message:\n%s\n\nShort user input:\n%s\n\nIf the short user input is a meaningful answer, option, confirmation, rejection, preference, instruction, or correction, reply keep.\nIf it is content-free chatter, accidental input, filler, pure punctuation, or noise not worth saving, reply discard.\n\nOutput only keep or discard.",
         "tdai_memory.capture.upsert_l0_failed": "upsert_l0 failed for %s",
         "tdai_memory.capture.write_runner_state_failed": "write_runner_state failed for %s/%s",
         "tdai_memory.config.offload_backend_url_missing": "offload.mode is 'backend' but no "
@@ -902,6 +909,7 @@ _MESSAGES["en"].update(
         "tdai_memory.store.write_pipeline_state_failed": "write_pipeline_state failed",
         "tdai_memory.store.write_runner_state_failed": "write_runner_state failed",
         "tdai_memory.utils.managed_timer_callback_failed": "ManagedTimer[%s] callback failed",
+        "utils.tools.background_task_failed": "Background task failed",
         "utils.tools.waiting_pending_tasks": "Waiting for %d pending tasks to complete",
     }
 )
