@@ -25,6 +25,22 @@ def test_parse_batch_summary_accepts_wrapped_results():
     assert parsed == [{"summary": "摘要", "score": 3}]
 
 
+def test_parse_batch_summary_accepts_json_code_fence():
+    parsed = offload_manager._parse_batch_summary_content(
+        '```json\n[{"summary":"摘要","score":3}]\n```'
+    )
+
+    assert parsed == [{"summary": "摘要", "score": 3}]
+
+
+def test_parse_batch_summary_accepts_json_with_surrounding_text():
+    parsed = offload_manager._parse_batch_summary_content(
+        '以下是結果：\n[{"summary":"摘要","score":3}]\n'
+    )
+
+    assert parsed == [{"summary": "摘要", "score": 3}]
+
+
 @pytest.mark.asyncio
 async def test_flush_pending_falls_back_to_result_text(tmp_path, monkeypatch):
     async def fail_summarize(*args, **kwargs):

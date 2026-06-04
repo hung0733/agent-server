@@ -91,7 +91,7 @@ async def _summarize_batch(
 
 
 def _parse_batch_summary_content(content: str) -> list:
-    parsed = json.loads(content)
+    parsed = _load_batch_summary_json(content)
     if isinstance(parsed, str):
         try:
             parsed = json.loads(parsed)
@@ -104,6 +104,34 @@ def _parse_batch_summary_content(content: str) -> list:
                 return value
     if isinstance(parsed, list):
         return parsed
+    raise ValueError(t("tdai_memory.offload.invalid_batch_summary_response"))
+
+
+def _load_batch_summary_json(content: str):
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError:
+        pass
+
+    fenced = content.strip()
+    if fenced.startswith("```"):
+        lines = fenced.splitlines()
+        if len(lines) >= 3 and lines[-1].strip() == "```":
+            try:
+                return json.loads("\n".join(lines[1:-1]))
+            except json.JSONDecodeError:
+                pass
+
+    decoder = json.JSONDecoder()
+    for index, char in enumerate(content):
+        if char not in "[{":
+            continue
+        try:
+            value, _ = decoder.raw_decode(content[index:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, (list, dict)):
+            return value
     raise ValueError(t("tdai_memory.offload.invalid_batch_summary_response"))
 
 
