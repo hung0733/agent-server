@@ -218,6 +218,9 @@ class Agent:
         message = interrupt_value.get("message")
         if isinstance(message, BaseMessage):
             interrupt_value = {**interrupt_value, "message": str(message.content)}
+            whatsapp_document = message.additional_kwargs.get("whatsapp_document")
+            if whatsapp_document:
+                interrupt_value["whatsapp_document"] = whatsapp_document
 
         return StreamChunk(
             chunk_type="interrupt",

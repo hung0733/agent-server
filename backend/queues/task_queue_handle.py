@@ -14,6 +14,7 @@ from backend.db.session import async_session_factory
 from backend.dto.session import AgentSessionCreate
 from backend.entities.assigned_task import AssignedTaskStep
 from backend.i18n import t
+from backend.llm.types import StreamChunk
 from backend.queues.message_queue import CmnMsgQueueTask, MessageQueue, TaskState
 from backend.queues.task_queue import (
     TaskQueueHandlerResult,
@@ -174,7 +175,7 @@ async def handle_assigned_task_send_step(
                 resp_message = ""
                 interrupt_message = _interrupt_message_from_chunk(chunk)
                 logger.info(t("queues.task_queue_handle.interrupted"), task.step_id)
-                msg_id = await _send_interrupt_to_user(task, interrupt_message)
+                msg_id = await _send_interrupt_to_user(task, chunk)
                 if msg_id:
                     msg_task.ack_stream_callback(msg_id)
 
@@ -234,9 +235,8 @@ def _interrupt_message_from_chunk(chunk: Any) -> str:
     return str(message)
 
 
-async def _send_interrupt_to_user(
-    task: TaskQueueStep, interrupt_message: str
-) -> str | None:
+async def _send_interrupt_to_user(task: TaskQueueStep, chunk: StreamChunk) -> str | None:
+    interrupt_message = _interrupt_message_from_chunk(chunk)
     if not interrupt_message or task.responsible_agent_db_id is None:
         return None
     if task.user_db_id is None:
@@ -271,7 +271,17 @@ async def _send_interrupt_to_user(
         whatsapp_key=whatsapp_key,
     )
     try:
-        resp = await channel.send_text(phoneno, interrupt_message)
+        document = _whatsapp_document_from_interrupt_data(chunk.data or {})
+        if document:
+            resp = await channel.send_document(
+                phoneno,
+                document["media"],
+                mimetype=document.get("mimetype"),
+                file_name=document.get("file_name"),
+                caption=document.get("caption") or interrupt_message,
+            )
+        else:
+            resp = await channel.send_text(phoneno, interrupt_message)
     finally:
         await channel.close()
     msg_id = _extract_message_id(resp)
@@ -282,6 +292,26 @@ async def _send_interrupt_to_user(
         msg_id,
     )
     return msg_id
+
+
+def _whatsapp_document_from_interrupt_data(
+    interrupt_data: dict[str, Any],
+) -> dict[str, str] | None:
+    document = interrupt_data.get("whatsapp_document")
+    if not isinstance(document, dict):
+        return None
+    media = document.get("media")
+    if not isinstance(media, str) or not media:
+        return None
+    return {
+        "media": media,
+        "mimetype": str(document.get("mimetype") or "text/html"),
+        "file_name": str(
+            document.get("file_name")
+            or t("graph.brainstormer.submit_approval.file_name")
+        ),
+        "caption": str(document.get("caption") or ""),
+    }
 
 
 def _extract_message_id(evolution_response: dict[str, Any]) -> str | None:

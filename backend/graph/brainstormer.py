@@ -1,5 +1,7 @@
+import base64
 from datetime import datetime, timezone
 import logging
+import re
 from typing import Any
 
 from langchain_core.runnables import RunnableConfig
@@ -84,12 +86,24 @@ async def pre_submit_approval_node(
             if tool_call.get("name") == "submit_html_plan_for_approval":
                 args = tool_call.get("args") or {}
 
-                message = await submit_html_plan_for_approval.coroutine(**args)  # type: ignore
+                validation_message = await submit_html_plan_for_approval.coroutine(  # type: ignore
+                    **args
+                )
                 await _save_html_plan_to_task_step(config, args)
+                whatsapp_document = _build_html_plan_whatsapp_document(args)
+                message = (
+                    _build_html_plan_approval_message(args)
+                    if whatsapp_document
+                    else validation_message
+                )
+
+                additional_kwargs = {"datetime": datetime.now(timezone.utc)}
+                if whatsapp_document:
+                    additional_kwargs["whatsapp_document"] = whatsapp_document
 
                 approval_msg = AIMessage(
                     content=message,
-                    additional_kwargs={"datetime": datetime.now(timezone.utc)},
+                    additional_kwargs=additional_kwargs,
                 )
 
                 messages.append(approval_msg)
@@ -109,6 +123,37 @@ async def pre_submit_approval_node(
     return {
         "messages": [ToolMessage(content=t("graph.bulter.assign_task.invalid_call"))]
     }
+
+
+def _build_html_plan_approval_message(args: dict[str, Any]) -> str:
+    return t("graph.brainstormer.submit_approval.file_message") % (
+        str(args.get("task_id") or "").strip(),
+        str(args.get("task_name") or "").strip(),
+        str(args.get("goal") or "").strip(),
+    )
+
+
+def _build_html_plan_whatsapp_document(args: dict[str, Any]) -> dict[str, str] | None:
+    html_plan = str(args.get("html_plan") or "").strip()
+    if not html_plan:
+        return None
+    caption = _build_html_plan_approval_message(args)
+    return {
+        "mediatype": "document",
+        "media": base64.b64encode(html_plan.encode("utf-8")).decode("ascii"),
+        "mimetype": "text/html",
+        "file_name": _html_plan_file_name(str(args.get("task_name") or "")),
+        "caption": caption,
+    }
+
+
+def _html_plan_file_name(task_name: str) -> str:
+    file_stem = re.sub(r"[^\w.-]+", "_", task_name.strip()).strip("._-")
+    if not file_stem:
+        file_stem = t("graph.brainstormer.submit_approval.file_name")
+    if not file_stem.lower().endswith(".html"):
+        file_stem = f"{file_stem}.html"
+    return file_stem
 
 
 async def _save_html_plan_to_task_step(

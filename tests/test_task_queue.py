@@ -6,6 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from backend.llm.types import StreamChunk
+from backend.queues.message_queue import TaskState
 from backend.queues.task_queue import (
     TaskQueue,
     TaskQueueHandlerResult,
@@ -132,6 +134,7 @@ class FakeEvolutionWhatsAppChannel:
     async def send_text(self, number, text):
         type(self).sent.append(
             {
+                "kind": "text",
                 "instance": self.whatsapp_instance,
                 "key": self.whatsapp_key,
                 "number": number,
@@ -139,6 +142,19 @@ class FakeEvolutionWhatsAppChannel:
             }
         )
         return {"key": {"id": "interrupt-msg-1"}}
+
+    async def send_document(self, number, media, **options):
+        type(self).sent.append(
+            {
+                "kind": "document",
+                "instance": self.whatsapp_instance,
+                "key": self.whatsapp_key,
+                "number": number,
+                "media": media,
+                "options": options,
+            }
+        )
+        return {"key": {"id": "document-msg-1"}}
 
     async def close(self):
         return None
@@ -148,11 +164,13 @@ class FakeMsgTask:
     def __init__(self, chunks):
         self.chunks = chunks
         self.acks = []
+        self.task_state = TaskState.PENDING
 
     def stream_gen(self):
         async def gen():
             for chunk in self.chunks:
                 yield chunk
+            self.task_state = TaskState.COMPLETED
 
         return gen()
 
@@ -780,6 +798,7 @@ async def test_assigned_task_send_interrupt_sends_whatsapp_and_completes(
     assert send_task.status == TaskQueueStepStatus.COMPLETED
     assert FakeEvolutionWhatsAppChannel.sent == [
         {
+            "kind": "text",
             "instance": "main-instance",
             "key": "main-key",
             "number": "85298765432",
@@ -790,7 +809,63 @@ async def test_assigned_task_send_interrupt_sends_whatsapp_and_completes(
 
 
 @pytest.mark.asyncio
-async def test_assigned_task_send_interrupt_missing_whatsapp_data_falls_back_response(
+async def test_assigned_task_send_interrupt_sends_whatsapp_document(
+    monkeypatch,
+):
+    _reset_fakes()
+    monkeypatch.setattr("backend.queues.task_queue_handle.MessageQueue", FakeMessageQueue)
+    monkeypatch.setattr(
+        "backend.queues.task_queue_handle.async_session_factory", _session_factory
+    )
+    monkeypatch.setattr("backend.queues.task_queue_handle.AgentDAO", FakeAgentDAO)
+    monkeypatch.setattr("backend.queues.task_queue_handle.UserAccDAO", FakeUserAccDAO)
+    monkeypatch.setattr(
+        "backend.queues.task_queue_handle.EvolutionWhatsAppChannel",
+        FakeEvolutionWhatsAppChannel,
+    )
+    FakeMessageQueue.chunks = [
+        StreamChunk(
+            chunk_type="interrupt",
+            data={
+                "message": "請查看附件 HTML 計劃書。",
+                "whatsapp_document": {
+                    "media": "PGh0bWw+PC9odG1sPg==",
+                    "mimetype": "text/html",
+                    "file_name": "計劃書.html",
+                    "caption": "請查看附件 HTML 計劃書。",
+                },
+            },
+        )
+    ]
+
+    send_task = _task(status=TaskQueueStepStatus.SEND)
+    send_task.assign_agent_id = "agent-assigned"
+    send_task.step_session_id = "step-session-abc"
+
+    send_result = await handle_assigned_task_send_step(send_task)
+
+    assert send_result is not None
+    assert send_result.success is True
+    assert send_task.status == TaskQueueStepStatus.COMPLETED
+    assert FakeEvolutionWhatsAppChannel.sent == [
+        {
+            "kind": "document",
+            "instance": "main-instance",
+            "key": "main-key",
+            "number": "85298765432",
+            "media": "PGh0bWw+PC9odG1sPg==",
+            "options": {
+                "mimetype": "text/html",
+                "file_name": "計劃書.html",
+                "caption": "請查看附件 HTML 計劃書。",
+            },
+        }
+    ]
+    assert FakeMessageQueue.task.acks == ["document-msg-1"]
+
+
+@pytest.mark.asyncio
+async def test_assigned_task_send_interrupt_missing_whatsapp_data_sends_nothing(
     monkeypatch,
 ):
     _reset_fakes()
@@ -824,9 +899,9 @@ async def test_assigned_task_send_interrupt_missing_whatsapp_data_falls_back_res
 
     send_result = await handle_assigned_task_send_step(send_task)
 
-    assert send_result is None
-    assert send_task.status == TaskQueueStepStatus.RESPONSE
-    assert send_task.message == "fallback approval"
+    assert send_result is not None
+    assert send_result.success is True
+    assert send_task.status == TaskQueueStepStatus.COMPLETED
     assert FakeEvolutionWhatsAppChannel.sent == []
     assert FakeMessageQueue.task.acks == []
 

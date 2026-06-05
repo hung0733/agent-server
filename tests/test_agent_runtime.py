@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import json
 from types import SimpleNamespace
 
@@ -798,13 +799,42 @@ async def test_brainstormer_pre_submit_approval_uses_tool_args_not_message_conte
     assert "呢段 content 不應直接輸出" not in content
     assert "task-1" in content
     assert "名城資料整理" in content
-    assert html_plan in content
+    assert html_plan not in content
+    whatsapp_document = result["messages"][0].additional_kwargs["whatsapp_document"]
+    assert whatsapp_document["mediatype"] == "document"
+    assert whatsapp_document["mimetype"] == "text/html"
+    assert whatsapp_document["file_name"] == "名城資料整理.html"
+    assert whatsapp_document["caption"] == content
+    assert base64.b64decode(whatsapp_document["media"]).decode() == html_plan
     assert result["human_review_node"] == "submit_approval_node"
     assert result["human_review_data"]["html_plan"] == html_plan
     assert FakeBrainstormerAssignedTaskDAO.updates == [
         {"session_db_id": 321, "output_html": html_plan}
     ]
     assert FakeBrainstormerStepSession.commits == 1
+
+
+def test_stream_interrupt_chunk_preserves_whatsapp_document_metadata():
+    message = AIMessage(
+        content="請查看附件 HTML 計劃書。",
+        additional_kwargs={
+            "whatsapp_document": {
+                "media": "PGh0bWw+PC9odG1sPg==",
+                "mimetype": "text/html",
+                "file_name": "plan.html",
+                "caption": "請查看附件 HTML 計劃書。",
+            }
+        },
+    )
+
+    chunk = Agent._stream_interrupt_chunk(
+        {"__interrupt__": [Interrupt(value={"type": "human_review", "message": message})]}
+    )
+
+    assert chunk is not None
+    assert chunk.chunk_type == "interrupt"
+    assert chunk.data["message"] == "請查看附件 HTML 計劃書。"
+    assert chunk.data["whatsapp_document"]["media"] == "PGh0bWw+PC9odG1sPg=="
 
 
 @pytest.mark.asyncio

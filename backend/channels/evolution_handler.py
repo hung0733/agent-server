@@ -61,6 +61,17 @@ class WhatsAppMsgQueueTask(MsgQueueTask):
     async def _handle_interrupt(self, chunk: StreamChunk) -> str | None:
         interrupt_data = chunk.data or {}
         interrupt_msg = str(interrupt_data.get("message") or chunk.content or "")
+        document = _whatsapp_document_from_interrupt_data(interrupt_data)
+
+        if document and self._channel and self._phone_no:
+            resp = await self._channel.send_document(
+                self._phone_no,
+                document["media"],
+                mimetype=document.get("mimetype"),
+                file_name=document.get("file_name"),
+                caption=document.get("caption") or interrupt_msg,
+            )
+            return self._extract_message_id(resp)
 
         if interrupt_msg and self._channel and self._phone_no:
             resp = await self._channel.send_text(self._phone_no, interrupt_msg)
@@ -109,6 +120,26 @@ class WhatsAppMsgQueueTask(MsgQueueTask):
         if isinstance(key, dict):
             return key.get("id")
         return None
+
+
+def _whatsapp_document_from_interrupt_data(
+    interrupt_data: dict[str, Any],
+) -> dict[str, str] | None:
+    document = interrupt_data.get("whatsapp_document")
+    if not isinstance(document, dict):
+        return None
+    media = document.get("media")
+    if not isinstance(media, str) or not media:
+        return None
+    return {
+        "media": media,
+        "mimetype": str(document.get("mimetype") or "text/html"),
+        "file_name": str(
+            document.get("file_name")
+            or t("graph.brainstormer.submit_approval.file_name")
+        ),
+        "caption": str(document.get("caption") or ""),
+    }
 
 
 def extract_message_metadata(

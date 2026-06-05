@@ -682,6 +682,53 @@ async def test_whatsapp_task_callback_sends_assign_task_tool_before_interrupt_me
 
 
 @pytest.mark.asyncio
+async def test_whatsapp_task_callback_sends_interrupt_document_file():
+    sent_documents = []
+
+    class FakeChannel:
+        async def send_document(self, number, media, **options):
+            sent_documents.append((number, media, options))
+            return {"key": {"id": "doc-msg-1"}}
+
+    task = WhatsAppMsgQueueTask(
+        message="建立 task",
+        agent_id="agent-123",
+        session_id="default-123",
+        channel=FakeChannel(),
+        phone_no="85298765432",
+    )
+
+    msg_id = await task.callback(
+        StreamChunk(
+            chunk_type="interrupt",
+            data={
+                "type": "human_review",
+                "message": "請查看附件 HTML 計劃書。",
+                "whatsapp_document": {
+                    "media": "PGh0bWw+PC9odG1sPg==",
+                    "mimetype": "text/html",
+                    "file_name": "計劃書.html",
+                    "caption": "請查看附件 HTML 計劃書。",
+                },
+            },
+        )
+    )
+
+    assert msg_id == "doc-msg-1"
+    assert sent_documents == [
+        (
+            "85298765432",
+            "PGh0bWw+PC9odG1sPg==",
+            {
+                "mimetype": "text/html",
+                "file_name": "計劃書.html",
+                "caption": "請查看附件 HTML 計劃書。",
+            },
+        )
+    ]
+
+
+@pytest.mark.asyncio
 async def test_log_inbound_message_done_fallback_sends_tool_summary_without_response_text(monkeypatch):
     sent_messages = []
 

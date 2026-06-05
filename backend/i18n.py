@@ -472,6 +472,11 @@ _MESSAGES["zh_HK"].update(
         "graph.bulter.assign_task.invalid_call": "找不到有效的 assign_task 工具調用。",
         "graph.bulter.assign_task.route_fallback": "Butler assign_task route fallback：tool_calls=%s",
         "graph.brainstormer.submit_approval.approved_message": "計劃書已核准",
+        "graph.brainstormer.submit_approval.file_message": (
+            "請查看附件 HTML 計劃書，然後回覆「approve」批准，"
+            "或回覆「cancel」取消。\n\nTask ID：%s\n任務名稱：%s\n目標：%s"
+        ),
+        "graph.brainstormer.submit_approval.file_name": "plan.html",
         "graph.brainstormer.user_question_requested": "Brainstormer 等待用戶回答問題：question=%s",
         "graph.interrupt.approval_request": "我準備執行以下任務，請確認：\n\n任務名稱：%s\n目標：%s\n\n回覆「同意」或「確認」批准執行，「取消」則不執行。",
         "graph.interrupt.approved": "已執行任務。\n\n任務名稱：%s\n目標：%s\n目前狀態：%s\n下一步：%s",
@@ -581,6 +586,12 @@ _MESSAGES["en"].update(
         "graph.bulter.assign_task.invalid_call": "No valid assign_task tool call was found.",
         "graph.bulter.assign_task.route_fallback": "Butler assign_task route fallback: tool_calls=%s",
         "graph.brainstormer.submit_approval.approved_message": "The plan has been approved.",
+        "graph.brainstormer.submit_approval.file_message": (
+            'Please review the attached HTML plan, then reply "approve" '
+            'to approve it or "cancel" to cancel.\n\n'
+            "Task ID: %s\nTask name: %s\nGoal: %s"
+        ),
+        "graph.brainstormer.submit_approval.file_name": "plan.html",
         "graph.brainstormer.user_question_requested": "Brainstormer is waiting for a user answer: question=%s",
         "graph.interrupt.approval_request": 'I am ready to execute the following task. Please confirm:\n\nTask name: %s\nGoal: %s\n\nReply "approve" or "yes" to proceed, "cancel" or "no" to abort.',
         "graph.interrupt.approved": "Task executed.\n\nTask name: %s\nGoal: %s\nCurrent status: %s\nNext step: %s",
