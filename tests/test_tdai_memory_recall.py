@@ -1,11 +1,13 @@
 import sys
 from pathlib import Path
 
+import pytest
+
 
 BACKEND_DIR = Path(__file__).resolve().parents[1] / "backend"
 sys.path.insert(0, str(BACKEND_DIR))
 
-from tdai_memory.recall import _rrf_fusion
+from tdai_memory.recall import _load_scene_nav, _rrf_fusion
 
 
 def test_rrf_fusion_returns_ranked_results_without_name_error():
@@ -23,3 +25,27 @@ def test_rrf_fusion_returns_ranked_results_without_name_error():
     assert [item["id"] for item in fused] == ["mem-1", "mem-2", "mem-3"]
     assert fused[0]["_source"] == "keyword"
     assert fused[0]["_rrf_score"] > fused[1]["_rrf_score"]
+
+
+@pytest.mark.asyncio
+async def test_load_scene_nav_accepts_list_scene_index(tmp_path):
+    scene_index_path = tmp_path / "scene_index.json"
+    scene_index_path.write_text(
+        """
+[
+  {
+    "name": "daily_work",
+    "label": "日常工作",
+    "summary": "近期工作記憶",
+    "memory_count": 2
+  }
+]
+""".strip(),
+        encoding="utf-8",
+    )
+
+    nav = await _load_scene_nav(str(tmp_path))
+
+    assert nav is not None
+    assert "scene_nav:daily_work" in nav
+    assert "日常工作" in nav

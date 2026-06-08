@@ -367,7 +367,7 @@ async def _perform_recall(
 
 
 async def _load_scene_nav(agent_dir: str) -> str | None:
-    def _read() -> dict | None:
+    def _read() -> dict | list | None:
         path = os.path.join(agent_dir, "scene_index.json")
         try:
             with open(path, "r", encoding="utf-8") as f:
@@ -379,7 +379,11 @@ async def _load_scene_nav(agent_dir: str) -> str | None:
     if not scene_index:
         return None
 
-    scenes = scene_index.get("scenes") or scene_index
+    if isinstance(scene_index, dict):
+        scenes = scene_index.get("scenes") or []
+    else:
+        scenes = scene_index
+
     if not isinstance(scenes, list) or not scenes:
         return None
 
