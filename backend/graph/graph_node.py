@@ -86,7 +86,7 @@ class GraphNode:
         True: {
             "temperature": 1.0,
             "top_p": 0.95,
-            "presence_penalty": 1.5,
+            "presence_penalty": 0.0,
             "top_k": 20,
             "repetition_penalty": 1.0,
             "min_p": 0.0,
