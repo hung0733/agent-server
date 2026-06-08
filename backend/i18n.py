@@ -484,6 +484,19 @@ _MESSAGES["zh_HK"].update(
             "或回覆「cancel」取消。\n\nTask ID：%s\n任務名稱：%s\n目標：%s"
         ),
         "graph.brainstormer.submit_approval.file_name": "plan.html",
+        "graph.brainstormer.response_question_check.failed": "Brainstormer response question check LLM call 失敗",
+        "graph.brainstormer.response_question_check.fallback_choice": "請直接回覆你的答案。",
+        "graph.brainstormer.response_question_check.invalid_json": "Brainstormer response question check 未能讀取有效 JSON",
+        "graph.brainstormer.response_question_check.prompt": (
+            "你係一個 routing 分類器。請判斷以下 assistant 回覆係咪一條應該暫停流程、等待用戶回答嘅問題。\n\n"
+            "assistant 回覆：\n%s\n\n"
+            "只輸出一個 JSON object，唔好有 markdown 或其他文字。格式如下：\n"
+            '{"is_question": true, "question": "要問用戶的一條問題", "description": "為何需要回答及相關背景", "choose": ["選項或回覆方式"]}\n\n'
+            "規則：\n"
+            "- 如果回覆主要係提出問題、要求用戶確認、選擇或補資料，is_question 設為 true。\n"
+            "- 如果回覆係完成答覆、總結、通知、或毋須用戶回答，is_question 設為 false。\n"
+            "- question、description、choose 只能抽取或整理原文已包含嘅意思，唔好加入新需求或新選項。"
+        ),
         "graph.brainstormer.user_question_requested": "Brainstormer 等待用戶回答問題：question=%s",
         "graph_node.user_whatsapp_missing_fields": "GraphNode WhatsApp 發送資料不足：user_db_id=%s agent_db_id=%s",
         "graph_node.user_whatsapp_send_failed": "GraphNode WhatsApp 發送失敗：user_db_id=%s agent_db_id=%s",
@@ -603,6 +616,19 @@ _MESSAGES["en"].update(
             "Task ID: %s\nTask name: %s\nGoal: %s"
         ),
         "graph.brainstormer.submit_approval.file_name": "plan.html",
+        "graph.brainstormer.response_question_check.failed": "Brainstormer response question check LLM call failed",
+        "graph.brainstormer.response_question_check.fallback_choice": "Please reply directly with your answer.",
+        "graph.brainstormer.response_question_check.invalid_json": "Brainstormer response question check could not read valid JSON",
+        "graph.brainstormer.response_question_check.prompt": (
+            "You are a routing classifier. Determine whether the following assistant response is a question that should pause the flow and wait for the user to answer.\n\n"
+            "Assistant response:\n%s\n\n"
+            "Output exactly one JSON object, with no markdown or extra text. Use this shape:\n"
+            '{"is_question": true, "question": "one question to ask the user", "description": "why the answer is needed and relevant context", "choose": ["options or reply method"]}\n\n'
+            "Rules:\n"
+            "- Set is_question to true if the response mainly asks a question, requests confirmation, asks the user to choose, or asks for missing information.\n"
+            "- Set is_question to false if the response is a final answer, summary, notification, or does not require a user reply.\n"
+            "- question, description, and choose may only extract or organize meaning already present in the response; do not add new requirements or new options."
+        ),
         "graph.brainstormer.user_question_requested": "Brainstormer is waiting for a user answer: question=%s",
         "graph_node.user_whatsapp_missing_fields": "GraphNode WhatsApp send data is incomplete: user_db_id=%s agent_db_id=%s",
         "graph_node.user_whatsapp_send_failed": "GraphNode WhatsApp send failed: user_db_id=%s agent_db_id=%s",

@@ -31,6 +31,9 @@ from backend.graph.graph_node import GraphNode, MessageState
 from backend.graph.brainstormer import (
     pre_submit_approval_node,
     pre_user_question_node,
+    response_question_check_node,
+    route_after_chat_brainstormer,
+    route_after_response_question_check,
     submit_approval_node,
 )
 from backend.graph.bulter import assign_task_node, workflow as butler_workflow
@@ -793,6 +796,230 @@ async def test_brainstormer_user_question_uses_tool_args_not_message_content(
     assert "自訂匯入流程" in content
     assert result["human_review_node"] == "chat"
     assert result["human_review_data"]["question"] == "請確認名城資料來源。"
+
+
+def test_brainstormer_routes_plain_ai_content_to_question_check():
+    state = {
+        "messages": [AIMessage(content="你想採用哪一種資料來源？")],
+        "human_review_node": None,
+        "human_review_data": None,
+        "human_review_result": None,
+    }
+
+    assert route_after_chat_brainstormer(state) == "response_question_check_node"
+
+
+@pytest.mark.asyncio
+async def test_brainstormer_response_question_check_routes_to_human_review(
+    monkeypatch,
+):
+    logged_questions = []
+
+    class QuestionClassifier:
+        async def ainvoke(self, messages):
+            return AIMessage(
+                content=json.dumps(
+                    {
+                        "is_question": True,
+                        "question": "請確認名城資料來源。",
+                        "description": "需要決定預載標準。",
+                        "choose": [
+                            "採用日本城郭協會「日本100名城」。",
+                            "由用戶自行維護名單。",
+                        ],
+                    }
+                )
+            )
+
+        def get_resp_content(self, response):
+            return response.content
+
+    async def get_question_classifier():
+        return QuestionClassifier()
+
+    monkeypatch.setattr(GraphNode, "store_message", lambda config, messages: None)
+    monkeypatch.setattr(
+        "backend.graph.brainstormer.logger.info",
+        lambda message, question: logged_questions.append(question),
+    )
+    monkeypatch.setattr(
+        "backend.graph.brainstormer.LLMSet.getRteModel",
+        get_question_classifier,
+    )
+
+    state = {
+        "messages": [
+            AIMessage(
+                content="請確認名城資料來源：100名城或自訂名單？\n補充：資料表 seed 會受影響。"
+            )
+        ],
+        "human_review_node": None,
+        "human_review_data": None,
+        "human_review_result": None,
+    }
+    config = GraphNode.prepare_chat_node_config(
+        thread_id="session-1",
+        models=None,
+        sys_prompt="",
+        involves_secrets=False,
+        think_mode=False,
+        args={},
+        agent_type="brainstormer",
+    )
+
+    result = await response_question_check_node(state, config)
+
+    assert result["human_review_node"] == "chat"
+    assert result["human_review_data"] == {}
+    assert logged_questions == ["請確認名城資料來源：100名城或自訂名單？"]
+    assert route_after_response_question_check(result) == "human_review_node"
+
+
+@pytest.mark.asyncio
+async def test_brainstormer_response_question_check_keeps_existing_message(
+    monkeypatch,
+):
+    stored_messages = []
+
+    class QuestionClassifier:
+        async def ainvoke(self, messages):
+            return AIMessage(
+                content=json.dumps(
+                    {
+                        "is_question": True,
+                        "question": "你希望先做哪一部分？",
+                        "description": "需要你指定優先次序。",
+                        "choose": [],
+                    }
+                )
+            )
+
+        def get_resp_content(self, response):
+            return response.content
+
+    async def get_question_classifier():
+        return QuestionClassifier()
+
+    monkeypatch.setattr(
+        GraphNode,
+        "store_message",
+        lambda config, messages: stored_messages.append(messages),
+    )
+    monkeypatch.setattr(
+        "backend.graph.brainstormer.LLMSet.getRteModel",
+        get_question_classifier,
+    )
+
+    state = {
+        "messages": [AIMessage(content="你希望先做哪一部分？")],
+        "human_review_node": None,
+        "human_review_data": None,
+        "human_review_result": None,
+    }
+    config = GraphNode.prepare_chat_node_config(
+        thread_id="session-1",
+        models=None,
+        sys_prompt="",
+        involves_secrets=False,
+        think_mode=False,
+        args={},
+        agent_type="brainstormer",
+    )
+
+    result = await response_question_check_node(state, config)
+
+    assert stored_messages == [state["messages"]]
+    assert result["human_review_data"] == {}
+
+
+@pytest.mark.asyncio
+async def test_brainstormer_response_question_check_routes_false_to_end(monkeypatch):
+    class QuestionClassifier:
+        async def ainvoke(self, messages):
+            return AIMessage(content=json.dumps({"is_question": False}))
+
+        def get_resp_content(self, response):
+            return response.content
+
+    async def get_question_classifier():
+        return QuestionClassifier()
+
+    monkeypatch.setattr(
+        "backend.graph.brainstormer.LLMSet.getRteModel",
+        get_question_classifier,
+    )
+
+    state = {
+        "messages": [AIMessage(content="我已整理完成。")],
+        "human_review_node": "chat",
+        "human_review_data": {"question": "stale"},
+        "human_review_result": None,
+    }
+
+    result = await response_question_check_node(state, {})
+
+    assert result["human_review_node"] is None
+    assert result["human_review_data"] is None
+    assert route_after_response_question_check(result) == "end_node"
+
+
+@pytest.mark.asyncio
+async def test_brainstormer_response_question_check_invalid_json_routes_to_end(
+    monkeypatch,
+):
+    class QuestionClassifier:
+        async def ainvoke(self, messages):
+            return AIMessage(content="not json")
+
+        def get_resp_content(self, response):
+            return response.content
+
+    async def get_question_classifier():
+        return QuestionClassifier()
+
+    monkeypatch.setattr(
+        "backend.graph.brainstormer.LLMSet.getRteModel",
+        get_question_classifier,
+    )
+
+    state = {
+        "messages": [AIMessage(content="請確認資料來源。")],
+        "human_review_node": "chat",
+        "human_review_data": {"question": "stale"},
+        "human_review_result": None,
+    }
+
+    result = await response_question_check_node(state, {})
+
+    assert result["human_review_node"] is None
+    assert result["human_review_data"] is None
+    assert route_after_response_question_check(result) == "end_node"
+
+
+@pytest.mark.asyncio
+async def test_brainstormer_response_question_check_exception_routes_to_end(
+    monkeypatch,
+):
+    async def get_question_classifier():
+        raise RuntimeError("routing unavailable")
+
+    monkeypatch.setattr(
+        "backend.graph.brainstormer.LLMSet.getRteModel",
+        get_question_classifier,
+    )
+
+    state = {
+        "messages": [AIMessage(content="請確認資料來源。")],
+        "human_review_node": "chat",
+        "human_review_data": {"question": "stale"},
+        "human_review_result": None,
+    }
+
+    result = await response_question_check_node(state, {})
+
+    assert result["human_review_node"] is None
+    assert result["human_review_data"] is None
+    assert route_after_response_question_check(result) == "end_node"
 
 
 @pytest.mark.asyncio

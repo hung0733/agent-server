@@ -1,5 +1,6 @@
 import base64
 from datetime import datetime, timezone
+import json
 import logging
 import re
 from typing import Any
@@ -9,6 +10,7 @@ from langgraph.graph import END, START, StateGraph
 from langchain_core.messages import (
     AIMessage,
     BaseMessage,
+    HumanMessage,
     ToolMessage,
 )
 from backend.dao.assigned_task import AssignedTaskDAO
@@ -17,6 +19,7 @@ from backend.graph.agent import chat_node, end_node, route_after_chat
 from backend.graph.graph_node import GraphNode, MessageState
 from backend.graph.interrupt_nodes import human_review_node, route_after_human_review
 from backend.i18n import t
+from backend.llm.llm import LLMSet
 from backend.tools.brainstormer import ask_user_question, submit_html_plan_for_approval
 
 logger = logging.getLogger(__name__)
@@ -34,7 +37,13 @@ def route_after_chat_brainstormer(state: MessageState) -> str:
             elif tool_call.get("name") == "submit_html_plan_for_approval":
                 return "pre_submit_approval_node"
 
-    return route_after_chat(state)
+    route = route_after_chat(state)
+    if route == "end_node" and isinstance(last_message, AIMessage):
+        content = _message_content_text(last_message)
+        if content:
+            return "response_question_check_node"
+
+    return route
 
 
 async def pre_user_question_node(
@@ -73,6 +82,82 @@ async def pre_user_question_node(
 
     return {
         "messages": [ToolMessage(content=t("graph.bulter.assign_task.invalid_call"))]
+    }
+
+
+async def response_question_check_node(
+    state: MessageState, config: RunnableConfig
+) -> dict[str, Any]:
+    messages: list[BaseMessage] = list(state["messages"])
+    last_message = messages[-1]
+
+    routing_result = await _classify_response_question(str(last_message.content))
+    if not routing_result.get("is_question"):
+        return _clear_pending_question_review()
+
+    question: str = str(last_message.content).splitlines()[0].strip()
+    logger.info(t("graph.brainstormer.user_question_requested"), question)
+    GraphNode.store_message(config, messages)
+
+    if GraphNode.is_butler_asking(config):
+        GraphNode.store_user_message(config, [last_message])
+
+    return {
+        "human_review_node": "chat",
+        "human_review_data": {},
+        "human_review_result": None,
+        "human_review_approve": False,
+    }
+
+
+def route_after_response_question_check(state: MessageState) -> str:
+    if state.get("human_review_node") == "chat":
+        return "human_review_node"
+    return "end_node"
+
+
+async def _classify_response_question(response_content: str) -> dict[str, Any]:
+    prompt = t("graph.brainstormer.response_question_check.prompt") % response_content
+    try:
+        client = await LLMSet.getRteModel()
+        response = await client.ainvoke([HumanMessage(content=prompt)])
+        content = client.get_resp_content(response).strip()
+        result = _parse_json_object(content)
+    except Exception:
+        logger.exception(t("graph.brainstormer.response_question_check.failed"))
+        return {"is_question": False}
+
+    if not isinstance(result.get("is_question"), bool):
+        logger.warning(t("graph.brainstormer.response_question_check.invalid_json"))
+        return {"is_question": False}
+
+    return result
+
+
+def _parse_json_object(content: str) -> dict[str, Any]:
+    content = content.strip()
+    if content.startswith("```"):
+        content = re.sub(r"^```(?:json)?\s*", "", content, flags=re.IGNORECASE)
+        content = re.sub(r"\s*```$", "", content)
+
+    parsed = json.loads(content)
+    if isinstance(parsed, dict):
+        return parsed
+    raise ValueError(t("graph.brainstormer.response_question_check.invalid_json"))
+
+
+def _message_content_text(message: BaseMessage) -> str:
+    if isinstance(message.content, str):
+        return message.content.strip()
+    return str(message.content or "").strip()
+
+
+def _clear_pending_question_review() -> dict[str, Any]:
+    return {
+        "human_review_node": None,
+        "human_review_data": None,
+        "human_review_result": None,
+        "human_review_approve": None,
     }
 
 
@@ -225,11 +310,15 @@ workflow.add_node("tools", GraphNode.build_tool_node(GraphNode.get_all_tools()))
 workflow.add_node("end_node", end_node)
 workflow.add_node("pre_user_question_node", pre_user_question_node)
 workflow.add_node("pre_submit_approval_node", pre_submit_approval_node)
+workflow.add_node("response_question_check_node", response_question_check_node)
 workflow.add_node("submit_approval_node", submit_approval_node)
 
 
 workflow.add_edge(START, "chat")
 workflow.add_conditional_edges("chat", route_after_chat_brainstormer)
+workflow.add_conditional_edges(
+    "response_question_check_node", route_after_response_question_check
+)
 workflow.add_conditional_edges("human_review_node", route_after_human_review)
 workflow.add_edge("pre_user_question_node", "human_review_node")
 workflow.add_edge("pre_submit_approval_node", "human_review_node")
