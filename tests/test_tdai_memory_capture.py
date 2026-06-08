@@ -12,6 +12,7 @@ class FakePostgres:
         self.records = []
         self.runner_states = []
         self.runner_state = None
+        self.duplicate_keys = set()
 
     def is_degraded(self):
         return False
@@ -22,6 +23,17 @@ class FakePostgres:
     async def upsert_l0(self, record):
         self.records.append(record)
         return True
+
+    async def exists_duplicate_l0(self, record):
+        key = (
+            record.agent_id,
+            record.session_key,
+            record.role,
+            record.message_text,
+            tuple(sorted(record.metadata.items())),
+            record.timestamp,
+        )
+        return key in self.duplicate_keys
 
     async def write_runner_state(
         self,
@@ -86,6 +98,57 @@ async def test_capture_preserves_conversation_metadata_on_l0_records(tmp_path):
     assert result.l0_recorded_count == 2
     assert [record.metadata for record in postgres.records] == [metadata, metadata]
     assert result.l0_records == postgres.records
+    assert postgres.runner_states == [
+        ("agent-1", "session-1", timestamp + 1, 1)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_capture_skips_duplicate_l0_records_by_timestamp(tmp_path):
+    postgres = FakePostgres()
+    timestamp = int(datetime(2026, 5, 26, tzinfo=timezone.utc).timestamp() * 1000)
+    metadata = {"conversation_kind": "agent_to_agent"}
+    postgres.duplicate_keys.add(
+        (
+            "agent-1",
+            "session-1",
+            "user",
+            "請處理呢個任務",
+            tuple(sorted(metadata.items())),
+            timestamp,
+        )
+    )
+    turn = CompletedTurn(
+        user_text="請處理呢個任務",
+        assistant_text="收到",
+        session_key="session-1",
+        metadata=metadata,
+        messages=[
+            ConversationMessage(
+                role="user",
+                content="請處理呢個任務",
+                timestamp=timestamp,
+            ),
+            ConversationMessage(
+                role="user",
+                content="請處理呢個任務",
+                timestamp=timestamp + 1,
+            ),
+        ],
+    )
+
+    result = await perform_auto_capture(
+        turn=turn,
+        agent_id="agent-1",
+        postgres=postgres,
+        qdrant=None,
+        embedding=None,
+        data_dir=str(tmp_path),
+    )
+
+    assert result.l0_recorded_count == 1
+    assert len(postgres.records) == 1
+    assert postgres.records[0].timestamp == timestamp + 1
     assert postgres.runner_states == [
         ("agent-1", "session-1", timestamp + 1, 1)
     ]

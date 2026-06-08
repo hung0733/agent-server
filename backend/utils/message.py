@@ -24,12 +24,23 @@ logger = logging.getLogger(__name__)
 class MsgUtil:
     @staticmethod
     async def save_agent_msg_hist(dtos: list[AgentMsgHistCreate]):
-        logger.info(t("utils.message.saved_count") % len(dtos))
+        saved_count = 0
         async with async_session_factory() as session:
             dao: AgentMsgHistDAO = AgentMsgHistDAO(session)
             for dto in dtos:
+                if await dao.exists_duplicate(
+                    session_id=dto.session_id,
+                    sender=dto.sender,
+                    msg_type=dto.msg_type,
+                    content=dto.content,
+                    meta_data=dto.meta_data,
+                    create_dt=dto.create_dt,
+                ):
+                    continue
                 await dao.create(dto)
+                saved_count += 1
             await session.commit()
+        logger.info(t("utils.message.saved_count") % saved_count)
 
     @staticmethod
     async def save_llm_usage(llm_endpoint_id: int, response: Any):

@@ -49,6 +49,46 @@ def patch_llm_usage_save(monkeypatch):
     return created, session
 
 
+def patch_agent_msg_hist_save(monkeypatch, existing_keys=None):
+    created = []
+    session = FakeUsageSession()
+    existing_keys = existing_keys or set()
+
+    class FakeAgentMsgHistDAO:
+        def __init__(self, dao_session):
+            assert dao_session is session
+
+        async def exists_duplicate(
+            self,
+            *,
+            session_id,
+            sender,
+            msg_type,
+            content,
+            meta_data,
+            create_dt,
+        ):
+            return (
+                session_id,
+                sender,
+                msg_type,
+                content,
+                meta_data,
+                create_dt,
+            ) in existing_keys
+
+        async def create(self, dto):
+            created.append(dto)
+
+    monkeypatch.setattr(
+        "backend.utils.message.async_session_factory",
+        lambda: FakeUsageSessionContext(session),
+    )
+    monkeypatch.setattr("backend.utils.message.AgentMsgHistDAO", FakeAgentMsgHistDAO)
+
+    return created, session
+
+
 def test_base_msg_to_msg_hist_rec_user():
     messages = [HumanMessage(content="你好")]
     result = MsgUtil.base_msg_to_msg_hist_rec(
@@ -301,6 +341,41 @@ def test_base_msg_to_msg_hist_rec_create_dt_from_message():
         conversation_metadata={"sender_name": "Alice", "recv_name": "Bot"},
     )
     assert result[0].create_dt == dt
+
+
+@pytest.mark.asyncio
+async def test_save_agent_msg_hist_skips_duplicate_with_same_create_dt(monkeypatch):
+    dt = datetime(2026, 5, 28, 12, 0, 0, tzinfo=timezone.utc)
+    existing_keys = {
+        (1, "Alice", "user", "你好", None, dt),
+    }
+    created, session = patch_agent_msg_hist_save(monkeypatch, existing_keys)
+    monkeypatch.setattr("backend.utils.message.t", lambda key: "Saved %d")
+
+    await MsgUtil.save_agent_msg_hist(
+        [
+            AgentMsgHistCreate(
+                session_id=1,
+                step_id="step-1",
+                sender="Alice",
+                msg_type="user",
+                content="你好",
+                create_dt=dt,
+            ),
+            AgentMsgHistCreate(
+                session_id=1,
+                step_id="step-2",
+                sender="Alice",
+                msg_type="user",
+                content="你好",
+                create_dt=dt.replace(minute=1),
+            ),
+        ]
+    )
+
+    assert len(created) == 1
+    assert created[0].step_id == "step-2"
+    assert session.committed is True
 
 
 @pytest.mark.asyncio

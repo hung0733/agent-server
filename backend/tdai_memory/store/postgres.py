@@ -260,6 +260,35 @@ class PostgresStore:
             logger.exception(t("tdai_memory.store.upsert_l0_failed"), record.id)
             return False
 
+    async def exists_duplicate_l0(self, record: L0Record) -> bool:
+        if self._degraded or self._pool is None:
+            return False
+        try:
+            async with self._pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    """
+                    SELECT id
+                    FROM l0_conversations
+                    WHERE agent_id = $1
+                      AND session_key = $2
+                      AND role = $3
+                      AND message_text = $4
+                      AND metadata_json = $5
+                      AND timestamp = $6
+                    LIMIT 1
+                    """,
+                    record.agent_id,
+                    record.session_key,
+                    record.role,
+                    record.message_text,
+                    json.dumps(record.metadata, ensure_ascii=False),
+                    record.timestamp,
+                )
+            return row is not None
+        except Exception:
+            logger.exception(t("tdai_memory.store.upsert_l0_failed"), record.id)
+            return False
+
     async def delete_l0(self, record_id: str) -> bool:
         if self._degraded or self._pool is None:
             return False

@@ -1,6 +1,5 @@
-from typing import Any
+from datetime import datetime
 
-from pydantic import BaseModel
 from sqlalchemy import func, select
 
 from backend.dao.base import BaseDAO
@@ -24,3 +23,27 @@ class AgentMsgHistDAO(BaseDAO[AgentMsgHist]):
             AgentMsgHist.session_id == session_id
         )
         return int(await self.session.scalar(stmt) or 0)
+
+    async def exists_duplicate(
+        self,
+        *,
+        session_id: int,
+        sender: str,
+        msg_type: str,
+        content: str | None,
+        meta_data: str | None,
+        create_dt: datetime | None,
+    ) -> bool:
+        stmt = (
+            select(AgentMsgHist.id)
+            .where(
+                AgentMsgHist.session_id == session_id,
+                AgentMsgHist.sender == sender,
+                AgentMsgHist.msg_type == msg_type,
+                AgentMsgHist.content == content,
+                AgentMsgHist.meta_data == meta_data,
+                AgentMsgHist.create_dt == create_dt,
+            )
+            .limit(1)
+        )
+        return await self.session.scalar(stmt) is not None

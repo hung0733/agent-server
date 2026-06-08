@@ -198,24 +198,8 @@ async def perform_auto_capture(
         if cursor > 0:
             filtered_msgs = [m for m in filtered_msgs if m.timestamp > cursor]
 
-        date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        conversations_dir = os.path.join(data_dir, agent_id, "conversations")
-        jsonl_path = os.path.join(conversations_dir, f"{date_str}.jsonl")
-
-        def _write_jsonl() -> None:
-            os.makedirs(conversations_dir, exist_ok=True)
-            with open(jsonl_path, "a", encoding="utf-8") as f:
-                for msg in filtered_msgs:
-                    f.write(
-                        json.dumps(
-                            _msg_to_dict(msg, turn.metadata), ensure_ascii=False
-                        )
-                        + "\n"
-                    )
-
-        await asyncio.to_thread(_write_jsonl)
-
         records: list[L0Record] = []
+        captured_msgs: list[ConversationMessage] = []
         msgs: list[dict] = []
         now_iso = datetime.now(timezone.utc).isoformat()
         for idx, msg in enumerate(filtered_msgs):
@@ -233,8 +217,29 @@ async def perform_auto_capture(
                 timestamp=msg.timestamp,
                 metadata={**turn.metadata, **msg.metadata},
             )
+            if await postgres.exists_duplicate_l0(record):
+                continue
             records.append(record)
+            captured_msgs.append(msg)
             msgs.append({"role": msg.role, "content": content})
+
+        date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        conversations_dir = os.path.join(data_dir, agent_id, "conversations")
+        jsonl_path = os.path.join(conversations_dir, f"{date_str}.jsonl")
+
+        def _write_jsonl() -> None:
+            os.makedirs(conversations_dir, exist_ok=True)
+            with open(jsonl_path, "a", encoding="utf-8") as f:
+                for msg in captured_msgs:
+                    f.write(
+                        json.dumps(
+                            _msg_to_dict(msg, turn.metadata), ensure_ascii=False
+                        )
+                        + "\n"
+                    )
+
+        if captured_msgs:
+            await asyncio.to_thread(_write_jsonl)
 
         for record in records:
             try:
