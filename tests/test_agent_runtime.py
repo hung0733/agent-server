@@ -113,6 +113,52 @@ class FakeBrainstormerAssignedTaskDAO:
         type(self).updates.append(kwargs)
 
 
+class FakeGraphNodeWhatsAppSession:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return None
+
+
+class FakeGraphNodeUserAccDAO:
+    user = None
+
+    def __init__(self, session):
+        self.session = session
+
+    async def get_by_id(self, id_):
+        return type(self).user
+
+
+class FakeGraphNodeAgentDAO:
+    agent = None
+
+    def __init__(self, session):
+        self.session = session
+
+    async def get_by_id(self, id_):
+        return type(self).agent
+
+
+class FakeEvolutionWhatsAppChannel:
+    instances = []
+
+    def __init__(self, *, whatsapp_instance=None, whatsapp_key=None):
+        self.whatsapp_instance = whatsapp_instance
+        self.whatsapp_key = whatsapp_key
+        self.sent = []
+        self.closed = False
+        type(self).instances.append(self)
+
+    async def send_text(self, number, text):
+        self.sent.append((number, text))
+        return {"key": {"id": "msg-1"}}
+
+    async def close(self):
+        self.closed = True
+
+
 class FakeAssignTaskAsyncSession:
     def __init__(self):
         self.committed = False
@@ -838,7 +884,15 @@ def test_stream_interrupt_chunk_preserves_whatsapp_document_metadata():
 
 
 @pytest.mark.asyncio
-async def test_brainstormer_submit_approval_node_returns_approved_message():
+async def test_brainstormer_submit_approval_node_returns_approved_message(monkeypatch):
+    sent = []
+
+    async def fake_send_user_whatsapp(user_db_id, agent_db_id, content):
+        sent.append((user_db_id, agent_db_id, content))
+        return "msg-1"
+
+    monkeypatch.setattr(GraphNode, "send_user_whatsapp", fake_send_user_whatsapp)
+
     state = {
         "messages": [HumanMessage(content="approve")],
         "human_review_node": "submit_approval_node",
@@ -853,6 +907,8 @@ async def test_brainstormer_submit_approval_node_returns_approved_message():
         think_mode=False,
         args={},
         agent_type="brainstormer",
+        user_db_id=11,
+        agent_db_id=22,
     )
 
     result = await submit_approval_node(state, config)
@@ -860,9 +916,66 @@ async def test_brainstormer_submit_approval_node_returns_approved_message():
     assert result["messages"][0].content == t(
         "graph.brainstormer.submit_approval.approved_message"
     )
+    assert sent == [
+        (11, 22, t("graph.brainstormer.submit_approval.approved_message"))
+    ]
     assert result["human_review_node"] is None
     assert result["human_review_data"] is None
     assert result["human_review_result"] is None
+
+
+@pytest.mark.asyncio
+async def test_graph_node_send_user_whatsapp_sends_text_and_closes(monkeypatch):
+    FakeEvolutionWhatsAppChannel.instances = []
+    FakeGraphNodeUserAccDAO.user = SimpleNamespace(phoneno="85261234567")
+    FakeGraphNodeAgentDAO.agent = SimpleNamespace(
+        whatsapp_instance="agent-instance",
+        whatsapp_key="agent-key",
+    )
+    monkeypatch.setattr(
+        "backend.graph.graph_node.async_session_factory",
+        lambda: FakeGraphNodeWhatsAppSession(),
+    )
+    monkeypatch.setattr("backend.graph.graph_node.UserAccDAO", FakeGraphNodeUserAccDAO)
+    monkeypatch.setattr("backend.graph.graph_node.AgentDAO", FakeGraphNodeAgentDAO)
+    monkeypatch.setattr(
+        "backend.graph.graph_node.EvolutionWhatsAppChannel",
+        FakeEvolutionWhatsAppChannel,
+    )
+
+    message_id = await GraphNode.send_user_whatsapp(11, 22, "計劃書已核准")
+
+    channel = FakeEvolutionWhatsAppChannel.instances[0]
+    assert message_id == "msg-1"
+    assert channel.whatsapp_instance == "agent-instance"
+    assert channel.whatsapp_key == "agent-key"
+    assert channel.sent == [("85261234567", "計劃書已核准")]
+    assert channel.closed is True
+
+
+@pytest.mark.asyncio
+async def test_graph_node_send_user_whatsapp_skips_missing_fields(monkeypatch):
+    FakeEvolutionWhatsAppChannel.instances = []
+    FakeGraphNodeUserAccDAO.user = SimpleNamespace(phoneno=None)
+    FakeGraphNodeAgentDAO.agent = SimpleNamespace(
+        whatsapp_instance="agent-instance",
+        whatsapp_key="agent-key",
+    )
+    monkeypatch.setattr(
+        "backend.graph.graph_node.async_session_factory",
+        lambda: FakeGraphNodeWhatsAppSession(),
+    )
+    monkeypatch.setattr("backend.graph.graph_node.UserAccDAO", FakeGraphNodeUserAccDAO)
+    monkeypatch.setattr("backend.graph.graph_node.AgentDAO", FakeGraphNodeAgentDAO)
+    monkeypatch.setattr(
+        "backend.graph.graph_node.EvolutionWhatsAppChannel",
+        FakeEvolutionWhatsAppChannel,
+    )
+
+    assert await GraphNode.send_user_whatsapp(None, 22, "計劃書已核准") is None
+    assert await GraphNode.send_user_whatsapp(11, 22, "") is None
+    assert await GraphNode.send_user_whatsapp(11, 22, "計劃書已核准") is None
+    assert FakeEvolutionWhatsAppChannel.instances == []
 
 
 @pytest.mark.asyncio

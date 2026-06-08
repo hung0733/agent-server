@@ -15,6 +15,10 @@ from langchain_core.runnables import RunnableConfig
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import ToolNode, ToolRuntime
 
+from backend.channels import EvolutionWhatsAppChannel
+from backend.dao.agent import AgentDAO
+from backend.dao.user_acc import UserAccDAO
+from backend.db.session import async_session_factory
 from backend.dto.agent_msg_hist import AgentMsgHistCreate
 from backend.i18n import t
 from backend.llm.llm import LLMSet
@@ -323,6 +327,76 @@ class GraphNode:
             extra_body.update(model.extra_body)
 
         return extra_body
+
+    @staticmethod
+    async def send_user_whatsapp(
+        user_db_id: int | None, agent_db_id: int | None, content: str
+    ) -> str | None:
+        content = str(content or "").strip()
+        if not user_db_id or not agent_db_id or not content:
+            logger.info(
+                t("graph_node.user_whatsapp_missing_fields"),
+                user_db_id,
+                agent_db_id,
+            )
+            return None
+
+        async with async_session_factory() as session:
+            user = await UserAccDAO(session).get_by_id(user_db_id)
+            agent = await AgentDAO(session).get_by_id(agent_db_id)
+
+        phoneno = getattr(user, "phoneno", None)
+        whatsapp_instance = getattr(agent, "whatsapp_instance", None)
+        whatsapp_key = getattr(agent, "whatsapp_key", None)
+
+        if (
+            not user
+            or not agent
+            or not phoneno
+            or not whatsapp_instance
+            or not whatsapp_key
+        ):
+            logger.info(
+                t("graph_node.user_whatsapp_missing_fields"),
+                user_db_id,
+                agent_db_id,
+            )
+            return None
+
+        channel = EvolutionWhatsAppChannel(
+            whatsapp_instance=whatsapp_instance,
+            whatsapp_key=whatsapp_key,
+        )
+        try:
+            resp = await channel.send_text(phoneno, content)
+        except Exception:
+            logger.exception(
+                t("graph_node.user_whatsapp_send_failed"),
+                user_db_id,
+                agent_db_id,
+            )
+            return None
+        finally:
+            await channel.close()
+
+        message_id = GraphNode._extract_evolution_message_id(resp)
+        logger.info(
+            t("graph_node.user_whatsapp_sent"),
+            user_db_id,
+            agent_db_id,
+            message_id,
+        )
+        return message_id
+
+    @staticmethod
+    def _extract_evolution_message_id(evolution_response: dict[str, Any]) -> str | None:
+        if not isinstance(evolution_response, dict):
+            return None
+        key = evolution_response.get("key")
+        if not isinstance(key, dict):
+            return None
+        message_id = key.get("id")
+        return message_id if isinstance(message_id, str) else None
 
     @staticmethod
     def stream_chunks_to_content(chunks: list[StreamChunk]) -> str:
