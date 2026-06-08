@@ -105,12 +105,18 @@ class FakeBrainstormerStepSession:
 
 class FakeBrainstormerAssignedTaskDAO:
     updates = []
+    approvals = []
+    approve_result = True
 
     def __init__(self, session):
         self.session = session
 
     async def update_step_output_html_by_session_id(self, **kwargs):
         type(self).updates.append(kwargs)
+
+    async def approve_plan_from_step_output(self, **kwargs):
+        type(self).approvals.append(kwargs)
+        return type(self).approve_result
 
 
 class FakeGraphNodeWhatsAppSession:
@@ -795,6 +801,8 @@ async def test_brainstormer_pre_submit_approval_uses_tool_args_not_message_conte
 ):
     FakeBrainstormerStepSession.commits = 0
     FakeBrainstormerAssignedTaskDAO.updates = []
+    FakeBrainstormerAssignedTaskDAO.approvals = []
+    FakeBrainstormerAssignedTaskDAO.approve_result = True
     monkeypatch.setattr(GraphNode, "store_message", lambda config, messages: None)
     monkeypatch.setattr(
         "backend.graph.brainstormer.async_session_factory",
@@ -886,17 +894,29 @@ def test_stream_interrupt_chunk_preserves_whatsapp_document_metadata():
 @pytest.mark.asyncio
 async def test_brainstormer_submit_approval_node_returns_approved_message(monkeypatch):
     sent = []
+    FakeBrainstormerStepSession.commits = 0
+    FakeBrainstormerAssignedTaskDAO.updates = []
+    FakeBrainstormerAssignedTaskDAO.approvals = []
+    FakeBrainstormerAssignedTaskDAO.approve_result = True
 
     async def fake_send_user_whatsapp(user_db_id, agent_db_id, content):
         sent.append((user_db_id, agent_db_id, content))
         return "msg-1"
 
     monkeypatch.setattr(GraphNode, "send_user_whatsapp", fake_send_user_whatsapp)
+    monkeypatch.setattr(
+        "backend.graph.brainstormer.async_session_factory",
+        lambda: FakeBrainstormerStepSession(),
+    )
+    monkeypatch.setattr(
+        "backend.graph.brainstormer.AssignedTaskDAO",
+        FakeBrainstormerAssignedTaskDAO,
+    )
 
     state = {
         "messages": [HumanMessage(content="approve")],
         "human_review_node": "submit_approval_node",
-        "human_review_data": {"html_plan": "<html></html>"},
+        "human_review_data": {"html_plan": "<html>do not trust ram</html>"},
         "human_review_result": APPROVE_LABEL,
     }
     config = GraphNode.prepare_chat_node_config(
@@ -909,6 +929,8 @@ async def test_brainstormer_submit_approval_node_returns_approved_message(monkey
         agent_type="brainstormer",
         user_db_id=11,
         agent_db_id=22,
+        session_db_id=321,
+        step_id="step-1",
     )
 
     result = await submit_approval_node(state, config)
@@ -919,6 +941,10 @@ async def test_brainstormer_submit_approval_node_returns_approved_message(monkey
     assert sent == [
         (11, 22, t("graph.brainstormer.submit_approval.approved_message"))
     ]
+    assert FakeBrainstormerAssignedTaskDAO.approvals == [
+        {"session_db_id": 321, "step_id": "step-1"}
+    ]
+    assert FakeBrainstormerStepSession.commits == 1
     assert result["human_review_node"] is None
     assert result["human_review_data"] is None
     assert result["human_review_result"] is None

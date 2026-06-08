@@ -312,6 +312,28 @@ async def test_dao_crud_happy_path(monkeypatch):
             assert process_log.finished_at == finished_at
             assert process_log.log == "done"
 
+            html_plan = "<html><body><h1>Approved plan</h1></body></html>"
+            steps[0].output_html = html_plan
+            await session.flush()
+            assert await assigned_task_dao.approve_plan_from_step_output(
+                session_db_id=steps[0].session_id,
+                step_id=steps[0].step_id,
+            ) is True
+            await session.refresh(assigned_task)
+            await session.refresh(steps[0])
+            await session.refresh(steps[1])
+            assert assigned_task.approved_plan_html == html_plan
+            assert steps[0].status == "completed"
+            assert steps[1].status == "pending"
+
+            assert await assigned_task_dao.approve_plan_from_step_output(
+                step_id=steps[2].step_id,
+            ) is False
+            await session.refresh(assigned_task)
+            await session.refresh(steps[2])
+            assert assigned_task.approved_plan_html == html_plan
+            assert steps[2].status == "blocked"
+
             sys_endpoint = await endpoint_dao.create(
                 LlmEndpointCreate(
                     user_id=None,

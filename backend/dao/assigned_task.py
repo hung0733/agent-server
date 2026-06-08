@@ -212,6 +212,49 @@ class AssignedTaskDAO(BaseDAO[AssignedTask]):
         await self.session.execute(stmt)
         await self.session.flush()
 
+    async def approve_plan_from_step_output(
+        self,
+        *,
+        session_db_id: int | None = None,
+        step_id: str | None = None,
+    ) -> bool:
+        if session_db_id is None and not step_id:
+            return False
+
+        conditions = []
+        if session_db_id is not None:
+            conditions.append(AssignedTaskStep.session_id == session_db_id)
+        if step_id:
+            conditions.append(AssignedTaskStep.step_id == step_id)
+
+        stmt = select(AssignedTaskStep).where(or_(*conditions)).limit(1)
+        step = await self.session.scalar(stmt)
+        html_plan = (step.output_html or "").strip() if step else ""
+        if step is None or not html_plan:
+            return False
+
+        await self.session.execute(
+            update(AssignedTask)
+            .where(AssignedTask.id == step.task_id)
+            .values(approved_plan_html=html_plan)
+        )
+        await self.session.execute(
+            update(AssignedTaskStep)
+            .where(AssignedTaskStep.id == step.id)
+            .values(status="completed")
+        )
+        await self.session.execute(
+            update(AssignedTaskStep)
+            .where(
+                AssignedTaskStep.task_id == step.task_id,
+                AssignedTaskStep.seq_no == step.seq_no + 1,
+                AssignedTaskStep.status == "blocked",
+            )
+            .values(status="pending")
+        )
+        await self.session.flush()
+        return True
+
     async def count_failed_process_logs(self, *, step_db_id: int) -> int:
         stmt = select(func.count()).select_from(AssignedTaskStepProcessLog).where(
             AssignedTaskStepProcessLog.step_id == step_db_id,

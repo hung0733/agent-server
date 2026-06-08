@@ -175,6 +175,13 @@ async def _save_html_plan_to_task_step(
 async def submit_approval_node(
     state: MessageState, config: RunnableConfig
 ) -> dict[str, Any]:
+    approved = await _approve_plan_from_step_output(config)
+    if not approved:
+        logger.warning(
+            t("graph.brainstormer.submit_approval.approve_plan_failed"),
+            GraphNode.get_configure(config, "session_db_id", None),
+            GraphNode.get_configure(config, "step_id", ""),
+        )
 
     message = AIMessage(
         content=t("graph.brainstormer.submit_approval.approved_message"),
@@ -195,6 +202,19 @@ async def submit_approval_node(
         "human_review_result": None,
         "human_review_approve": None,
     }
+
+
+async def _approve_plan_from_step_output(config: RunnableConfig) -> bool:
+    session_db_id = GraphNode.get_configure(config, "session_db_id", None)
+    step_id = GraphNode.get_configure(config, "step_id", "")
+    async with async_session_factory() as session:
+        approved = await AssignedTaskDAO(session).approve_plan_from_step_output(
+            session_db_id=int(session_db_id) if session_db_id is not None else None,
+            step_id=str(step_id or "") or None,
+        )
+        if approved:
+            await session.commit()
+        return approved
 
 
 workflow = StateGraph(MessageState)

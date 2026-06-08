@@ -88,6 +88,7 @@ _MESSAGES = {
         "queues.task_queue.skip_queued_step": "Task queue 略過已排隊或處理中的 step：step_db_id=%s step_id=%s",
         "queues.task_queue.started": "Task queue 已啟動：max_concurrency=%s poll_interval_seconds=%s",
         "queues.task_queue_handle.completed": "Task queue step handler 完成：step_id=%s task_id=%s",
+        "queues.task_queue_handle.completing_without_response": "Task queue step 不需要 response，準備完成",
         "queues.task_queue_handle.continue_sub_agent_message": "請繼續處理之前的任務動作。請根據這個 session 之前的對話及已完成內容繼續推進。",
         "queues.task_queue_handle.default_session_not_found": "找不到 Responsible Agent 預設 session：step_id=%s responsible_agent_id=%s",
         "queues.task_queue_handle.find_assign_agent": "Task queue step handler 正在尋找 assigned agent：step_id=%s",
@@ -98,6 +99,8 @@ _MESSAGES = {
         "queues.task_queue_handle.interrupt_whatsapp_missing_fields": "Task queue interrupt WhatsApp 發送資料不足：step_id=%s responsible_agent_id=%s",
         "queues.task_queue_handle.interrupt_whatsapp_sent": "Task queue interrupt WhatsApp 已送出：step_id=%s phone_no=%s message_id=%s",
         "queues.task_queue_handle.interrupted": "Task queue step 收到 interrupt 並已通知用戶：step_id=%s",
+        "queues.task_queue_handle.message_queue_completed": "Message queue task 已完成",
+        "queues.task_queue_handle.response_message_received": "Task queue step 收到 response message，準備進入 RESPONSE step",
         "queues.task_queue_handle.scaffold_completed": "Task queue handler scaffold 已處理 step：step_id=%s",
         "queues.task_queue_handle.started": "Task queue step handler 開始：status=%s responsible_agent_id=%s assign_agent_id=%s task_session_id=%s step_session_id=%s task_name=%s step_name=%s step_id=%s task_id=%s agent_type=%s",
         "queues.task_queue_handle.step_session_name": "[Task][%s] %s",
@@ -268,6 +271,7 @@ _MESSAGES = {
         "queues.task_queue.skip_queued_step": "Task queue skipped an already queued or active step: step_db_id=%s step_id=%s",
         "queues.task_queue.started": "Task queue started: max_concurrency=%s poll_interval_seconds=%s",
         "queues.task_queue_handle.completed": "Task queue step handler completed: step_id=%s task_id=%s",
+        "queues.task_queue_handle.completing_without_response": "Task queue step does not need a response and will complete",
         "queues.task_queue_handle.continue_sub_agent_message": "Please continue the previous task action. Use the previous conversation and completed work in this session to keep progressing.",
         "queues.task_queue_handle.default_session_not_found": "Responsible Agent default session not found: step_id=%s responsible_agent_id=%s",
         "queues.task_queue_handle.find_assign_agent": "Task queue step handler finding assigned agent: step_id=%s",
@@ -278,6 +282,8 @@ _MESSAGES = {
         "queues.task_queue_handle.interrupt_whatsapp_missing_fields": "Task queue interrupt WhatsApp send data is incomplete: step_id=%s responsible_agent_id=%s",
         "queues.task_queue_handle.interrupt_whatsapp_sent": "Task queue interrupt WhatsApp sent: step_id=%s phone_no=%s message_id=%s",
         "queues.task_queue_handle.interrupted": "Task queue step received interrupt and notified user: step_id=%s",
+        "queues.task_queue_handle.message_queue_completed": "Message queue task completed",
+        "queues.task_queue_handle.response_message_received": "Task queue step received response message and will enter RESPONSE step",
         "queues.task_queue_handle.scaffold_completed": "Task queue handler scaffold processed step: step_id=%s",
         "queues.task_queue_handle.started": "Task queue step handler started: status=%s responsible_agent_id=%s assign_agent_id=%s task_session_id=%s step_session_id=%s task_name=%s step_name=%s step_id=%s task_id=%s agent_type=%s",
         "queues.task_queue_handle.step_session_name": "[Task][%s] %s",
@@ -472,6 +478,7 @@ _MESSAGES["zh_HK"].update(
         "graph.bulter.assign_task.invalid_call": "找不到有效的 assign_task 工具調用。",
         "graph.bulter.assign_task.route_fallback": "Butler assign_task route fallback：tool_calls=%s",
         "graph.brainstormer.submit_approval.approved_message": "計劃書已核准",
+        "graph.brainstormer.submit_approval.approve_plan_failed": "批准計劃時未能從 assigned task step 讀取 HTML plan：session_db_id=%s step_id=%s",
         "graph.brainstormer.submit_approval.file_message": (
             "請查看附件 HTML 計劃書，然後回覆「approve」批准，"
             "或回覆「cancel」取消。\n\nTask ID：%s\n任務名稱：%s\n目標：%s"
@@ -589,6 +596,7 @@ _MESSAGES["en"].update(
         "graph.bulter.assign_task.invalid_call": "No valid assign_task tool call was found.",
         "graph.bulter.assign_task.route_fallback": "Butler assign_task route fallback: tool_calls=%s",
         "graph.brainstormer.submit_approval.approved_message": "The plan has been approved.",
+        "graph.brainstormer.submit_approval.approve_plan_failed": "Could not read the HTML plan from the assigned task step during approval: session_db_id=%s step_id=%s",
         "graph.brainstormer.submit_approval.file_message": (
             'Please review the attached HTML plan, then reply "approve" '
             'to approve it or "cancel" to cancel.\n\n'

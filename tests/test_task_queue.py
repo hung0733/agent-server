@@ -764,6 +764,33 @@ async def test_assigned_task_send_response_handler_completes(
     assert response_task.status == TaskQueueStepStatus.COMPLETED
     assert "status=response" in caplog.text
 
+
+@pytest.mark.asyncio
+async def test_assigned_task_send_completes_when_db_step_already_completed(
+    monkeypatch,
+):
+    _reset_fakes()
+    monkeypatch.setattr("backend.queues.task_queue_handle.MessageQueue", FakeMessageQueue)
+    monkeypatch.setattr(
+        "backend.queues.task_queue_handle.async_session_factory", _session_factory
+    )
+    FakeSession.step_status = "completed"
+    FakeMessageQueue.chunks = [
+        SimpleNamespace(chunk_type="content", content="approved", data=None)
+    ]
+
+    send_task = _task(status=TaskQueueStepStatus.SEND)
+    send_task.assign_agent_id = "agent-assigned"
+    send_task.step_session_id = "step-session-abc"
+
+    send_result = await handle_assigned_task_send_step(send_task)
+
+    assert send_result is not None
+    assert send_result.success is True
+    assert send_task.status == TaskQueueStepStatus.COMPLETED
+    assert send_task.message == ""
+
+
 @pytest.mark.asyncio
 async def test_assigned_task_send_interrupt_sends_whatsapp_and_completes(
     monkeypatch,
