@@ -147,6 +147,10 @@ async def handle_assigned_task_init_message_step(
             task.task_goal,
             task.goal,
         )
+        if task.agent_type == "planner":
+            approved_plan_html = (task.approved_plan_html or "").strip()
+            if approved_plan_html:
+                task.message += f"\n\n<html_plan>\n{approved_plan_html}\n</html_plan>"
     else:
         task.message = t("queues.task_queue_handle.continue_sub_agent_message")
 

@@ -278,6 +278,7 @@ def _step(step_db_id: int, task_db_id: int = 10):
             task_id=f"task-{task_db_id}",
             task_name="Build task tracker",
             goal="Build a reliable task tracker for the product team",
+            approved_plan_html="<html><body>Approved plan</body></html>",
             create_dt=TASK_CREATE_DT,
             user_id=999,
             responsible_agent=responsible_agent,
@@ -307,6 +308,7 @@ def _task(
         task_id="task-10",
         task_name="Build task tracker",
         task_goal="Build a reliable task tracker for the product team",
+        approved_plan_html=None,
         task_create_dt=TASK_CREATE_DT,
         title="Plan",
         goal="Plan it",
@@ -380,6 +382,7 @@ async def test_task_queue_enqueues_due_pending_step_without_marking_processing(m
     assert queued.step_db_id == 1
     assert queued.task_name == "Build task tracker"
     assert queued.task_goal == "Build a reliable task tracker for the product team"
+    assert queued.approved_plan_html == "<html><body>Approved plan</body></html>"
     assert queued.task_create_dt == TASK_CREATE_DT
     assert queued.agent_type == "brainstormer"
     assert queued.responsible_agent_id == "agent-main"
@@ -723,6 +726,81 @@ async def test_assigned_task_init_message_step_prepares_initial_message(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_assigned_task_init_message_step_appends_planner_html_plan(monkeypatch):
+    _reset_fakes()
+    monkeypatch.setattr(
+        "backend.queues.task_queue_handle.async_session_factory", _session_factory
+    )
+    monkeypatch.setattr(
+        "backend.queues.task_queue_handle.AgentSessionDAO", FakeAgentSessionDAO
+    )
+    monkeypatch.setattr(
+        "backend.queues.task_queue_handle.AgentMsgHistDAO", FakeAgentMsgHistDAO
+    )
+    init_message_task = _task(status=TaskQueueStepStatus.INIT_MESSAGE)
+    init_message_task.step_session_id = "step-session-abc"
+    init_message_task.approved_plan_html = "<html><body>Approved plan</body></html>"
+
+    init_message_result = await handle_assigned_task_init_message_step(init_message_task)
+
+    assert init_message_result is None
+    assert init_message_task.status == TaskQueueStepStatus.SEND
+    assert init_message_task.message.endswith(
+        "\n\n<html_plan>\n"
+        "<html><body>Approved plan</body></html>"
+        "\n</html_plan>"
+    )
+
+
+@pytest.mark.asyncio
+async def test_assigned_task_init_message_step_skips_html_plan_for_non_planner(
+    monkeypatch,
+):
+    _reset_fakes()
+    monkeypatch.setattr(
+        "backend.queues.task_queue_handle.async_session_factory", _session_factory
+    )
+    monkeypatch.setattr(
+        "backend.queues.task_queue_handle.AgentSessionDAO", FakeAgentSessionDAO
+    )
+    monkeypatch.setattr(
+        "backend.queues.task_queue_handle.AgentMsgHistDAO", FakeAgentMsgHistDAO
+    )
+    init_message_task = _task(status=TaskQueueStepStatus.INIT_MESSAGE)
+    init_message_task.step_session_id = "step-session-abc"
+    init_message_task.agent_type = "reviewer"
+    init_message_task.approved_plan_html = "<html><body>Approved plan</body></html>"
+
+    init_message_result = await handle_assigned_task_init_message_step(init_message_task)
+
+    assert init_message_result is None
+    assert "<html_plan>" not in init_message_task.message
+    assert "Approved plan" not in init_message_task.message
+
+
+@pytest.mark.asyncio
+async def test_assigned_task_init_message_step_skips_blank_html_plan(monkeypatch):
+    _reset_fakes()
+    monkeypatch.setattr(
+        "backend.queues.task_queue_handle.async_session_factory", _session_factory
+    )
+    monkeypatch.setattr(
+        "backend.queues.task_queue_handle.AgentSessionDAO", FakeAgentSessionDAO
+    )
+    monkeypatch.setattr(
+        "backend.queues.task_queue_handle.AgentMsgHistDAO", FakeAgentMsgHistDAO
+    )
+    init_message_task = _task(status=TaskQueueStepStatus.INIT_MESSAGE)
+    init_message_task.step_session_id = "step-session-abc"
+    init_message_task.approved_plan_html = "   "
+
+    init_message_result = await handle_assigned_task_init_message_step(init_message_task)
+
+    assert init_message_result is None
+    assert "<html_plan>" not in init_message_task.message
+
+
+@pytest.mark.asyncio
 async def test_assigned_task_init_message_step_prepares_continue_message(monkeypatch):
     _reset_fakes()
     FakeAgentMsgHistDAO.history_count = 2
@@ -737,6 +815,7 @@ async def test_assigned_task_init_message_step_prepares_continue_message(monkeyp
     )
     init_message_task = _task(status=TaskQueueStepStatus.INIT_MESSAGE)
     init_message_task.step_session_id = "step-session-abc"
+    init_message_task.approved_plan_html = "<html><body>Approved plan</body></html>"
 
     init_message_result = await handle_assigned_task_init_message_step(init_message_task)
 
@@ -747,6 +826,8 @@ async def test_assigned_task_init_message_step_prepares_continue_message(monkeyp
         "請根據這個 session 之前的對話及已完成內容繼續推進。"
     )
     assert "Build task tracker" not in init_message_task.message
+    assert "<html_plan>" not in init_message_task.message
+    assert "Approved plan" not in init_message_task.message
     assert "task-10" not in init_message_task.message
     assert "step-1" not in init_message_task.message
     assert FakeAgentSessionDAO.session_id_calls == ["step-session-abc"]
