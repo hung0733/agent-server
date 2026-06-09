@@ -2,7 +2,6 @@
 
 ## Agent Type
 
-- `agent_type`: `planner`
 - Display role: planner
 
 ## Role Definition（角色定義）

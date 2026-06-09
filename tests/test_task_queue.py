@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
 
+from backend.i18n import t
 from backend.llm.types import StreamChunk
-from backend.queues.message_queue import TaskState
+from backend.queues.message_queue import CmnMsgQueueTask, TaskState
 from backend.queues.task_queue import (
     TaskQueue,
     TaskQueueHandlerResult,
@@ -193,6 +195,29 @@ class FakeMessageQueue:
         return type(self).task
 
 
+class RealCmnMessageQueue:
+    chunks = []
+    created = []
+    task = None
+    publish_task = None
+
+    @classmethod
+    def instance(cls):
+        return cls()
+
+    async def create(self, **kwargs):
+        type(self).created.append(kwargs)
+        task = CmnMsgQueueTask(**kwargs)
+        type(self).task = task
+
+        async def publish_chunks():
+            for chunk in type(self).chunks:
+                await task.callback(chunk)
+
+        type(self).publish_task = asyncio.create_task(publish_chunks())
+        return task
+
+
 class FakeAgentSessionDAO:
     default_session = SimpleNamespace(id=321, session_id="default-main")
     by_session_id = {"step-session-abc": SimpleNamespace(id=654)}
@@ -327,6 +352,10 @@ def _reset_fakes():
     FakeMessageQueue.chunks = []
     FakeMessageQueue.created = []
     FakeMessageQueue.task = None
+    RealCmnMessageQueue.chunks = []
+    RealCmnMessageQueue.created = []
+    RealCmnMessageQueue.task = None
+    RealCmnMessageQueue.publish_task = None
     FakeAgentSessionDAO.default_session = SimpleNamespace(
         id=321, session_id="default-main"
     )
@@ -763,6 +792,68 @@ async def test_assigned_task_send_response_handler_completes(
     assert response_result.success is True
     assert response_task.status == TaskQueueStepStatus.COMPLETED
     assert "status=response" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_assigned_task_send_real_cmn_stream_completes_after_done(
+    monkeypatch, caplog
+):
+    _reset_fakes()
+    monkeypatch.setattr(
+        "backend.queues.task_queue_handle.MessageQueue", RealCmnMessageQueue
+    )
+    monkeypatch.setattr(
+        "backend.queues.task_queue_handle.async_session_factory", _session_factory
+    )
+    RealCmnMessageQueue.chunks = [
+        StreamChunk(chunk_type="content", content="done"),
+        StreamChunk(chunk_type="done"),
+    ]
+
+    caplog.set_level(logging.INFO, logger="backend.queues.task_queue_handle")
+    send_task = _task(status=TaskQueueStepStatus.SEND)
+    send_task.assign_agent_id = "agent-assigned"
+    send_task.step_session_id = "step-session-abc"
+
+    send_result = await asyncio.wait_for(
+        handle_assigned_task_send_step(send_task), timeout=1
+    )
+
+    assert send_result is None
+    assert send_task.status == TaskQueueStepStatus.RESPONSE
+    assert send_task.message == "done"
+    assert RealCmnMessageQueue.task.task_state == TaskState.COMPLETED
+    assert t("queues.task_queue_handle.message_queue_completed") in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_assigned_task_send_real_cmn_stream_completes_without_response(
+    monkeypatch, caplog
+):
+    _reset_fakes()
+    monkeypatch.setattr(
+        "backend.queues.task_queue_handle.MessageQueue", RealCmnMessageQueue
+    )
+    monkeypatch.setattr(
+        "backend.queues.task_queue_handle.async_session_factory", _session_factory
+    )
+    RealCmnMessageQueue.chunks = [StreamChunk(chunk_type="done")]
+
+    caplog.set_level(logging.INFO, logger="backend.queues.task_queue_handle")
+    send_task = _task(status=TaskQueueStepStatus.SEND)
+    send_task.assign_agent_id = "agent-assigned"
+    send_task.step_session_id = "step-session-abc"
+
+    send_result = await asyncio.wait_for(
+        handle_assigned_task_send_step(send_task), timeout=1
+    )
+
+    assert send_result is not None
+    assert send_result.success is True
+    assert send_task.status == TaskQueueStepStatus.COMPLETED
+    assert RealCmnMessageQueue.task.task_state == TaskState.COMPLETED
+    assert t("queues.task_queue_handle.message_queue_completed") in caplog.text
+    assert t("queues.task_queue_handle.completing_without_response") in caplog.text
 
 
 @pytest.mark.asyncio

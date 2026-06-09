@@ -81,16 +81,18 @@ class CmnMsgQueueTask(MsgQueueTask):
                         self._resolve_stream_callback(None)
 
                     if self._is_terminal_chunk(item.chunk):
-                        logger.debug(("串流已結束"))
+                        logger.debug(t("queues.message_queue.stream_closed"))
                         self._stream_closed = True
+                        if not self.wait_msg_id:
+                            self.change_task_state(TaskState.COMPLETED)
                         return
             except GeneratorExit:
-                logger.debug(("generator 已強制關閉"))
+                logger.debug(t("queues.message_queue.stream_force_closed"))
                 self._stream_closed = True
                 self._resolve_stream_callback(None)
             except Exception as exc:
                 self._stream_closed = True
-                logger.error(("stream_gen 錯誤：%s"), exc)
+                logger.error(t("queues.message_queue.stream_failed"), exc)
                 yield StreamChunk(chunk_type="done")
 
         return _gen()

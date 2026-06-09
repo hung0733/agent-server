@@ -103,6 +103,7 @@ async def test_cmn_task_stream_gen_yields_chunks_and_stops_after_done():
     assert await asyncio.wait_for(done_callback, timeout=1) is None
     with pytest.raises(StopAsyncIteration):
         await stream.__anext__()
+    assert task.task_state == TaskState.COMPLETED
 
 
 @pytest.mark.asyncio
@@ -120,6 +121,24 @@ async def test_cmn_task_stream_gen_yields_task_end_and_stops():
     assert await asyncio.wait_for(task_end_callback, timeout=1) is None
     with pytest.raises(StopAsyncIteration):
         await stream.__anext__()
+    assert task.task_state == TaskState.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_cmn_task_stream_gen_does_not_complete_when_waiting_for_interrupt():
+    task = CmnMsgQueueTask("hello", "agent-1", "session-1")
+    task.wait_msg_id = "approval-msg-1"
+    stream = task.stream_gen()
+
+    done_callback = asyncio.create_task(task.callback(StreamChunk(chunk_type="done")))
+    chunk = await stream.__anext__()
+    task.ack_stream_callback(None)
+
+    assert chunk.chunk_type == "done"
+    assert await asyncio.wait_for(done_callback, timeout=1) is None
+    with pytest.raises(StopAsyncIteration):
+        await stream.__anext__()
+    assert task.task_state != TaskState.COMPLETED
 
 
 @pytest.mark.asyncio

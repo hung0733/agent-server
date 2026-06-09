@@ -275,7 +275,11 @@ async def submit_approval_node(
 
     user_db_id = GraphNode.get_configure(config, "user_db_id", None)
     agent_db_id = GraphNode.get_configure(config, "agent_db_id", None)
-    await GraphNode.send_user_whatsapp(user_db_id, agent_db_id, str(message.content))
+    sender_agent_db_id = GraphNode.get_configure(config, "sender_agent_db_id", None)
+    whatsapp_agent_db_id = sender_agent_db_id or agent_db_id
+    await GraphNode.send_user_whatsapp(
+        user_db_id, whatsapp_agent_db_id, str(message.content)
+    )
 
     if GraphNode.is_butler_asking(config):
         GraphNode.store_user_message(config, [message])
