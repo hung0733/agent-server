@@ -267,7 +267,17 @@ async def test_dao_crud_happy_path(monkeypatch):
             assert [step.goal for step in steps] == [
                 "向用戶收集需求、取得批准，並產生 HTML 計劃文件。",
                 "將已批准的 HTML 計劃轉換成可執行子步驟。",
-                "在開始執行前審核規劃輸出。",
+                "審核 planned_task_step_json 的task Step 分拆是否完全附合html_plan的所有內容。"
+                "\n\n## 輸出格式規範 (JSON Output Constraints)\n"
+                "```json\n"
+                "[{\n"
+                '\t"agent_type": "brainstormer",\n'
+                '\t"review_suggest": "html_plan 有什麼問題需要修改﹐沒有的話留空白"\n'
+                "},{\n"
+                '\t"agent_type": "planner",\n'
+                '\t"review_suggest": "planned_task_step_json 有什麼問題需要修改﹐沒有的話留空白"\n'
+                "}]\n"
+                "```",
             ]
             first_started_at = datetime(2026, 1, 2, 4, 0, 0, tzinfo=timezone.utc)
             second_started_at = datetime(2026, 1, 2, 5, 0, 0, tzinfo=timezone.utc)
