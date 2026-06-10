@@ -91,6 +91,7 @@ class FakeAssignedTaskDAO:
             goal="Keep working",
             status="brainstorm_pending",
             approved_plan_html=None,
+            planned_task_step_json='[{"agent_type":"engineer"}]',
             create_dt="2026-06-01T00:00:00+00:00",
             update_dt="2026-06-01T00:00:00+00:00",
             steps=[
@@ -304,6 +305,9 @@ async def test_read_assigned_task_returns_scoped_task_details(monkeypatch):
 
     assert result["accepted"] is True
     assert result["task"]["task_id"] == "task-open"
+    assert result["task"]["planned_task_step_json"] == (
+        '[{"agent_type":"engineer"}]'
+    )
     assert result["task"]["steps"][0]["step_id"] == "step-1"
     assert FakeAssignedTaskDAO.detail_args == (123, 456, "task-open")
 

@@ -62,6 +62,8 @@ def _task_dict(task: Any, *, include_steps: bool = False) -> dict[str, Any]:
     }
     if hasattr(task, "approved_plan_html"):
         data["approved_plan_html"] = task.approved_plan_html
+    if hasattr(task, "planned_task_step_json"):
+        data["planned_task_step_json"] = task.planned_task_step_json
     if include_steps:
         steps = sorted(getattr(task, "steps", []), key=lambda step: step.seq_no)
         data["steps"] = [_step_dict(step) for step in steps]

@@ -20,6 +20,7 @@ from langgraph.types import Command, Interrupt
 
 from backend.agent.agent import Agent
 from backend.agent.butler import Bulter
+from backend.agent.planner import Planner
 from backend.graph.agent import (
     end_node as agent_end_node,
     chat_node,
@@ -37,6 +38,10 @@ from backend.graph.brainstormer import (
     submit_approval_node,
 )
 from backend.graph.bulter import assign_task_node, workflow as butler_workflow
+from backend.graph.planner import (
+    parse_assigned_task_step_json,
+    save_assigned_task_step_json_node,
+)
 from backend.graph.interrupt_nodes import (
     APPROVE_LABEL,
     CANCEL_LABEL,
@@ -120,6 +125,31 @@ class FakeBrainstormerAssignedTaskDAO:
     async def approve_plan_from_step_output(self, **kwargs):
         type(self).approvals.append(kwargs)
         return type(self).approve_result
+
+
+class FakePlannerStepSession:
+    commits = 0
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return None
+
+    async def commit(self):
+        type(self).commits += 1
+
+
+class FakePlannerAssignedTaskDAO:
+    completions = []
+    complete_result = True
+
+    def __init__(self, session):
+        self.session = session
+
+    async def complete_planner_step_with_planned_task_step_json(self, **kwargs):
+        type(self).completions.append(kwargs)
+        return type(self).complete_result
 
 
 class FakeGraphNodeWhatsAppSession:
@@ -1022,6 +1052,96 @@ async def test_brainstormer_response_question_check_exception_routes_to_end(
     assert route_after_response_question_check(result) == "end_node"
 
 
+def _valid_planner_steps_json() -> str:
+    return json.dumps(
+        [
+            {
+                "agent_type": "engineer",
+                "title": "S1",
+                "goal": "完成可驗收的第一步。",
+                "dependsOn": None,
+                "status": "PENDING",
+                "seq_no": 1,
+            },
+            {
+                "agent_type": "reviewer",
+                "title": "R1",
+                "goal": "審核第一步交付。",
+                "dependsOn": 1,
+                "status": "BLOCKED",
+                "seq_no": 2,
+            },
+        ],
+        ensure_ascii=False,
+    )
+
+
+def test_planner_parse_assigned_task_step_json_accepts_valid_array():
+    content = _valid_planner_steps_json()
+
+    assert parse_assigned_task_step_json(content) == content
+
+
+def test_planner_parse_assigned_task_step_json_accepts_fenced_json():
+    content = _valid_planner_steps_json()
+
+    assert parse_assigned_task_step_json(f"```json\n{content}\n```") == content
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        '{"steps": []}',
+        '[{"agent_type":"engineer"}]',
+        '[{"agent_type":"planner","title":"S1","goal":"x","dependsOn":null,"status":"PENDING","seq_no":1}]',
+        '[{"agent_type":"engineer","title":"S1","goal":"x","dependsOn":null,"status":"pending","seq_no":1}]',
+    ],
+)
+def test_planner_parse_assigned_task_step_json_rejects_invalid_content(content):
+    with pytest.raises(ValueError):
+        parse_assigned_task_step_json(content)
+
+
+@pytest.mark.asyncio
+async def test_planner_save_node_saves_planned_task_step_json_and_completes_step(monkeypatch):
+    FakePlannerStepSession.commits = 0
+    FakePlannerAssignedTaskDAO.completions = []
+    FakePlannerAssignedTaskDAO.complete_result = True
+    monkeypatch.setattr(
+        "backend.graph.planner.async_session_factory",
+        lambda: FakePlannerStepSession(),
+    )
+    monkeypatch.setattr(
+        "backend.graph.planner.AssignedTaskDAO",
+        FakePlannerAssignedTaskDAO,
+    )
+    output_json = _valid_planner_steps_json()
+    state = {
+        "messages": [AIMessage(content=output_json)],
+        "human_review_node": None,
+        "human_review_data": None,
+        "human_review_result": None,
+    }
+    config = GraphNode.prepare_chat_node_config(
+        thread_id="session-1",
+        models=None,
+        sys_prompt="",
+        involves_secrets=False,
+        think_mode=False,
+        args={},
+        agent_type="planner",
+        session_db_id=321,
+    )
+
+    result = await save_assigned_task_step_json_node(state, config)
+
+    assert result["messages"][0].content == t("graph.planner.saved_message")
+    assert FakePlannerAssignedTaskDAO.completions == [
+        {"session_db_id": 321, "planned_task_step_json": output_json}
+    ]
+    assert FakePlannerStepSession.commits == 1
+
+
 @pytest.mark.asyncio
 async def test_brainstormer_pre_submit_approval_uses_tool_args_not_message_content(
     monkeypatch,
@@ -1680,6 +1800,41 @@ async def test_message_task_resumes_assign_task_after_human_approval(monkeypatch
         chunk.chunk_type == "content" and "Task tracker" in str(chunk.content)
         for chunk in task.chunks
     )
+
+
+@pytest.mark.asyncio
+async def test_agent_get_agent_returns_planner_for_planner_type(monkeypatch):
+    row = (
+        1,
+        2,
+        3,
+        "user-1",
+        "Alice",
+        "agent-planner",
+        "session-planner",
+        "planner",
+        "Planner",
+        None,
+        "Alice",
+        None,
+        None,
+        None,
+        False,
+        True,
+    )
+
+    async def get_db_agent(agent_id, session_id):
+        return row
+
+    async def init_llm_models(self):
+        self.models = FakeModels(FakeLLM())
+
+    monkeypatch.setattr(Agent, "get_db_agent", get_db_agent)
+    monkeypatch.setattr(Agent, "init_llm_models", init_llm_models)
+
+    agent = await Agent.get_agent("agent-planner", "session-planner")
+
+    assert isinstance(agent, Planner)
 
 
 class FakeGraph:

@@ -5,6 +5,7 @@ from sqlalchemy.orm import selectinload
 
 from backend.dao.agent_type import AgentTypeDAO
 from backend.dao.base import BaseDAO
+from backend.entities.agent_type import AgentType
 from backend.entities.assigned_task import AssignedTask, AssignedTaskStep, AssignedTaskStepProcessLog
 from backend.i18n import t
 
@@ -211,6 +212,43 @@ class AssignedTaskDAO(BaseDAO[AssignedTask]):
         )
         await self.session.execute(stmt)
         await self.session.flush()
+
+    async def complete_planner_step_with_planned_task_step_json(
+        self, *, session_db_id: int, planned_task_step_json: str
+    ) -> bool:
+        step = await self.session.scalar(
+            select(AssignedTaskStep)
+            .join(AgentType, AssignedTaskStep.agent_type_id == AgentType.id)
+            .where(
+                AssignedTaskStep.session_id == session_db_id,
+                AgentType.code == "planner",
+            )
+            .limit(1)
+        )
+        if step is None:
+            return False
+
+        await self.session.execute(
+            update(AssignedTask)
+            .where(AssignedTask.id == step.task_id)
+            .values(planned_task_step_json=planned_task_step_json)
+        )
+        await self.session.execute(
+            update(AssignedTaskStep)
+            .where(AssignedTaskStep.id == step.id)
+            .values(status="completed")
+        )
+        await self.session.execute(
+            update(AssignedTaskStep)
+            .where(
+                AssignedTaskStep.task_id == step.task_id,
+                AssignedTaskStep.seq_no == step.seq_no + 1,
+                AssignedTaskStep.status == "blocked",
+            )
+            .values(status="pending")
+        )
+        await self.session.flush()
+        return True
 
     async def approve_plan_from_step_output(
         self,

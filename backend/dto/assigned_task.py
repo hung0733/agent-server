@@ -12,6 +12,7 @@ class AssignedTaskCreate(BaseModel):
     goal: str
     status: str = "brainstorm_pending"
     approved_plan_html: str | None = None
+    planned_task_step_json: str | None = None
 
 
 class AssignedTaskRead(AssignedTaskCreate):

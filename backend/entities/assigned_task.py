@@ -23,6 +23,7 @@ class AssignedTask(Base):
         server_default="brainstorm_pending",
     )
     approved_plan_html: Mapped[str | None] = mapped_column(Text)
+    planned_task_step_json: Mapped[str | None] = mapped_column(Text)
     create_dt: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     update_dt: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

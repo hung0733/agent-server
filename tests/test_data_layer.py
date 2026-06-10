@@ -168,6 +168,7 @@ def test_dto_validation_and_from_attributes():
             "goal": "Create root task tracking",
             "status": "brainstorm_pending",
             "approved_plan_html": None,
+            "planned_task_step_json": None,
         },
     )()
     assert AssignedTaskRead.model_validate(assigned_task_obj).task_id == "task_abc123"
@@ -326,13 +327,45 @@ async def test_dao_crud_happy_path(monkeypatch):
             assert steps[0].status == "completed"
             assert steps[1].status == "pending"
 
+            planner_step_session = await session_dao.create(
+                AgentSessionCreate(
+                    recv_agent_id=agent.id,
+                    session_id="session-planner-step",
+                    name="Planner Step",
+                    session_type="chat",
+                )
+            )
+            await assigned_task_dao.update_step_assignment_and_session(
+                step_db_id=steps[1].id,
+                session_db_id=planner_step_session.id,
+            )
+            planner_output_json = (
+                '[{"agent_type":"engineer","title":"S1","goal":"Do work",'
+                '"dependsOn":null,"status":"PENDING","seq_no":1}]'
+            )
+            assert await assigned_task_dao.complete_planner_step_with_planned_task_step_json(
+                session_db_id=planner_step_session.id,
+                planned_task_step_json=planner_output_json,
+            ) is True
+            await session.refresh(assigned_task)
+            await session.refresh(steps[1])
+            await session.refresh(steps[2])
+            assert assigned_task.planned_task_step_json == planner_output_json
+            assert steps[1].output_json is None
+            assert steps[1].status == "completed"
+            assert steps[2].status == "pending"
+            assert await assigned_task_dao.complete_planner_step_with_planned_task_step_json(
+                session_db_id=999999,
+                planned_task_step_json="[]",
+            ) is False
+
             assert await assigned_task_dao.approve_plan_from_step_output(
                 step_id=steps[2].step_id,
             ) is False
             await session.refresh(assigned_task)
             await session.refresh(steps[2])
             assert assigned_task.approved_plan_html == html_plan
-            assert steps[2].status == "blocked"
+            assert steps[2].status == "pending"
 
             sys_endpoint = await endpoint_dao.create(
                 LlmEndpointCreate(
@@ -554,6 +587,7 @@ async def test_dao_crud_happy_path(monkeypatch):
 
             await session.delete(process_log)
             await assigned_task_dao.delete(assigned_task)
+            await session_dao.delete(planner_step_session)
             await session_dao.delete(user_to_agent_session)
             await session_dao.delete(agent_to_agent_session)
             await session_dao.delete(sender_default_session)

@@ -145,6 +145,10 @@ class Agent:
             from backend.agent.brainstormer import Brainstormer
 
             agent = Brainstormer(*row)
+        elif row[7] == "planner":
+            from backend.agent.planner import Planner
+
+            agent = Planner(*row)
         else:
             agent = cls(*row)
         await agent.init_llm_models()
