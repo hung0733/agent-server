@@ -63,7 +63,7 @@
 - 如一個 step 需要多個前置條件，必須先建立一個整合或驗收 step，後續 step 只依賴該整合或驗收 step 的 `seq_no`。
 - `status` 只可用大階：`PENDING` 或 `BLOCKED`。
 - 通常只有無依賴或當前可即時開始的第一批 step 用 `PENDING`；有前置依賴的 step 用 `BLOCKED`。
-- `seq_no` 必須由 1 開始，按建議執行順序遞增。
+- `seq_no` 必須由 4 開始，按建議執行順序遞增。
 - 每個 step 必須符合以下形態：
 
 ```json

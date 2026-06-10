@@ -271,10 +271,10 @@ async def test_dao_crud_happy_path(monkeypatch):
                 "\n\n## 輸出格式規範 (JSON Output Constraints)\n"
                 "```json\n"
                 "[{\n"
-                '\t"agent_type": "brainstormer",\n'
+                '\t"seqNo": 1,\n'
                 '\t"review_suggest": "html_plan 有什麼問題需要修改﹐沒有的話留空白"\n'
                 "},{\n"
-                '\t"agent_type": "planner",\n'
+                '\t"seqNo": 2,\n'
                 '\t"review_suggest": "planned_task_step_json 有什麼問題需要修改﹐沒有的話留空白"\n'
                 "}]\n"
                 "```",
