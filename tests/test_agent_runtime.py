@@ -21,6 +21,7 @@ from langgraph.types import Command, Interrupt
 from backend.agent.agent import Agent
 from backend.agent.butler import Bulter
 from backend.agent.planner import Planner
+from backend.agent.reviewer import Reviewer
 from backend.graph.agent import (
     end_node as agent_end_node,
     chat_node,
@@ -41,6 +42,10 @@ from backend.graph.bulter import assign_task_node, workflow as butler_workflow
 from backend.graph.planner import (
     parse_assigned_task_step_json,
     save_assigned_task_step_json_node,
+)
+from backend.graph.reviewer import (
+    handle_review_json_node,
+    parse_reviewer_review_json,
 )
 from backend.graph.interrupt_nodes import (
     APPROVE_LABEL,
@@ -148,6 +153,31 @@ class FakePlannerAssignedTaskDAO:
         self.session = session
 
     async def complete_planner_step_with_planned_task_step_json(self, **kwargs):
+        type(self).completions.append(kwargs)
+        return type(self).complete_result
+
+
+class FakeReviewerStepSession:
+    commits = 0
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return None
+
+    async def commit(self):
+        type(self).commits += 1
+
+
+class FakeReviewerAssignedTaskDAO:
+    completions = []
+    complete_result = True
+
+    def __init__(self, session):
+        self.session = session
+
+    async def complete_reviewer_step_with_review_json(self, **kwargs):
         type(self).completions.append(kwargs)
         return type(self).complete_result
 
@@ -1142,6 +1172,121 @@ async def test_planner_save_node_saves_planned_task_step_json_and_completes_step
     assert FakePlannerStepSession.commits == 1
 
 
+def _valid_reviewer_json() -> str:
+    return json.dumps(
+        [
+            {"seqNo": 1, "review_suggest": ""},
+            {"seqNo": 2, "review_suggest": "補充驗收準則。"},
+        ],
+        ensure_ascii=False,
+    )
+
+
+def test_reviewer_parse_review_json_accepts_valid_array():
+    content = _valid_reviewer_json()
+
+    assert parse_reviewer_review_json(content) == json.loads(content)
+
+
+def test_reviewer_parse_review_json_accepts_fenced_json():
+    content = _valid_reviewer_json()
+
+    assert parse_reviewer_review_json(f"```json\n{content}\n```") == json.loads(content)
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        '{"items": []}',
+        '[{"seqNo":1}]',
+        '[{"seqNo":1,"review_suggest":"","extra":true}]',
+        '[{"seqNo":"1","review_suggest":""}]',
+        '[{"seqNo":1,"review_suggest":null}]',
+    ],
+)
+def test_reviewer_parse_review_json_rejects_invalid_content(content):
+    with pytest.raises(ValueError):
+        parse_reviewer_review_json(content)
+
+
+@pytest.mark.asyncio
+async def test_reviewer_handle_json_node_saves_review_json_and_completes_step(
+    monkeypatch,
+):
+    FakeReviewerStepSession.commits = 0
+    FakeReviewerAssignedTaskDAO.completions = []
+    FakeReviewerAssignedTaskDAO.complete_result = True
+    monkeypatch.setattr(
+        "backend.graph.reviewer.async_session_factory",
+        lambda: FakeReviewerStepSession(),
+    )
+    monkeypatch.setattr(
+        "backend.graph.reviewer.AssignedTaskDAO",
+        FakeReviewerAssignedTaskDAO,
+    )
+    output_json = _valid_reviewer_json()
+    state = {
+        "messages": [AIMessage(content=output_json)],
+        "human_review_node": None,
+        "human_review_data": None,
+        "human_review_result": None,
+    }
+    config = GraphNode.prepare_chat_node_config(
+        thread_id="session-1",
+        models=None,
+        sys_prompt="",
+        involves_secrets=False,
+        think_mode=False,
+        args={},
+        agent_type="reviewer",
+        session_db_id=321,
+    )
+
+    result = await handle_review_json_node(state, config)
+
+    assert result["messages"][0].content == t("graph.reviewer.saved_message")
+    assert FakeReviewerAssignedTaskDAO.completions == [
+        {"session_db_id": 321, "review_items": json.loads(output_json)}
+    ]
+    assert FakeReviewerStepSession.commits == 1
+
+
+@pytest.mark.asyncio
+async def test_reviewer_handle_json_node_rejects_invalid_json(monkeypatch):
+    FakeReviewerStepSession.commits = 0
+    FakeReviewerAssignedTaskDAO.completions = []
+    monkeypatch.setattr(
+        "backend.graph.reviewer.async_session_factory",
+        lambda: FakeReviewerStepSession(),
+    )
+    monkeypatch.setattr(
+        "backend.graph.reviewer.AssignedTaskDAO",
+        FakeReviewerAssignedTaskDAO,
+    )
+    state = {
+        "messages": [AIMessage(content='[{"seqNo":"1","review_suggest":""}]')],
+        "human_review_node": None,
+        "human_review_data": None,
+        "human_review_result": None,
+    }
+    config = GraphNode.prepare_chat_node_config(
+        thread_id="session-1",
+        models=None,
+        sys_prompt="",
+        involves_secrets=False,
+        think_mode=False,
+        args={},
+        agent_type="reviewer",
+        session_db_id=321,
+    )
+
+    result = await handle_review_json_node(state, config)
+
+    assert result["messages"][0].content == t("graph.reviewer.invalid_json")
+    assert FakeReviewerAssignedTaskDAO.completions == []
+    assert FakeReviewerStepSession.commits == 0
+
+
 @pytest.mark.asyncio
 async def test_brainstormer_pre_submit_approval_uses_tool_args_not_message_content(
     monkeypatch,
@@ -1835,6 +1980,41 @@ async def test_agent_get_agent_returns_planner_for_planner_type(monkeypatch):
     agent = await Agent.get_agent("agent-planner", "session-planner")
 
     assert isinstance(agent, Planner)
+
+
+@pytest.mark.asyncio
+async def test_agent_get_agent_returns_reviewer_for_reviewer_type(monkeypatch):
+    row = (
+        1,
+        2,
+        3,
+        "user-1",
+        "Alice",
+        "agent-reviewer",
+        "session-reviewer",
+        "reviewer",
+        "Reviewer",
+        None,
+        "Alice",
+        None,
+        None,
+        None,
+        False,
+        True,
+    )
+
+    async def get_db_agent(agent_id, session_id):
+        return row
+
+    async def init_llm_models(self):
+        self.models = FakeModels(FakeLLM())
+
+    monkeypatch.setattr(Agent, "get_db_agent", get_db_agent)
+    monkeypatch.setattr(Agent, "init_llm_models", init_llm_models)
+
+    agent = await Agent.get_agent("agent-reviewer", "session-reviewer")
+
+    assert isinstance(agent, Reviewer)
 
 
 class FakeGraph:

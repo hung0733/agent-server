@@ -1,11 +1,12 @@
 from datetime import datetime, timezone
+import json
 from os import getenv
 import re
 from urllib.parse import quote_plus
 
 import pytest
 from dotenv import load_dotenv
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from backend.client.openai import OpenAIClient
@@ -20,6 +21,7 @@ from backend.dao import (
     UserAccDAO,
 )
 from backend.db.base import Base
+from backend.entities.assigned_task import AssignedTaskStep
 from backend.llm.llm import LLMSet
 import backend.entities  # noqa: F401
 from backend.dto import (
@@ -119,6 +121,84 @@ async def drop_test_schema(url: str, schema: str) -> None:
         await engine.dispose()
 
 
+async def _prepare_reviewer_task(session, suffix: str):
+    user_dao = UserAccDAO(session)
+    group_dao = LlmGroupDAO(session)
+    agent_dao = AgentDAO(session)
+    session_dao = AgentSessionDAO(session)
+    assigned_task_dao = AssignedTaskDAO(session)
+
+    user = await user_dao.create(
+        UserAccCreate(user_id=f"u-reviewer-{suffix}", name="Alice")
+    )
+    group = await group_dao.create(
+        LlmGroupCreate(user_id=user.id, name=f"default-{suffix}")
+    )
+    agent = await agent_dao.create(
+        AgentCreate(
+            user_id=user.id,
+            agent_id=f"agent-reviewer-{suffix}",
+            name="Main Agent",
+            llm_group_id=group.id,
+            agent_type="assistant",
+        )
+    )
+    assigned_task = await assigned_task_dao.create(
+        AssignedTaskCreate(
+            task_id=f"task-reviewer-{suffix}",
+            user_id=user.id,
+            responsible_agent_id=agent.id,
+            task_name="Build task tracker",
+            goal="Create root task tracking",
+            planned_task_step_json=json.dumps(
+                [
+                    {
+                        "agent_type": "engineer",
+                        "title": "Build",
+                        "goal": "Build the feature.",
+                        "dependsOn": None,
+                        "status": "PENDING",
+                        "seq_no": 4,
+                    },
+                    {
+                        "agent_type": "reviewer",
+                        "title": "Review build",
+                        "goal": "Review the build.",
+                        "dependsOn": 4,
+                        "status": "BLOCKED",
+                        "seq_no": 5,
+                    },
+                ]
+            ),
+        )
+    )
+    steps = await assigned_task_dao.create_initial_steps(
+        task_db_id=assigned_task.id,
+        step_ids=(
+            f"step-brainstorm-{suffix}",
+            f"step-planner-{suffix}",
+            f"step-reviewer-{suffix}",
+        ),
+    )
+    steps[0].status = "completed"
+    steps[1].status = "completed"
+    steps[2].status = "pending"
+    reviewer_session = await session_dao.create(
+        AgentSessionCreate(
+            recv_agent_id=agent.id,
+            session_id=f"session-reviewer-{suffix}",
+            name="Reviewer Step",
+            session_type="chat",
+        )
+    )
+    await assigned_task_dao.update_step_assignment_and_session(
+        step_db_id=steps[2].id,
+        session_db_id=reviewer_session.id,
+    )
+    await session.flush()
+    return assigned_task_dao, assigned_task, reviewer_session
+
+
 def test_entity_metadata_contains_expected_tables():
     assert EXPECTED_TABLES == set(Base.metadata.tables)
 
@@ -206,6 +286,96 @@ def test_dto_validation_and_from_attributes():
     assert session_create.sender_agent_id is None
 
     assert isinstance(datetime.now(timezone.utc), datetime)
+
+
+@pytest.mark.asyncio
+async def test_reviewer_dao_handles_suggest_and_approved_paths():
+    test_database_url = build_test_database_url()
+    test_schema = f"{get_test_schema()}_reviewer"
+    await recreate_test_schema(test_database_url, test_schema)
+
+    original_schemas = bind_metadata_to_schema(test_schema)
+    engine = create_async_engine(test_database_url)
+    async_session = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    try:
+        async with async_session() as session:
+            (
+                assigned_task_dao,
+                assigned_task,
+                reviewer_session,
+            ) = await _prepare_reviewer_task(session, "suggest")
+
+            assert await assigned_task_dao.complete_reviewer_step_with_review_json(
+                session_db_id=reviewer_session.id,
+                review_items=[
+                    {"seqNo": 1, "review_suggest": ""},
+                    {"seqNo": 2, "review_suggest": "補充子步驟拆分。"},
+                ],
+            )
+            await session.commit()
+
+            steps = list(
+                (
+                    await session.scalars(
+                        select(AssignedTaskStep)
+                        .where(AssignedTaskStep.task_id == assigned_task.id)
+                        .order_by(AssignedTaskStep.seq_no)
+                    )
+                ).all()
+            )
+            assert len(steps) == 3
+            assert steps[0].status == "completed"
+            assert steps[0].review_suggest is None
+            assert steps[1].status == "pending"
+            assert steps[1].review_suggest == "補充子步驟拆分。"
+            assert steps[2].status == "blocked"
+
+        async with async_session() as session:
+            (
+                assigned_task_dao,
+                assigned_task,
+                reviewer_session,
+            ) = await _prepare_reviewer_task(session, "approve")
+
+            review_items = [
+                {"seqNo": 1, "review_suggest": ""},
+                {"seqNo": 2, "review_suggest": ""},
+            ]
+            assert await assigned_task_dao.complete_reviewer_step_with_review_json(
+                session_db_id=reviewer_session.id,
+                review_items=review_items,
+            )
+            assert await assigned_task_dao.complete_reviewer_step_with_review_json(
+                session_db_id=reviewer_session.id,
+                review_items=review_items,
+            )
+            await session.commit()
+
+            steps = list(
+                (
+                    await session.scalars(
+                        select(AssignedTaskStep)
+                        .where(AssignedTaskStep.task_id == assigned_task.id)
+                        .order_by(AssignedTaskStep.seq_no)
+                    )
+                ).all()
+            )
+            assert len(steps) == 5
+            assert steps[2].status == "completed"
+            assert steps[3].title == "Build"
+            assert steps[3].status == "pending"
+            assert steps[3].parent_step_id is None
+            assert steps[4].title == "Review build"
+            assert steps[4].status == "blocked"
+            assert steps[4].parent_step_id == steps[3].id
+    finally:
+        await engine.dispose()
+        restore_metadata_schemas(original_schemas)
+        await drop_test_schema(test_database_url, test_schema)
 
 
 @pytest.mark.asyncio

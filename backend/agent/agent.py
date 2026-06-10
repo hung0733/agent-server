@@ -149,6 +149,10 @@ class Agent:
             from backend.agent.planner import Planner
 
             agent = Planner(*row)
+        elif row[7] == "reviewer":
+            from backend.agent.reviewer import Reviewer
+
+            agent = Reviewer(*row)
         else:
             agent = cls(*row)
         await agent.init_llm_models()

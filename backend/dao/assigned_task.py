@@ -1,4 +1,6 @@
+import json
 from datetime import datetime
+import uuid
 
 from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.orm import selectinload
@@ -6,7 +8,11 @@ from sqlalchemy.orm import selectinload
 from backend.dao.agent_type import AgentTypeDAO
 from backend.dao.base import BaseDAO
 from backend.entities.agent_type import AgentType
-from backend.entities.assigned_task import AssignedTask, AssignedTaskStep, AssignedTaskStepProcessLog
+from backend.entities.assigned_task import (
+    AssignedTask,
+    AssignedTaskStep,
+    AssignedTaskStepProcessLog,
+)
 from backend.i18n import t
 
 
@@ -292,6 +298,123 @@ class AssignedTaskDAO(BaseDAO[AssignedTask]):
         )
         await self.session.flush()
         return True
+
+    async def complete_reviewer_step_with_review_json(
+        self,
+        *,
+        session_db_id: int,
+        review_items: list[dict[str, object]],
+    ) -> bool:
+        step = await self.session.scalar(
+            select(AssignedTaskStep)
+            .join(AgentType, AssignedTaskStep.agent_type_id == AgentType.id)
+            .options(selectinload(AssignedTaskStep.task))
+            .where(
+                AssignedTaskStep.session_id == session_db_id,
+                AgentType.code == "reviewer",
+            )
+            .limit(1)
+        )
+        if step is None:
+            return False
+
+        has_review_suggest = False
+        for item in review_items:
+            seq_no = int(item["seqNo"])
+            review_suggest = str(item["review_suggest"]).strip() or None
+            if review_suggest:
+                has_review_suggest = True
+
+            await self.session.execute(
+                update(AssignedTaskStep)
+                .where(
+                    AssignedTaskStep.task_id == step.task_id,
+                    AssignedTaskStep.seq_no == seq_no,
+                )
+                .values(review_suggest=review_suggest)
+            )
+            if review_suggest:
+                await self.session.execute(
+                    update(AssignedTaskStep)
+                    .where(
+                        AssignedTaskStep.task_id == step.task_id,
+                        AssignedTaskStep.seq_no == seq_no,
+                        AssignedTaskStep.status == "completed",
+                    )
+                    .values(status="pending")
+                )
+
+        if has_review_suggest:
+            await self.session.execute(
+                update(AssignedTaskStep)
+                .where(AssignedTaskStep.id == step.id)
+                .values(status="blocked")
+            )
+            await self.session.flush()
+            return True
+
+        await self.session.execute(
+            update(AssignedTaskStep)
+            .where(AssignedTaskStep.id == step.id)
+            .values(status="completed")
+        )
+
+        step_count = int(
+            await self.session.scalar(
+                select(func.count())
+                .select_from(AssignedTaskStep)
+                .where(AssignedTaskStep.task_id == step.task_id)
+            )
+            or 0
+        )
+        if step_count == 3:
+            await self._create_steps_from_planned_task_json(step.task)
+
+        await self.session.flush()
+        return True
+
+    async def _create_steps_from_planned_task_json(self, task: AssignedTask) -> None:
+        planned_task_step_json = (task.planned_task_step_json or "").strip()
+        if not planned_task_step_json:
+            return
+
+        planned_steps = json.loads(planned_task_step_json)
+        if not isinstance(planned_steps, list):
+            return
+
+        agent_type_dao = AgentTypeDAO(self.session)
+        created_by_seq_no: dict[int, AssignedTaskStep] = {}
+
+        for item in planned_steps:
+            if not isinstance(item, dict):
+                continue
+            agent_type = await agent_type_dao.get_or_create_by_code(
+                str(item["agent_type"])
+            )
+            step = AssignedTaskStep(
+                step_id=f"step-{uuid.uuid4()}",
+                task_id=task.id,
+                agent_type_id=agent_type.id,
+                agent_type_ref=agent_type,
+                title=str(item["title"]),
+                goal=str(item["goal"]),
+                status=str(item["status"]).lower(),
+                seq_no=int(item["seq_no"]),
+            )
+            self.session.add(step)
+            await self.session.flush()
+            created_by_seq_no[step.seq_no] = step
+
+        for item in planned_steps:
+            if not isinstance(item, dict):
+                continue
+            depends_on = item.get("dependsOn")
+            if depends_on is None:
+                continue
+            step = created_by_seq_no.get(int(item["seq_no"]))
+            parent_step = created_by_seq_no.get(int(depends_on))
+            if step is not None and parent_step is not None:
+                step.parent_step_id = parent_step.id
 
     async def count_failed_process_logs(self, *, step_db_id: int) -> int:
         stmt = select(func.count()).select_from(AssignedTaskStepProcessLog).where(
