@@ -31,6 +31,7 @@ class AssignedTaskStepCreate(BaseModel):
     goal: str
     status: str
     seq_no: int
+    review_suggest: str | None = None
     assign_agent_id: int | None = None
     session_id: int | None = None
     output_html: str | None = None

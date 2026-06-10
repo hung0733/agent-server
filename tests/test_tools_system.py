@@ -102,6 +102,7 @@ class FakeAssignedTaskDAO:
                     goal="Plan",
                     status="pending",
                     seq_no=1,
+                    review_suggest=None,
                     output_html=None,
                     output_json=None,
                 )
@@ -309,6 +310,7 @@ async def test_read_assigned_task_returns_scoped_task_details(monkeypatch):
         '[{"agent_type":"engineer"}]'
     )
     assert result["task"]["steps"][0]["step_id"] == "step-1"
+    assert result["task"]["steps"][0]["review_suggest"] is None
     assert FakeAssignedTaskDAO.detail_args == (123, 456, "task-open")
 
 

@@ -78,6 +78,7 @@ def _step_dict(step: Any) -> dict[str, Any]:
         "goal": step.goal,
         "status": step.status,
         "seq_no": step.seq_no,
+        "review_suggest": getattr(step, "review_suggest", None),
         "output_html": step.output_html,
         "output_json": step.output_json,
     }

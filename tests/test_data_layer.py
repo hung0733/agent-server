@@ -186,13 +186,16 @@ def test_dto_validation_and_from_attributes():
             "goal": "Collect requirements",
             "status": "pending",
             "seq_no": 1,
+            "review_suggest": None,
             "assign_agent_id": 1,
             "session_id": None,
             "output_html": None,
             "output_json": None,
         },
     )()
-    assert AssignedTaskStepRead.model_validate(assigned_task_step_obj).step_id == "step_abc123"
+    assigned_task_step_read = AssignedTaskStepRead.model_validate(assigned_task_step_obj)
+    assert assigned_task_step_read.step_id == "step_abc123"
+    assert assigned_task_step_read.review_suggest is None
 
     session_create = AgentSessionCreate(
         recv_agent_id=1,

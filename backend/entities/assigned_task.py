@@ -50,6 +50,7 @@ class AssignedTaskStep(Base):
     goal: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(100), nullable=False)
     seq_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    review_suggest: Mapped[str | None] = mapped_column(Text)
     assign_agent_id: Mapped[int | None] = mapped_column(ForeignKey("agent.id"), nullable=True, index=True)
     session_id: Mapped[int | None] = mapped_column(ForeignKey("session.id"), nullable=True, index=True)
     output_html: Mapped[str | None] = mapped_column(Text)
