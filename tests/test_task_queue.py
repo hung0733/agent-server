@@ -279,6 +279,7 @@ def _step(step_db_id: int, task_db_id: int = 10):
             task_name="Build task tracker",
             goal="Build a reliable task tracker for the product team",
             approved_plan_html="<html><body>Approved plan</body></html>",
+            planned_task_step_json='[{"agent_type":"engineer"}]',
             create_dt=TASK_CREATE_DT,
             user_id=999,
             responsible_agent=responsible_agent,
@@ -309,6 +310,7 @@ def _task(
         task_name="Build task tracker",
         task_goal="Build a reliable task tracker for the product team",
         approved_plan_html=None,
+        planned_task_step_json=None,
         task_create_dt=TASK_CREATE_DT,
         title="Plan",
         goal="Plan it",
@@ -753,7 +755,7 @@ async def test_assigned_task_init_message_step_appends_planner_html_plan(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_assigned_task_init_message_step_skips_html_plan_for_non_planner(
+async def test_assigned_task_init_message_step_appends_reviewer_html_plan_and_task_step_plan(
     monkeypatch,
 ):
     _reset_fakes()
@@ -770,12 +772,25 @@ async def test_assigned_task_init_message_step_skips_html_plan_for_non_planner(
     init_message_task.step_session_id = "step-session-abc"
     init_message_task.agent_type = "reviewer"
     init_message_task.approved_plan_html = "<html><body>Approved plan</body></html>"
+    init_message_task.planned_task_step_json = (
+        '[{"agent_type":"engineer","title":"Build queue","goal":"Ship it",'
+        '"dependsOn":null,"status":"PENDING","seq_no":1}]'
+    )
 
     init_message_result = await handle_assigned_task_init_message_step(init_message_task)
 
     assert init_message_result is None
-    assert "<html_plan>" not in init_message_task.message
-    assert "Approved plan" not in init_message_task.message
+    assert "<html_plan>" in init_message_task.message
+    assert "Approved plan" in init_message_task.message
+    assert init_message_task.message.endswith(
+        "\n\n<html_plan>\n"
+        "<html><body>Approved plan</body></html>"
+        "\n</html_plan>"
+        "\n\n<planned_task_step_json>\n"
+        '[{"agent_type":"engineer","title":"Build queue","goal":"Ship it",'
+        '"dependsOn":null,"status":"PENDING","seq_no":1}]'
+        "\n</planned_task_step_json>"
+    )
 
 
 @pytest.mark.asyncio

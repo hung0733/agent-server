@@ -39,6 +39,7 @@ class TaskQueueStep:
     task_name: str
     task_goal: str
     approved_plan_html: str | None
+    planned_task_step_json: str | None
     task_create_dt: datetime
     title: str
     goal: str
@@ -168,6 +169,7 @@ class TaskQueue:
                     task_name=step.task.task_name,
                     task_goal=step.task.goal,
                     approved_plan_html=step.task.approved_plan_html,
+                    planned_task_step_json=step.task.planned_task_step_json,
                     task_create_dt=step.task.create_dt,
                     title=step.title,
                     goal=step.goal,

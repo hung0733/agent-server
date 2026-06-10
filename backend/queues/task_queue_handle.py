@@ -147,10 +147,18 @@ async def handle_assigned_task_init_message_step(
             task.task_goal,
             task.goal,
         )
-        if task.agent_type == "planner":
+        if task.agent_type in ("planner", "reviewer"):
             approved_plan_html = (task.approved_plan_html or "").strip()
             if approved_plan_html:
                 task.message += f"\n\n<html_plan>\n{approved_plan_html}\n</html_plan>"
+        if task.agent_type == "reviewer":
+            task_step_plan = (task.planned_task_step_json or "").strip()
+            if task_step_plan:
+                task.message += (
+                    f"\n\n<planned_task_step_json>\n"
+                    f"{task_step_plan}\n"
+                    f"</planned_task_step_json>"
+                )
     else:
         task.message = t("queues.task_queue_handle.continue_sub_agent_message")
 
@@ -237,7 +245,9 @@ def _interrupt_message_from_chunk(chunk: Any) -> str:
     return str(message)
 
 
-async def _send_interrupt_to_user(task: TaskQueueStep, chunk: StreamChunk) -> str | None:
+async def _send_interrupt_to_user(
+    task: TaskQueueStep, chunk: StreamChunk
+) -> str | None:
     interrupt_message = _interrupt_message_from_chunk(chunk)
     if not interrupt_message or task.responsible_agent_db_id is None:
         return None
